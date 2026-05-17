@@ -162,7 +162,6 @@ export function AdminSidebar({
   canManageBusiness = false,
   initialPendingCount = 0,
   isActive: _isActive = true,
-  notificationsLauncher = null,
 }: {
   slug: string;
   businessId: string;
@@ -174,10 +173,6 @@ export function AdminSidebar({
   canManageBusiness?: boolean;
   initialPendingCount?: number;
   isActive?: boolean;
-  /** Slot opcional: el layout pasa el <NotificationsLauncher> ya cableado
-   *  (con realtime + drawer + toasts) y la sidebar lo renderiza en su
-   *  header, siempre visible. */
-  notificationsLauncher?: React.ReactNode;
 }) {
   void _isActive;
   const pathname = usePathname();
@@ -281,39 +276,26 @@ export function AdminSidebar({
         )}
       >
         {/* ── Header ──────────────────────────────────────────────────────── */}
-        <header className="flex flex-col items-stretch gap-2 px-3 pt-3 pb-2">
-          <div className="flex flex-row items-center gap-2">
-            <BusinessMark
-              slug={slug}
-              name={businessName}
-              logoUrl={businessLogoUrl}
-            />
-            <div
-              className={cn(
-                "min-w-0 flex-1 overflow-hidden transition-opacity duration-200",
-                expanded ? "opacity-100 delay-100" : "pointer-events-none opacity-0",
-              )}
-              aria-hidden={!expanded}
-            >
-              <p className="truncate text-sm font-semibold tracking-tight text-zinc-900">
-                {businessName}
-              </p>
-              <p className="truncate text-[0.65rem] font-medium uppercase tracking-[0.14em] text-zinc-500">
-                Panel admin
-              </p>
-            </div>
+        <header className="flex flex-row items-center gap-2 px-3 pt-3 pb-2">
+          <BusinessMark
+            slug={slug}
+            name={businessName}
+            logoUrl={businessLogoUrl}
+          />
+          <div
+            className={cn(
+              "min-w-0 flex-1 overflow-hidden transition-opacity duration-200",
+              expanded ? "opacity-100 delay-100" : "pointer-events-none opacity-0",
+            )}
+            aria-hidden={!expanded}
+          >
+            <p className="truncate text-sm font-semibold tracking-tight text-zinc-900">
+              {businessName}
+            </p>
+            <p className="truncate text-[0.65rem] font-medium uppercase tracking-[0.14em] text-zinc-500">
+              Panel admin
+            </p>
           </div>
-          {/* Notificaciones — siempre en el header, fácil de encontrar. */}
-          {notificationsLauncher && (
-            <div
-              className={cn(
-                "flex",
-                expanded ? "justify-end pr-1" : "justify-center",
-              )}
-            >
-              {notificationsLauncher}
-            </div>
-          )}
         </header>
 
         {/* ── Nav ─────────────────────────────────────────────────────────── */}

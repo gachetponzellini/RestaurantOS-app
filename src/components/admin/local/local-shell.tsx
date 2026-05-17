@@ -2,12 +2,10 @@
 
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Users } from "lucide-react";
 
 import { CajaAdminBoard } from "@/components/admin/local/caja-admin-board";
 import { ComandasKanban } from "@/components/admin/local/comandas-kanban";
 import { SalonDesktop, type SalonOrderRef, type SalonReservationRef } from "@/components/admin/local/salon-desktop";
-import { AsignarMozosOverlay } from "@/components/mozo/asignar-mozos-overlay";
 import { OrdersRealtimeBoard } from "@/components/admin/orders-realtime-board";
 import type { LocalComanda, LocalStation } from "@/lib/admin/local-query";
 import type { AdminOrder } from "@/lib/admin/orders-query";
@@ -15,7 +13,6 @@ import type { BusinessRole } from "@/lib/admin/context";
 import type { FloorPlanWithTables } from "@/lib/admin/floor-plan/queries";
 import type { ActiveTurnoView, Caja } from "@/lib/caja/types";
 import type { MozoMember } from "@/lib/mozo/queries";
-import { canAssignMozo } from "@/lib/permissions/can";
 import { cn } from "@/lib/utils";
 
 type Tab = "pedidos" | "comandas" | "salon" | "caja";
@@ -158,18 +155,9 @@ function TabsInner({
     >
       <div className="border-border/60 flex items-center justify-between gap-3 border-b bg-white/95 px-4 py-3 backdrop-blur">
         {tabsBar}
-        {/* Notificaciones viven en el layout global (admin layout). Acá solo
-            quedan acciones específicas de la pantalla. */}
-        {active === "salon" && canAssignMozo(role) && (
-          <button
-            type="button"
-            onClick={() => setDistribuirOpen(true)}
-            className="mr-12 inline-flex flex-shrink-0 items-center gap-1.5 rounded-full bg-zinc-900 px-3.5 py-1.5 text-xs font-semibold text-white transition hover:brightness-110"
-          >
-            <Users className="size-3.5" />
-            Distribuir mozos
-          </button>
-        )}
+        {/* El botón "Distribuir mozos" se movió al header del sidebar de
+            mesas dentro del salón (SalonDesktop → ActiveTablesList). El
+            bell global vive en el admin layout. */}
       </div>
       <div className="flex-1 overflow-auto p-4">
         {active === "salon" && (
@@ -182,6 +170,9 @@ function TabsInner({
             mozos={mozos}
             currentUserId={currentUserId}
             role={role}
+            distribuirOpen={distribuirOpen}
+            onDistribuirOpen={() => setDistribuirOpen(true)}
+            onDistribuirClose={() => setDistribuirOpen(false)}
           />
         )}
         {active === "pedidos" && (
@@ -210,16 +201,9 @@ function TabsInner({
         )}
       </div>
 
-      {/* Modo "pintura" — overlay vive acá para alinear el trigger con
-          las tabs y poder cerrarlo desde cualquier botón del shell. */}
-      <AsignarMozosOverlay
-        open={distribuirOpen}
-        onClose={() => setDistribuirOpen(false)}
-        slug={slug}
-        floorPlans={floorPlans}
-        mozos={mozos}
-        tables={allActiveTables}
-      />
+      {/* Modo "pintura" — vive directamente adentro de SalonDesktop como
+          un slot del sidebar derecho (paint mode). El overlay legacy
+          dejó de usarse. */}
     </div>
   );
 }

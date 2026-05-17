@@ -6,7 +6,7 @@
  * `src/lib/chatbot/agent.ts` y usa el `name` de acá como clave.
  */
 
-export type ToolGroup = "info" | "cart" | "checkout";
+export type ToolGroup = "info" | "cart" | "checkout" | "reservations";
 
 export type ToolMetadata = {
   name: string;
@@ -34,6 +34,11 @@ export const TOOL_GROUPS: Record<ToolGroup, { label: string; description: string
     label: "Checkout",
     description:
       "Cierran el flujo generando el link al checkout web.",
+  },
+  reservations: {
+    label: "Reservas",
+    description:
+      "Permiten al bot consultar disponibilidad, generar un link para reservar mesa, listar las reservas del cliente y confirmarlas.",
   },
 };
 
@@ -131,6 +136,88 @@ Genera el link para terminar el pedido en la web. Solo llamala cuando:
 1. El cliente confirmó que no quiere agregar más.
 2. Llamaste \`get_cart\` en el mensaje previo.
 3. El carrito no está vacío.`,
+  },
+  {
+    name: "get_reservation_info",
+    group: "reservations",
+    label: "Info de reservas",
+    description:
+      "Política del negocio para reservas: máximo de comensales, anticipación, duración, días abiertos.",
+    promptSection: `### \`get_reservation_info()\`
+Devuelve la política de reservas del negocio: \`max_party_size\`, \`advance_days_max\`, \`lead_time_min\`, \`slot_duration_min\`, lista de días abiertos con cantidad de turnos.
+- Usala si el cliente pregunta "¿hasta cuántas personas?" / "¿con cuánta antelación?" / "¿qué días hay turnos?".
+- Si \`accepts_reservations\` es false, el negocio no tiene horarios cargados — avisale al cliente que por ahora no se aceptan reservas.
+- Nunca inventes estos datos.`,
+  },
+  {
+    name: "list_reservation_salones",
+    group: "reservations",
+    label: "Listar salones reservables",
+    description:
+      "Lista los salones del negocio que aceptan reservas. Si hay más de uno, el cliente tiene que elegir.",
+    promptSection: `### \`list_reservation_salones()\`
+Devuelve \`{ salones: [{id, name}], multi_salon: boolean }\`.
+- Llamala una sola vez al iniciar un flujo de reserva, antes de \`check_reservation_availability\`.
+- Si \`multi_salon\` es **false** (0 o 1 salón), ignorá el campo \`floor_plan_id\` en las tools siguientes — el bot no tiene que preguntar nada al cliente.
+- Si \`multi_salon\` es **true**, mostrale al cliente los \`name\` (sin el \`id\`) y preguntale en cuál quiere reservar. Una vez que elija, **siempre** pasá el \`id\` correspondiente como \`floor_plan_id\` en \`check_reservation_availability\` y en \`generate_reservation_link\`. Tiene que ser el mismo \`floor_plan_id\` en las dos llamadas.
+- Nunca inventes nombres de salones — si la lista está vacía o el cliente menciona uno que no aparece, decilo y ofrecé los que hay.`,
+  },
+  {
+    name: "check_reservation_availability",
+    group: "reservations",
+    label: "Disponibilidad de reserva",
+    description:
+      "Lista los horarios disponibles para reservar en una fecha y cantidad de personas.",
+    promptSection: `### \`check_reservation_availability(date, party_size, floor_plan_id?)\`
+Devuelve los slots (horarios HH:MM) disponibles para reservar en una fecha (YYYY-MM-DD) y cantidad de personas.
+- \`date\`: formato \`YYYY-MM-DD\` en hora local del negocio.
+- \`party_size\`: entero ≥ 1. Si supera el máximo, devuelve \`error: "party_size_too_large"\` con \`max_party_size\` — pasale ese dato al cliente.
+- \`floor_plan_id\` (opcional): si \`list_reservation_salones\` devolvió \`multi_salon: true\`, **siempre** pasá el id del salón que eligió el cliente. Si \`multi_salon\` es false, omitilo.
+- Si devuelve \`slots: []\`, ofrecé otra fecha cercana o sugerí cambiar la cantidad de personas (o probar otro salón si hay varios).
+- **Siempre** llamala antes de \`generate_reservation_link\`. Nunca generes un link con un slot que no apareció en esta lista.
+- Mostrale al cliente los slots tal cual te los pasa la tool, sin reformatear los horarios.`,
+  },
+  {
+    name: "generate_reservation_link",
+    group: "reservations",
+    label: "Generar link de reserva",
+    description:
+      "Guarda los datos elegidos y devuelve un link para que el cliente confirme la reserva logueado en la web.",
+    dependsOn: ["check_reservation_availability"],
+    promptSection: `### \`generate_reservation_link({ date, slot, party_size, customer_name?, notes?, floor_plan_id? })\`
+Crea una "intención de reserva" y devuelve la URL donde el cliente la confirma en la web (después de loguearse).
+- **Pre-requisito duro**: tenés que haber llamado \`check_reservation_availability\` y haber tenido confirmación explícita del cliente sobre **fecha + hora + cantidad**. Nunca lo llames sin esa terna confirmada.
+- Si \`list_reservation_salones\` devolvió \`multi_salon: true\`, pasá el mismo \`floor_plan_id\` que usaste en \`check_reservation_availability\`. Tienen que coincidir.
+- Si la tool devuelve \`error: "slot_no_longer_available"\` con \`available_slots\`, decile al cliente que ese turno se ocupó y ofrecele los nuevos slots.
+- Si \`customer_name\` ya lo mencionó el cliente en la conversación, pasalo. Si no, omitilo — la web lo pide al confirmar.
+- Después de tener el link, pasaselo con la frase de cierre: explicá que en el link va a iniciar sesión y confirmar sus datos.`,
+  },
+  {
+    name: "list_my_reservations",
+    group: "reservations",
+    label: "Listar reservas del cliente",
+    description:
+      "Devuelve las reservas próximas del cliente actual, identificándolo por su teléfono.",
+    promptSection: `### \`list_my_reservations()\`
+Devuelve las reservas activas (confirmed o seated) y futuras del cliente actual, identificado por su teléfono.
+- Usala si el cliente pregunta "¿qué reservas tengo?" / "¿tengo reserva para hoy?".
+- Si devuelve \`{ requires_phone: true }\`, pedile el teléfono al cliente y reintentá con esa data en el siguiente turno (la tool todavía no acepta un teléfono como argumento; mientras tanto, indicale que escriba a \`/${"{"}slug${"}"}/perfil/reservas\` para verlas).
+- Si \`count\` es 0, ofrecele reservar.
+- No inventes IDs. El \`id\` que devuelve es el que necesitás para \`confirm_reservation\`.`,
+  },
+  {
+    name: "confirm_reservation",
+    group: "reservations",
+    label: "Confirmar reserva",
+    description:
+      "Marca una reserva como confirmada por el cliente (para el flujo de '¿confirmás tu reserva?').",
+    dependsOn: ["list_my_reservations"],
+    promptSection: `### \`confirm_reservation(reservation_id)\`
+Marca la reserva como confirmada por el cliente. Esto es para el flujo donde el bot pregunta "¿venís hoy a tu reserva?" y el cliente responde que sí.
+- Solo llamala si el cliente respondió afirmativamente (sí, dale, voy, confirmo). Si dudó, no la llames y pedí más claridad.
+- El \`reservation_id\` viene de \`list_my_reservations\`. Nunca inventes uno.
+- Si devuelve \`error: "reservation_not_found"\` puede ser que el teléfono no coincida; pedile que escriba a \`/${"{"}slug${"}"}/perfil/reservas\`.
+- Para **cambiar** o **cancelar** una reserva, derivá siempre al cliente a \`/${"{"}slug${"}"}/perfil/reservas\` — el bot no puede modificarla.`,
   },
 ];
 

@@ -12,7 +12,34 @@ const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const dbAvailable = Boolean(supabaseUrl && serviceKey);
 
-describe.skipIf(!dbAvailable)("persistOrder (integration)", () => {
+// Detectar si el seed `pizzanapoli` con sus products/modifiers requeridos
+// existe. Si no, los tests se saltan en lugar de crashear en el beforeAll.
+// DT-008 cerrada: este test depende de un seed local que no siempre está
+// presente en la DB linkeada del piloto.
+const REQUIRED_PRODUCTS = ["muzzarella", "agua-500"] as const;
+const REQUIRED_MODIFIERS = ["Chica", "Grande", "Jamón"] as const;
+
+async function isSeedAvailable(): Promise<boolean> {
+  if (!dbAvailable) return false;
+  const supabase = createClient(supabaseUrl!, serviceKey!);
+  const { data: products } = await supabase
+    .from("products")
+    .select("slug")
+    .in("slug", REQUIRED_PRODUCTS);
+  if (!products || products.length !== REQUIRED_PRODUCTS.length) return false;
+  const { data: modifiers } = await supabase
+    .from("modifiers")
+    .select("name")
+    .in("name", REQUIRED_MODIFIERS);
+  return Boolean(modifiers && modifiers.length === REQUIRED_MODIFIERS.length);
+}
+
+// Top-level await en vitest: la suite se evalúa de manera async cuando se
+// usa describe.skipIf con una expresión. `await` acá funciona dentro del
+// archivo de test.
+const seedReady = await isSeedAvailable();
+
+describe.skipIf(!seedReady)("persistOrder (integration)", () => {
   const supabase = createClient(supabaseUrl!, serviceKey!);
   let productMuzzaId: string;
   let productAguaId: string;
@@ -23,13 +50,15 @@ describe.skipIf(!dbAvailable)("persistOrder (integration)", () => {
   beforeAll(async () => {
     const { data: products } = await supabase
       .from("products")
-      .select("id, slug");
+      .select("id, slug")
+      .in("slug", REQUIRED_PRODUCTS);
     productMuzzaId = products!.find((p) => p.slug === "muzzarella")!.id;
     productAguaId = products!.find((p) => p.slug === "agua-500")!.id;
 
     const { data: modifiers } = await supabase
       .from("modifiers")
-      .select("id, name");
+      .select("id, name")
+      .in("name", REQUIRED_MODIFIERS);
     modChicaId = modifiers!.find((m) => m.name === "Chica")!.id;
     modGrandeId = modifiers!.find((m) => m.name === "Grande")!.id;
     modJamonId = modifiers!.find((m) => m.name === "Jamón")!.id;

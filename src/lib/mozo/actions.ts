@@ -20,8 +20,6 @@ import { getBusiness } from "@/lib/tenant";
 
 type GenericClient = SupabaseClient;
 
-type KitchenStatus = "pending" | "preparing" | "ready" | "delivered";
-
 // ── Helpers internos ────────────────────────────────────────────
 
 type LoadedTable = {
@@ -572,41 +570,3 @@ export async function transferTable(
   return actionOk(undefined);
 }
 
-// ── Cocina (existente, sin cambios funcionales) ─────────────────
-
-export async function updateKitchenStatusForOrder(
-  orderId: string,
-  toStatus: KitchenStatus,
-  businessSlug: string,
-): Promise<ActionResult<void>> {
-  const business = await getBusiness(businessSlug);
-  if (!business) return actionError("Negocio no encontrado.");
-
-  const service = createSupabaseServiceClient() as unknown as GenericClient;
-
-  const { data: order } = await service
-    .from("orders")
-    .select("id, business_id")
-    .eq("id", orderId)
-    .maybeSingle();
-  if (
-    !order ||
-    (order as { business_id: string } | null)?.business_id !== business.id
-  ) {
-    return actionError("Orden no encontrada.");
-  }
-
-  const { error } = await service
-    .from("order_items")
-    .update({ kitchen_status: toStatus })
-    .eq("order_id", orderId)
-    .neq("kitchen_status", "delivered");
-
-  if (error) {
-    console.error("updateKitchenStatusForOrder", error);
-    return actionError("No pudimos actualizar el estado de cocina.");
-  }
-
-  revalidatePath(`/${businessSlug}/cocina`);
-  return actionOk(undefined);
-}

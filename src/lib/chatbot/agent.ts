@@ -14,6 +14,15 @@ import { z } from "zod";
 
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 import {
+  checkAvailabilityForChatbot,
+  confirmReservationByChatbot,
+  createReservationIntent,
+  getReservationPolicyForChatbot,
+  listChatbotReservationsByPhone,
+  listSalonesForChatbot,
+  normalizePhone,
+} from "@/lib/reservations/chatbot-actions";
+import {
   buildEnabledToolsList,
   buildEnabledToolsMarkdown,
   isToolEnabled,
@@ -55,7 +64,9 @@ export type RunChatbotResult = {
 export const DEFAULT_SYSTEM_PROMPT = `# Asistente virtual de {{businessName}}
 
 ## Identidad
-Sos el asistente de **{{businessName}}**. Atendés por WhatsApp. Tu trabajo es tomar pedidos: ayudás al cliente a elegir productos, armás el carrito, y al final le pasás un link para que termine el pedido en la web (dirección, forma de pago, confirmación). Sos útil, claro y directo.
+Sos el asistente de **{{businessName}}**. Atendés por WhatsApp. Tu trabajo es ayudar con dos cosas: (1) **pedidos** — tomar el pedido del cliente y pasarle un link para terminarlo en la web; (2) **reservas** — proponer un horario para reservar mesa y pasarle un link para que confirme. Sos útil, claro y directo.
+
+El sistema te identifica al cliente por su teléfono (su número de WhatsApp), así que para listar o confirmar sus reservas no hace falta pedirle el teléfono — ya lo tenés.
 
 ## Estilo
 - Español rioplatense informal (vos, dale, bárbaro). Nunca "usted".
@@ -66,7 +77,7 @@ Sos el asistente de **{{businessName}}**. Atendés por WhatsApp. Tu trabajo es t
 Si es el **primer** mensaje que te manda el cliente (el historial de la conversación está vacío antes de su mensaje), tu respuesta SIEMPRE sigue esta estructura de 2 partes:
 
 1. **Saludo cálido** mencionando al negocio por nombre. Ej: *"¡Hola! 👋 Bienvenido/a a {{businessName}}"*.
-2. **Invitación a pedir**: una pregunta simple. Ej: *"¿Qué te gustaría pedir?"* o *"Contame qué tenés ganas"*.
+2. **Invitación abierta**: una pregunta corta que abra a pedir o reservar. Ej: *"¿En qué te puedo ayudar?"*, *"¿Querés pedir algo o reservar mesa?"*, *"Contame qué necesitás"*.
 
 Variá las palabras exactas entre conversaciones para no sonar robótico, pero respetá siempre las 2 partes. En los mensajes siguientes ya no saludes.
 
@@ -79,17 +90,42 @@ Variá las palabras exactas entre conversaciones para no sonar robótico, pero r
 5. **Iterar**: "¿Querés agregar algo más?" hasta que el cliente diga que cerró.
 6. **Revisar + link**: \`get_cart\` para mostrar resumen + total. Si alcanza el mínimo (para delivery), \`generate_checkout_link\` y pasá el link con la frase de cierre (ver más abajo).
 
+## Flujo de reserva (paralelo al de pedido)
+Si el cliente dice "quiero reservar mesa", "tienen para X personas el viernes", "quiero ir a comer mañana" o similar:
+1. **Recolectar terna**: necesitás **fecha + cantidad de personas** para arrancar. Si falta, preguntá.
+2. **Consultar disponibilidad**: \`check_reservation_availability(date, party_size)\` con la fecha en formato YYYY-MM-DD y la cantidad.
+   - Si la tool devuelve \`party_size_too_large\`, decile el máximo y pedí otra cantidad.
+   - Si \`slots\` viene vacío, ofrecé otra fecha cercana.
+   - Si trae slots, mostrale **3–5 opciones** al cliente (no la lista entera si son muchos).
+3. **Confirmar la terna**: que el cliente te diga explícitamente el horario que prefiere. No avances hasta tener fecha + hora + cantidad confirmadas.
+4. **Generar link**: \`generate_reservation_link({ date, slot, party_size, customer_name?, notes? })\`. Pasá el nombre solo si el cliente ya lo mencionó.
+   - Si devuelve \`slot_no_longer_available\` con \`available_slots\`, avisale al cliente y ofrecé los nuevos slots.
+5. **Pasar el link** con una frase corta: *"Listo, reservá acá 👉 [url] — vas a iniciar sesión y confirmar tus datos."*
+
+Si el cliente pregunta "¿qué reservas tengo?" / "¿tengo reserva para hoy?":
+- Llamá \`list_my_reservations\` (no le pidas el teléfono, ya lo tenés).
+- Si la tool dice \`requires_phone: true\`, indicale que mire en \`/${"{"}slug${"}"}/perfil/reservas\`.
+- Si \`count\` es 0, ofrecele reservar.
+
+Si el bot pregunta "¿confirmás tu reserva de hoy?" y el cliente responde que sí:
+- Primero \`list_my_reservations\` para obtener el \`reservation_id\` correcto.
+- Después \`confirm_reservation(reservation_id)\`.
+
+Para **cambiar** o **cancelar** una reserva: NO existe tool para eso. Derivá siempre al cliente a \`/${"{"}slug${"}"}/perfil/reservas\`.
+
 ## Herramientas disponibles
 Tenés acceso a: {{enabled_tools_list}}.
 
 {{enabled_tools_markdown}}
 
 ## Reglas duras
-1. **Nunca** inventes productos, precios, modifiers ni horarios. Todo sale de las tools.
+1. **Nunca** inventes productos, precios, modifiers, horarios, slots de reserva ni IDs. Todo sale de las tools.
 2. **Nunca** llames \`generate_checkout_link\` sin haber mostrado el carrito antes.
-3. **Nunca** pidas nombre, dirección, teléfono ni forma de pago. Eso se completa en la web al clickear el link. Si el cliente pregunta "¿cómo pago?" o "¿a dónde mandás?", respondé: *"Todo eso lo cargás en el link al final — elegís delivery o pickup, dirección y forma de pago."*
-4. Si el carrito no alcanza el mínimo para delivery, avisá cuánto falta antes de generar el link.
-5. Si el local está cerrado y el cliente está por pedir, avisá y preguntá si quiere igual dejar armado el pedido para después.
+3. **Nunca** llames \`generate_reservation_link\` sin haber llamado primero \`check_reservation_availability\` y tener confirmación explícita del cliente sobre fecha, hora y cantidad.
+4. **Nunca** pidas nombre, dirección, teléfono ni forma de pago para el pedido. Eso se completa en la web al clickear el link. Si el cliente pregunta "¿cómo pago?" o "¿a dónde mandás?", respondé: *"Todo eso lo cargás en el link al final — elegís delivery o pickup, dirección y forma de pago."*
+5. Si el carrito no alcanza el mínimo para delivery, avisá cuánto falta antes de generar el link.
+6. Si el local está cerrado y el cliente está por pedir, avisá y preguntá si quiere igual dejar armado el pedido para después.
+7. **Nunca** ofrezcas modificar o cancelar reservas — derivá a \`/${"{"}slug${"}"}/perfil/reservas\`.
 
 ## Qué sabés y qué NO sabés
 **Sabés**: catálogo, modifiers, horarios, info de delivery (fee, mínimo, estimado), dirección del local.
@@ -148,6 +184,8 @@ export async function runChatbot(
     businessId: input.businessId,
     businessSlug: input.businessSlug,
     conversationId,
+    contactIdentifier: input.contactIdentifier,
+    channel: input.channel,
     enabledTools,
     systemPrompt,
     history,
@@ -575,6 +613,13 @@ type BotCtx = {
   businessId: string;
   businessSlug: string;
   conversationId: string;
+  /**
+   * Identity of the conversation contact (phone for WhatsApp, opaque string
+   * for `web-test`). Reservation tools use this as weak auth ("show / confirm
+   * the reservations whose `customer_phone` matches this identifier").
+   */
+  contactIdentifier: string;
+  channel: ChatbotChannel;
 };
 
 function readCart(raw: unknown): CartState {
@@ -1136,6 +1181,224 @@ function buildGenerateCheckoutLinkTool(ctx: BotCtx) {
   );
 }
 
+// ---------------- Reservations tools ----------------
+
+function buildReservationInfoTool(ctx: BotCtx) {
+  return tool(
+    async () => {
+      const info = await getReservationPolicyForChatbot(ctx.businessId);
+      return JSON.stringify(info);
+    },
+    {
+      name: "get_reservation_info",
+      description:
+        "Devuelve la política de reservas del negocio: máximo de comensales, anticipación, duración del turno y días abiertos. Usala cuando el cliente pregunte por restricciones o disponibilidad general antes de elegir un día.",
+      schema: z.object({}),
+    },
+  );
+}
+
+function buildListReservationSalonesTool(ctx: BotCtx) {
+  return tool(
+    async () => {
+      const result = await listSalonesForChatbot(ctx.businessId);
+      return JSON.stringify(result);
+    },
+    {
+      name: "list_reservation_salones",
+      description:
+        "Devuelve los salones del negocio que aceptan reservas (con al menos una mesa activa) y un flag `multi_salon`. Si `multi_salon` es true, preguntale al cliente en qué salón quiere reservar y pasá su `id` como `floor_plan_id` en las tools siguientes. Si es false, ignoralo.",
+      schema: z.object({}),
+    },
+  );
+}
+
+function buildCheckReservationAvailabilityTool(ctx: BotCtx) {
+  return tool(
+    async ({
+      date,
+      party_size,
+      floor_plan_id,
+    }: {
+      date: string;
+      party_size: number;
+      floor_plan_id?: string;
+    }) => {
+      const result = await checkAvailabilityForChatbot(
+        ctx.businessId,
+        date,
+        party_size,
+        floor_plan_id ?? null,
+      );
+      return JSON.stringify(result);
+    },
+    {
+      name: "check_reservation_availability",
+      description:
+        "Lista los horarios (slots HH:MM) disponibles para reservar en una fecha (YYYY-MM-DD) y cantidad de personas. Siempre úsala antes de generate_reservation_link. Si el negocio tiene varios salones (averigualo con list_reservation_salones), pasá el `floor_plan_id` elegido por el cliente.",
+      schema: z.object({
+        date: z
+          .string()
+          .regex(/^\d{4}-\d{2}-\d{2}$/, "Fecha en formato YYYY-MM-DD")
+          .describe(
+            "Fecha local del negocio en formato YYYY-MM-DD (ej. '2026-06-15').",
+          ),
+        party_size: z
+          .number()
+          .int()
+          .min(1)
+          .describe("Cantidad de comensales. Entero ≥ 1."),
+        floor_plan_id: z
+          .string()
+          .uuid()
+          .optional()
+          .describe(
+            "Id del salón elegido. Obligatorio si list_reservation_salones devolvió multi_salon=true; omitilo si no.",
+          ),
+      }),
+    },
+  );
+}
+
+function buildGenerateReservationLinkTool(ctx: BotCtx) {
+  return tool(
+    async ({
+      date,
+      slot,
+      party_size,
+      customer_name,
+      notes,
+      floor_plan_id,
+    }: {
+      date: string;
+      slot: string;
+      party_size: number;
+      customer_name?: string;
+      notes?: string;
+      floor_plan_id?: string;
+    }) => {
+      const phone = normalizePhone(ctx.contactIdentifier);
+      const result = await createReservationIntent({
+        businessId: ctx.businessId,
+        conversationId: ctx.conversationId,
+        date,
+        slot,
+        partySize: party_size,
+        customerName: customer_name ?? null,
+        customerPhone: phone || null,
+        notes: notes ?? null,
+        floorPlanId: floor_plan_id ?? null,
+      });
+      if (!result.ok) {
+        return JSON.stringify({
+          error: result.error,
+          ...(result.available_slots
+            ? { available_slots: result.available_slots }
+            : {}),
+        });
+      }
+      const base =
+        process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, "") ??
+        "http://localhost:3000";
+      const url = `${base}/${ctx.businessSlug}/reservar/${result.token}`;
+      return JSON.stringify({ url, token: result.token });
+    },
+    {
+      name: "generate_reservation_link",
+      description:
+        "Crea una intención de reserva con los datos elegidos y devuelve la URL que el cliente abre para confirmar en la web (después de loguearse). Llamala solo después de check_reservation_availability y de tener confirmación explícita del cliente sobre fecha, hora y cantidad.",
+      schema: z.object({
+        date: z
+          .string()
+          .regex(/^\d{4}-\d{2}-\d{2}$/, "Fecha en formato YYYY-MM-DD")
+          .describe("Fecha de la reserva en formato YYYY-MM-DD."),
+        slot: z
+          .string()
+          .regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Hora en formato HH:MM")
+          .describe(
+            "Horario elegido en formato HH:MM. Tiene que ser uno de los que devolvió check_reservation_availability.",
+          ),
+        party_size: z
+          .number()
+          .int()
+          .min(1)
+          .describe("Cantidad de comensales."),
+        customer_name: z
+          .string()
+          .optional()
+          .describe(
+            "Nombre del cliente si lo dijo en la conversación. Opcional — la web lo pide al confirmar.",
+          ),
+        notes: z
+          .string()
+          .optional()
+          .describe(
+            "Pedidos especiales o notas (cumpleaños, alergias, etc.). Opcional.",
+          ),
+        floor_plan_id: z
+          .string()
+          .uuid()
+          .optional()
+          .describe(
+            "Id del salón elegido. Debe coincidir con el `floor_plan_id` usado en check_reservation_availability cuando hay más de un salón.",
+          ),
+      }),
+    },
+  );
+}
+
+function buildListMyReservationsTool(ctx: BotCtx) {
+  return tool(
+    async () => {
+      const phone = normalizePhone(ctx.contactIdentifier);
+      if (!phone) {
+        return JSON.stringify({
+          requires_phone: true,
+          message:
+            "El contactIdentifier no parece un teléfono. Pedile al cliente que escriba a /perfil/reservas para ver sus reservas.",
+        });
+      }
+      const result = await listChatbotReservationsByPhone(
+        ctx.businessId,
+        phone,
+      );
+      return JSON.stringify(result);
+    },
+    {
+      name: "list_my_reservations",
+      description:
+        "Devuelve las reservas próximas (status confirmed o seated, starts_at en el futuro) del cliente actual identificado por su teléfono.",
+      schema: z.object({}),
+    },
+  );
+}
+
+function buildConfirmReservationTool(ctx: BotCtx) {
+  return tool(
+    async ({ reservation_id }: { reservation_id: string }) => {
+      const result = await confirmReservationByChatbot(
+        ctx.businessId,
+        reservation_id,
+        ctx.contactIdentifier,
+      );
+      return JSON.stringify(result);
+    },
+    {
+      name: "confirm_reservation",
+      description:
+        "Marca una reserva existente como confirmada por el cliente. Llamala solo si el cliente respondió afirmativamente a una pregunta del tipo '¿confirmás tu reserva?'. El reservation_id viene de list_my_reservations.",
+      schema: z.object({
+        reservation_id: z
+          .string()
+          .uuid()
+          .describe(
+            "UUID de la reserva a confirmar. Sale de list_my_reservations.",
+          ),
+      }),
+    },
+  );
+}
+
 // ---------------- LLM loop ----------------
 
 // Registry: maps a tool name to its builder. Each builder takes the unified
@@ -1149,12 +1412,21 @@ const TOOL_BUILDERS: Record<string, (ctx: BotCtx) => StructuredToolInterface> = 
   add_to_cart: (ctx) => buildAddToCartTool(ctx),
   remove_from_cart: (ctx) => buildRemoveFromCartTool(ctx),
   generate_checkout_link: (ctx) => buildGenerateCheckoutLinkTool(ctx),
+  get_reservation_info: (ctx) => buildReservationInfoTool(ctx),
+  list_reservation_salones: (ctx) => buildListReservationSalonesTool(ctx),
+  check_reservation_availability: (ctx) =>
+    buildCheckReservationAvailabilityTool(ctx),
+  generate_reservation_link: (ctx) => buildGenerateReservationLinkTool(ctx),
+  list_my_reservations: (ctx) => buildListMyReservationsTool(ctx),
+  confirm_reservation: (ctx) => buildConfirmReservationTool(ctx),
 };
 
 async function invokeLlm({
   businessId,
   businessSlug,
   conversationId,
+  contactIdentifier,
+  channel,
   enabledTools,
   systemPrompt,
   history,
@@ -1163,12 +1435,20 @@ async function invokeLlm({
   businessId: string;
   businessSlug: string;
   conversationId: string;
+  contactIdentifier: string;
+  channel: ChatbotChannel;
   enabledTools: string[] | null;
   systemPrompt: string;
   history: StoredMessage[];
   userMessage: string;
 }): Promise<{ assistantMessage: string; toolTrace: ToolTraceEntry[] }> {
-  const ctx: BotCtx = { businessId, businessSlug, conversationId };
+  const ctx: BotCtx = {
+    businessId,
+    businessSlug,
+    conversationId,
+    contactIdentifier,
+    channel,
+  };
   const toolTrace: ToolTraceEntry[] = [];
 
   // Build only the enabled tools (null = all enabled).

@@ -1,0 +1,427 @@
+import "server-only";
+
+import { fromZonedTime } from "date-fns-tz";
+import type { SupabaseClient } from "@supabase/supabase-js";
+
+import { computeAvailableSlots } from "@/lib/reservations/availability";
+import {
+  getBusinessSalones,
+  getBusinessTables,
+  getReservationSettings,
+  getReservationsInRange,
+} from "@/lib/reservations/queries";
+import type { Reservation } from "@/lib/reservations/types";
+import { createSupabaseServiceClient } from "@/lib/supabase/service";
+
+type GenericClient = SupabaseClient;
+
+/**
+ * Chatbot-side actions for the reservations feature.
+ *
+ * Architectural notes:
+ * - These functions are the bridge between the LangChain tools in
+ *   `src/lib/chatbot/agent.ts` and the canonical reservation logic in
+ *   `availability.ts` / `booking-actions.ts`. They don't duplicate domain
+ *   rules — they wrap the existing ones.
+ * - Creation goes through a token + web confirmation (mirror of the cart
+ *   handoff in 0014_chatbot_cart.sql). The chatbot never inserts into
+ *   `reservations` directly; that happens from `/reservar/[token]` once the
+ *   customer logs in. See `createReservationIntent` below.
+ * - "List my reservations" and "confirm reservation" use phone-based identity:
+ *   the `contactIdentifier` from the conversation is normalized to digits and
+ *   compared against `reservations.customer_phone`. This is weak auth on
+ *   purpose — WhatsApp owns the phone, so in production this is good enough.
+ *   On the `web-test` channel the identifier may not be a phone; in that case
+ *   `normalizePhone` returns "" and the tools return `requires_phone: true`
+ *   so the bot asks the user explicitly.
+ */
+
+const RESERVATION_INTENT_TOKEN_LENGTH = 16;
+
+export type ReservationIntent = {
+  date: string; // YYYY-MM-DD in business TZ
+  slot: string; // HH:MM in business TZ
+  party_size: number;
+  customer_name?: string | null;
+  customer_phone?: string | null;
+  notes?: string | null;
+  /** Salón elegido. Null/ausente cuando el negocio tiene un único salón o
+   *  el bot no preguntó (intents viejos previos a multi-salón). */
+  floor_plan_id?: string | null;
+};
+
+/**
+ * Digits-only phone normalization. Anything that doesn't look phone-like
+ * collapses to "" — the tools use that to ask the user explicitly.
+ */
+export function normalizePhone(raw: string | null | undefined): string {
+  if (!raw) return "";
+  const digits = raw.replace(/\D+/g, "");
+  // Require a minimum so emails like "x@y.com" don't accidentally normalize
+  // to "" (they already do, but stray strings with two digits shouldn't pass).
+  if (digits.length < 6) return "";
+  return digits;
+}
+
+type Business = {
+  id: string;
+  timezone: string;
+};
+
+async function getBusinessById(businessId: string): Promise<Business | null> {
+  const service = createSupabaseServiceClient() as unknown as GenericClient;
+  const { data } = await service
+    .from("businesses")
+    .select("id, timezone")
+    .eq("id", businessId)
+    .maybeSingle();
+  return (data as Business | null) ?? null;
+}
+
+/**
+ * Read-only summary of the business's reservation policy. The chatbot uses
+ * this for questions like "¿hasta cuántas personas?", "¿con cuánta antelación?".
+ */
+export async function getReservationPolicyForChatbot(businessId: string) {
+  const settings = await getReservationSettings(businessId, { useService: true });
+  // Translate the schedule into a human-friendly summary: list of open days
+  // with their slot count. The bot can format this freely.
+  const dayNames = ["domingo", "lunes", "martes", "miércoles", "jueves", "viernes", "sábado"];
+  const open_days = (Object.entries(settings.schedule) as [string, { open: boolean; slots: string[] }][])
+    .filter(([, day]) => day?.open && day.slots.length > 0)
+    .map(([dow, day]) => ({
+      day_of_week: Number(dow),
+      day_name: dayNames[Number(dow)],
+      slot_count: day.slots.length,
+      first_slot: day.slots[0] ?? null,
+      last_slot: day.slots[day.slots.length - 1] ?? null,
+    }));
+
+  return {
+    max_party_size: settings.max_party_size,
+    advance_days_max: settings.advance_days_max,
+    lead_time_min: settings.lead_time_min,
+    slot_duration_min: settings.slot_duration_min,
+    open_days,
+    accepts_reservations: open_days.length > 0,
+  };
+}
+
+/**
+ * Lista los salones del negocio que aceptan reservas (al menos una mesa
+ * activa). El bot la usa de paso 0: si `multi_salon` es true, debe preguntar
+ * al cliente cuál antes de pedir horarios.
+ */
+export async function listSalonesForChatbot(businessId: string) {
+  const salones = await getBusinessSalones(businessId, { useService: true });
+  return {
+    salones,
+    multi_salon: salones.length > 1,
+  };
+}
+
+/**
+ * Check available slots for a given date and party size.
+ * Wraps `computeAvailableSlots` with pre-loaded settings/tables/reservations.
+ *
+ * `floorPlanId` restringe el cómputo a las mesas de ese salón. Sin él,
+ * cae al primer floor_plan (legacy).
+ */
+export async function checkAvailabilityForChatbot(
+  businessId: string,
+  date: string,
+  partySize: number,
+  floorPlanId?: string | null,
+) {
+  const business = await getBusinessById(businessId);
+  if (!business) return { error: "business_not_found" as const };
+
+  const settings = await getReservationSettings(businessId, { useService: true });
+
+  if (partySize < 1) {
+    return { error: "invalid_party_size" as const };
+  }
+  if (partySize > settings.max_party_size) {
+    return {
+      error: "party_size_too_large" as const,
+      max_party_size: settings.max_party_size,
+    };
+  }
+
+  const tables = await getBusinessTables(businessId, {
+    useService: true,
+    floorPlanId: floorPlanId ?? null,
+  });
+
+  // Reservations across the whole day (in TZ). We pad by 1 day on each side
+  // so the buffer logic sees neighbors near midnight.
+  const dayStart = fromZonedTime(`${date}T00:00:00`, business.timezone);
+  const dayEnd = new Date(dayStart.getTime() + 24 * 60 * 60 * 1000);
+  const windowStart = new Date(dayStart.getTime() - 24 * 60 * 60 * 1000);
+  const windowEnd = new Date(dayEnd.getTime() + 24 * 60 * 60 * 1000);
+  const reservations = await getReservationsInRange(
+    businessId,
+    windowStart.toISOString(),
+    windowEnd.toISOString(),
+    { useService: true },
+  );
+
+  const slots = computeAvailableSlots({
+    date,
+    partySize,
+    settings,
+    tables,
+    reservations,
+    timezone: business.timezone,
+  });
+
+  return {
+    date,
+    party_size: partySize,
+    slots: slots.map((s) => s.slot),
+    count: slots.length,
+  };
+}
+
+/**
+ * Create a reservation intent: validates the slot exists in availability,
+ * persists `{intent, token}` on `chatbot_conversations`, returns the token.
+ *
+ * Re-uses the same 16-hex token shape as `cart_token` so log inspection is
+ * consistent.
+ */
+export async function createReservationIntent(input: {
+  businessId: string;
+  conversationId: string;
+  date: string;
+  slot: string;
+  partySize: number;
+  customerName?: string | null;
+  customerPhone?: string | null;
+  notes?: string | null;
+  floorPlanId?: string | null;
+}): Promise<
+  | { ok: true; token: string }
+  | { ok: false; error: string; available_slots?: string[] }
+> {
+  const business = await getBusinessById(input.businessId);
+  if (!business) return { ok: false, error: "business_not_found" };
+
+  const settings = await getReservationSettings(input.businessId, { useService: true });
+  if (input.partySize < 1 || input.partySize > settings.max_party_size) {
+    return {
+      ok: false,
+      error: `El máximo es ${settings.max_party_size} comensales.`,
+    };
+  }
+
+  const tables = await getBusinessTables(input.businessId, {
+    useService: true,
+    floorPlanId: input.floorPlanId ?? null,
+  });
+  const dayStart = fromZonedTime(`${input.date}T00:00:00`, business.timezone);
+  const dayEnd = new Date(dayStart.getTime() + 24 * 60 * 60 * 1000);
+  const windowStart = new Date(dayStart.getTime() - 24 * 60 * 60 * 1000);
+  const windowEnd = new Date(dayEnd.getTime() + 24 * 60 * 60 * 1000);
+  const reservations = await getReservationsInRange(
+    input.businessId,
+    windowStart.toISOString(),
+    windowEnd.toISOString(),
+    { useService: true },
+  );
+
+  const slots = computeAvailableSlots({
+    date: input.date,
+    partySize: input.partySize,
+    settings,
+    tables,
+    reservations,
+    timezone: business.timezone,
+  });
+
+  const isAvailable = slots.some((s) => s.slot === input.slot);
+  if (!isAvailable) {
+    return {
+      ok: false,
+      error: "slot_no_longer_available",
+      available_slots: slots.map((s) => s.slot),
+    };
+  }
+
+  const token = globalThis.crypto
+    .randomUUID()
+    .replace(/-/g, "")
+    .slice(0, RESERVATION_INTENT_TOKEN_LENGTH);
+
+  const intent: ReservationIntent = {
+    date: input.date,
+    slot: input.slot,
+    party_size: input.partySize,
+    customer_name: input.customerName ?? null,
+    customer_phone: input.customerPhone ?? null,
+    notes: input.notes ?? null,
+    floor_plan_id: input.floorPlanId ?? null,
+  };
+
+  const service = createSupabaseServiceClient() as unknown as GenericClient;
+  const { error } = await service
+    .from("chatbot_conversations")
+    .update({ reservation_intent: intent, reservation_token: token })
+    .eq("id", input.conversationId)
+    .eq("business_id", input.businessId);
+  if (error) {
+    return { ok: false, error: `failed_to_persist_intent: ${error.message}` };
+  }
+  return { ok: true, token };
+}
+
+/**
+ * Look up an intent by token. Used by the `/reservar/[token]` web route.
+ * Returns the parsed intent or null if not found / conversation closed.
+ */
+export async function getReservationIntentByToken(token: string): Promise<
+  | {
+      conversationId: string;
+      businessId: string;
+      intent: ReservationIntent;
+    }
+  | null
+> {
+  const service = createSupabaseServiceClient() as unknown as GenericClient;
+  const { data } = await service
+    .from("chatbot_conversations")
+    .select("id, business_id, reservation_intent, closed_at")
+    .eq("reservation_token", token)
+    .maybeSingle();
+  if (!data) return null;
+  const row = data as {
+    id: string;
+    business_id: string;
+    reservation_intent: ReservationIntent | null;
+    closed_at: string | null;
+  };
+  if (row.closed_at) return null;
+  if (!row.reservation_intent) return null;
+  return {
+    conversationId: row.id,
+    businessId: row.business_id,
+    intent: row.reservation_intent,
+  };
+}
+
+/**
+ * Clear the intent payload after a successful reservation creation. Keeps
+ * the token around for audit ("which conversation generated which booking").
+ */
+export async function consumeReservationIntent(token: string): Promise<void> {
+  const service = createSupabaseServiceClient() as unknown as GenericClient;
+  await service
+    .from("chatbot_conversations")
+    .update({ reservation_intent: null })
+    .eq("reservation_token", token);
+}
+
+/**
+ * Upcoming reservations for the given phone. "Upcoming" = live status
+ * (confirmed | seated) AND starts_at in the future.
+ *
+ * Returns shape designed for the LLM: small, named fields, ISO timestamps.
+ */
+export async function listChatbotReservationsByPhone(
+  businessId: string,
+  phone: string,
+): Promise<{
+  reservations: Array<
+    Pick<Reservation, "id" | "starts_at" | "ends_at" | "party_size" | "status" | "customer_name">
+    & { client_confirmed_at: string | null }
+  >;
+  count: number;
+}> {
+  const normalized = normalizePhone(phone);
+  const service = createSupabaseServiceClient() as unknown as GenericClient;
+  const nowIso = new Date().toISOString();
+  const { data } = await service
+    .from("reservations")
+    .select("id, starts_at, ends_at, party_size, status, customer_name, customer_phone, client_confirmed_at")
+    .eq("business_id", businessId)
+    .in("status", ["confirmed", "seated"])
+    .gte("starts_at", nowIso)
+    .order("starts_at", { ascending: true });
+
+  const rows = (data ?? []) as Array<
+    Reservation & { client_confirmed_at: string | null }
+  >;
+
+  // Filter client-side by normalized phone (the DB stores it raw).
+  const filtered = rows.filter(
+    (r) => normalizePhone(r.customer_phone) === normalized,
+  );
+
+  return {
+    count: filtered.length,
+    reservations: filtered.map((r) => ({
+      id: r.id,
+      starts_at: r.starts_at,
+      ends_at: r.ends_at,
+      party_size: r.party_size,
+      status: r.status,
+      customer_name: r.customer_name,
+      client_confirmed_at: r.client_confirmed_at,
+    })),
+  };
+}
+
+/**
+ * Mark a reservation as client-confirmed. Validates ownership by phone
+ * (same identity model as `listChatbotReservationsByPhone`).
+ *
+ * Refuses to confirm reservations that are not in a live status — there's
+ * nothing meaningful to "confirm" once it's completed/cancelled/no_show.
+ */
+export async function confirmReservationByChatbot(
+  businessId: string,
+  reservationId: string,
+  contactPhone: string,
+): Promise<
+  | { ok: true; client_confirmed_at: string }
+  | { ok: false; error: string }
+> {
+  const normalized = normalizePhone(contactPhone);
+  if (!normalized) {
+    return { ok: false, error: "phone_required" };
+  }
+
+  const service = createSupabaseServiceClient() as unknown as GenericClient;
+  const { data: existing } = await service
+    .from("reservations")
+    .select("id, business_id, customer_phone, status, client_confirmed_at")
+    .eq("id", reservationId)
+    .maybeSingle();
+  const r = existing as
+    | Pick<Reservation, "id" | "business_id" | "customer_phone" | "status">
+        & { client_confirmed_at: string | null }
+    | null;
+
+  if (!r) return { ok: false, error: "reservation_not_found" };
+  if (r.business_id !== businessId) return { ok: false, error: "reservation_not_found" };
+  if (normalizePhone(r.customer_phone) !== normalized) {
+    return { ok: false, error: "reservation_not_found" };
+  }
+  if (r.status !== "confirmed" && r.status !== "seated") {
+    return { ok: false, error: "reservation_not_active" };
+  }
+  if (r.client_confirmed_at) {
+    return { ok: true, client_confirmed_at: r.client_confirmed_at };
+  }
+
+  const nowIso = new Date().toISOString();
+  const { error } = await service
+    .from("reservations")
+    .update({ client_confirmed_at: nowIso })
+    .eq("id", reservationId)
+    .eq("business_id", businessId);
+  if (error) {
+    return { ok: false, error: `update_failed: ${error.message}` };
+  }
+  return { ok: true, client_confirmed_at: nowIso };
+}

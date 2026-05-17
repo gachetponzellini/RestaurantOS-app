@@ -31,6 +31,7 @@ import { signOut } from "@/lib/auth/sign-out";
 import { anularMesa, volverAPedir } from "@/lib/mozo/actions";
 import type { MozoMember } from "@/lib/mozo/queries";
 import { type OperationalStatus } from "@/lib/mozo/state-machine";
+import { useTablesRealtime } from "@/lib/mozo/use-tables-realtime";
 import { NotificationsToastHost } from "@/components/notifications/notifications-toast-host";
 import { useNotificationsRealtime } from "@/components/notifications/use-notifications-realtime";
 import { markAllRead, markRead } from "@/lib/notifications/actions";
@@ -251,11 +252,13 @@ export function MozoClient({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams, allTables]);
 
-  // Polling cada 10 s
-  useEffect(() => {
-    const id = setInterval(() => router.refresh(), 10_000);
-    return () => clearInterval(id);
-  }, [router]);
+  // Realtime via Supabase publication (DT-011 cerrada en migración 0040).
+  // Cualquier UPDATE/INSERT en tables del business invalida la página.
+  // Reemplaza el polling de 10 s que tenía antes.
+  useTablesRealtime({
+    businessId,
+    floorPlanIds: floorPlans.map((fp) => fp.plan.id),
+  });
 
   // ── Derived ──
   const mozoNameById = useMemo(() => {

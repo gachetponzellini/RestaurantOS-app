@@ -2,11 +2,13 @@
 
 import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import {
   ArrowLeftRight,
   Ban,
   ClipboardList,
   Clock,
+  Pencil,
   Receipt,
   UserPlus,
   Users,
@@ -14,6 +16,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
+import { AsignarMozosPanel } from "@/components/mozo/asignar-mozos-panel";
 import { FloorPlanViewer } from "@/components/mozo/floor-plan-viewer";
 import { OrderSummaryCard } from "@/components/mozo/order-summary-card";
 import { TransferTableModal } from "@/components/mozo/transfer-table-modal";
@@ -21,11 +24,12 @@ import { WalkInModal } from "@/components/mozo/walk-in-modal";
 import { Button } from "@/components/ui/button";
 import type { BusinessRole } from "@/lib/admin/context";
 import type { FloorPlanWithTables } from "@/lib/admin/floor-plan/queries";
-import { anularMesa } from "@/lib/mozo/actions";
-import { initialsFromName, mozoColor } from "@/lib/mozo/colors";
+import { anularMesa, assignMozoToTable } from "@/lib/mozo/actions";
+import { initialsFromName, mozoColor, mozoPalette } from "@/lib/mozo/colors";
 import type { MozoMember } from "@/lib/mozo/queries";
 import { type OperationalStatus } from "@/lib/mozo/state-machine";
-import { canTransitionMesa } from "@/lib/permissions/can";
+import { useTablesRealtime } from "@/lib/mozo/use-tables-realtime";
+import { canAssignMozo, canTransitionMesa } from "@/lib/permissions/can";
 import type { FloorTable } from "@/lib/reservations/types";
 import { cn } from "@/lib/utils";
 
@@ -129,6 +133,9 @@ export function SalonDesktop({
   mozos,
   currentUserId,
   role,
+  distribuirOpen = false,
+  onDistribuirOpen,
+  onDistribuirClose,
 }: {
   slug: string;
   businessId: string;
@@ -138,15 +145,21 @@ export function SalonDesktop({
   mozos: MozoMember[];
   currentUserId: string;
   role: BusinessRole;
+  /** Modo "Distribuir mozos" (paint mode). El sidebar derecho muestra la
+   *  paleta de mozos y el plano grande tiñe mesas por mozo + tap asigna. */
+  distribuirOpen?: boolean;
+  onDistribuirOpen?: () => void;
+  onDistribuirClose?: () => void;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
 
-  // Polling 10s. `tables` no está en realtime (DT-004).
-  useEffect(() => {
-    const id = setInterval(() => router.refresh(), 10_000);
-    return () => clearInterval(id);
-  }, [router]);
+  // Realtime via Supabase publication (DT-011 cerrada, migración 0040).
+  // Cualquier UPDATE/INSERT en tables visibles invalida la página.
+  useTablesRealtime({
+    businessId,
+    floorPlanIds: floorPlans.map((fp) => fp.plan.id),
+  });
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [walkInTableId, setWalkInTableId] = useState<string | null>(null);
@@ -275,6 +288,72 @@ export function SalonDesktop({
     ? (activeTables.find((t) => t.id === selectedId) ?? null)
     : null;
 
+  // ── Paint mode (Distribuir mozos) ──
+  // Mozo activo en la paleta. Default: primer mozo del listado.
+  const [paintMozoId, setPaintMozoId] = useState<string | null>(null);
+  useEffect(() => {
+    if (distribuirOpen && paintMozoId === null) {
+      const firstMozo =
+        mozos.find((m) => m.role === "mozo")?.user_id ??
+        mozos[0]?.user_id ??
+        null;
+      setPaintMozoId(firstMozo);
+    }
+    // Al cerrar, mantenemos el último mozo activo (es probable que el
+    // encargado vuelva a abrir y siga en el mismo).
+  }, [distribuirOpen, mozos, paintMozoId]);
+
+  // Espejo local de mozo_id por tableId para optimistic update en paint
+  // mode. Se sincroniza con las tables del server al refresh.
+  const [localAssign, setLocalAssign] = useState<Record<string, string | null>>(
+    {},
+  );
+  useEffect(() => {
+    const m: Record<string, string | null> = {};
+    for (const t of activeTables) m[t.id] = t.mozo_id ?? null;
+    setLocalAssign(m);
+  }, [activeTables]);
+
+  // En paint mode el selected debe limpiarse (no abrimos TableDetail).
+  useEffect(() => {
+    if (distribuirOpen && selectedId !== null) setSelectedId(null);
+  }, [distribuirOpen, selectedId]);
+
+  const handlePaintTable = useCallback(
+    (table: FloorTable) => {
+      const currentAssigned = localAssign[table.id] ?? null;
+      // Toggle: si la mesa ya está asignada al mozo activo → desasignar.
+      const next = currentAssigned === paintMozoId ? null : paintMozoId;
+      setLocalAssign((prev) => ({ ...prev, [table.id]: next }));
+      startTransition(async () => {
+        const r = await assignMozoToTable(table.id, next, slug);
+        if (!r.ok) {
+          toast.error(r.error);
+          setLocalAssign((prev) => ({ ...prev, [table.id]: currentAssigned }));
+        }
+      });
+    },
+    [localAssign, paintMozoId, slug],
+  );
+
+  const countByMozo = useMemo(() => {
+    const c: Record<string, number> = {};
+    for (const id of Object.values(localAssign)) {
+      if (id) c[id] = (c[id] ?? 0) + 1;
+    }
+    return c;
+  }, [localAssign]);
+
+  const totalSinAsignar = useMemo(
+    () => activeTables.filter((t) => !localAssign[t.id]).length,
+    [activeTables, localAssign],
+  );
+
+  const closeDistribuir = useCallback(() => {
+    onDistribuirClose?.();
+    router.refresh();
+  }, [onDistribuirClose, router]);
+
   // Extras para el FloorPlanViewer.
   const extras = useMemo(() => {
     const out: Record<
@@ -290,7 +369,14 @@ export function SalonDesktop({
     for (const t of activeTables) {
       const order = orderByTable[t.id];
       const reservation = reservationByTable[t.id];
-      const mozoName = t.mozo_id ? mozoNameById.get(t.mozo_id) : null;
+      // En paint mode usamos `localAssign` (optimistic) para que el tap
+      // pinte la mesa de inmediato sin esperar al server.
+      const effectiveMozoId = distribuirOpen
+        ? localAssign[t.id] ?? null
+        : t.mozo_id;
+      const mozoName = effectiveMozoId
+        ? mozoNameById.get(effectiveMozoId)
+        : null;
       out[t.id] = {
         reservation: reservation
           ? {
@@ -308,11 +394,18 @@ export function SalonDesktop({
           : undefined,
         minutesOpen: t.opened_at ? (minutesSince(t.opened_at) ?? undefined) : undefined,
         mozoInitial: mozoName ? initialsFromName(mozoName) : undefined,
-        mozoColor: t.mozo_id ? mozoColor(t.mozo_id) : undefined,
+        mozoColor: effectiveMozoId ? mozoColor(effectiveMozoId) : undefined,
       };
     }
     return out;
-  }, [activeTables, orderByTable, reservationByTable, mozoNameById]);
+  }, [
+    activeTables,
+    orderByTable,
+    reservationByTable,
+    mozoNameById,
+    distribuirOpen,
+    localAssign,
+  ]);
 
   // Mozos visibles en este salón (con su conteo de mesas asignadas). Usado
   // por la leyenda debajo del plano para que el encargado mapee color → mozo
@@ -355,7 +448,10 @@ export function SalonDesktop({
                 plan={plan}
                 tables={tables}
                 extras={extras}
-                onTableClick={(t) => setSelectedId(t.id)}
+                paintMode={distribuirOpen}
+                onTableClick={(t) =>
+                  distribuirOpen ? handlePaintTable(t) : setSelectedId(t.id)
+                }
               />
             ) : (
               <div className="flex h-full items-center justify-center p-12 text-center">
@@ -372,9 +468,21 @@ export function SalonDesktop({
           <SalonStats stats={stats} total={allActiveTables.length} />
         </div>
 
-        {/* Panel lateral */}
+        {/* Panel lateral — 3 modos: paint (Distribuir mozos) > selección
+            de mesa > lista por defecto. Paint gana porque mientras el
+            encargado está pintando no queremos que un tap accidental
+            abra el detalle. */}
         <aside className="bg-card ring-border/60 flex min-h-0 flex-col overflow-hidden rounded-2xl ring-1">
-          {selected ? (
+          {distribuirOpen ? (
+            <AsignarMozosPanel
+              mozos={mozos}
+              activeMozoId={paintMozoId}
+              onActiveMozoChange={setPaintMozoId}
+              countByMozo={countByMozo}
+              totalSinAsignar={totalSinAsignar}
+              onDone={closeDistribuir}
+            />
+          ) : selected ? (
             <TableDetail
               table={selected}
               order={orderByTable[selected.id]}
@@ -400,6 +508,13 @@ export function SalonDesktop({
               reservationByTable={reservationByTable}
               mozoNameById={mozoNameById}
               onSelect={(id) => setSelectedId(id)}
+              canDistribuir={canAssignMozo(role) && !!onDistribuirOpen}
+              onDistribuir={() => onDistribuirOpen?.()}
+              editPlanHref={
+                canAssignMozo(role) && active?.plan.id
+                  ? `/${slug}/admin/salones/${active.plan.id}`
+                  : null
+              }
             />
           )}
         </aside>
@@ -651,12 +766,21 @@ function ActiveTablesList({
   reservationByTable,
   mozoNameById,
   onSelect,
+  canDistribuir,
+  onDistribuir,
+  editPlanHref,
 }: {
   tables: FloorTable[];
   orderByTable: Record<string, SalonOrderRef>;
   reservationByTable: Record<string, SalonReservationRef>;
   mozoNameById: Map<string, string>;
   onSelect: (id: string) => void;
+  /** Mostrar el CTA "Distribuir mozos" en el header de la lista. Solo
+   *  encargado / admin lo ven (el flag es del parent). */
+  canDistribuir: boolean;
+  onDistribuir: () => void;
+  /** Link al editor del plano del salón activo. Si null, no se muestra. */
+  editPlanHref: string | null;
 }) {
   // Agrupamos por estado para que el encargado vea: primero urgentes
   // (pidio_cuenta), después ocupadas, después libres con reserva próxima
@@ -724,8 +848,8 @@ function ActiveTablesList({
 
   return (
     <>
-      <header className="border-border/60 flex items-center justify-between border-b px-4 py-3">
-        <div>
+      <header className="border-border/60 flex items-center justify-between gap-2 border-b px-4 py-3">
+        <div className="min-w-0">
           <h3 className="text-foreground text-sm font-bold tracking-tight">
             Mesas
           </h3>
@@ -733,9 +857,34 @@ function ActiveTablesList({
             {totalActivas} {totalActivas === 1 ? "activa" : "activas"} · {tables.length} totales
           </p>
         </div>
-        <span className="text-muted-foreground text-[11px]">
-          Tocá para ver
-        </span>
+        {canDistribuir || editPlanHref ? (
+          <div className="flex flex-shrink-0 items-center gap-1.5">
+            {canDistribuir && (
+              <button
+                type="button"
+                onClick={onDistribuir}
+                className="inline-flex items-center gap-1.5 rounded-full bg-zinc-900 px-3 py-1.5 text-[11px] font-semibold text-white transition hover:brightness-110 active:scale-[0.97]"
+              >
+                <Users className="size-3" />
+                Distribuir mozos
+              </button>
+            )}
+            {editPlanHref && (
+              <Link
+                href={editPlanHref}
+                className="inline-flex items-center gap-1.5 rounded-full bg-zinc-100 px-3 py-1.5 text-[11px] font-semibold text-zinc-700 ring-1 ring-zinc-200 transition hover:bg-zinc-200 active:scale-[0.97]"
+                aria-label="Editar mesas del salón"
+              >
+                <Pencil className="size-3" />
+                Editar mesas
+              </Link>
+            )}
+          </div>
+        ) : (
+          <span className="text-muted-foreground shrink-0 text-[11px]">
+            Tocá para ver
+          </span>
+        )}
       </header>
       <div className="flex-1 overflow-y-auto pb-3">
         {tables.length === 0 ? (
@@ -863,13 +1012,27 @@ function ActiveTableRow({
           </p>
         )}
 
-        {/* Línea 5: mozo asignado, chip más liviano */}
-        {mozoName && (
-          <p className="mt-1 inline-flex max-w-full items-center gap-1 truncate rounded-full bg-zinc-100 px-2 py-0.5 text-[10px] font-medium text-zinc-600">
-            <UserPlus className="size-2.5 flex-shrink-0" />
-            <span className="truncate">{mozoName}</span>
-          </p>
-        )}
+        {/* Línea 5: mozo asignado — chip con color del palette del mozo
+            (distinto de los colores de estado, ver lib/mozo/colors.ts). */}
+        {mozoName && table.mozo_id && (() => {
+          const p = mozoPalette(table.mozo_id);
+          return (
+            <p
+              className={cn(
+                "mt-1 inline-flex max-w-full items-center gap-1 truncate rounded-full px-2 py-0.5 text-[10px] font-semibold ring-1",
+                p.bg,
+                p.text,
+                p.ring,
+              )}
+            >
+              <span
+                aria-hidden
+                className={cn("size-1.5 shrink-0 rounded-full", p.dot)}
+              />
+              <span className="truncate">{mozoName}</span>
+            </p>
+          );
+        })()}
       </button>
     </li>
   );
@@ -962,12 +1125,25 @@ function TableDetail({
                 {tiempoLabel}
               </span>
             )}
-            {mozoName && (
-              <span className="inline-flex max-w-[180px] items-center gap-1 truncate rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] font-medium text-zinc-700">
-                <UserPlus className="h-3 w-3 flex-shrink-0" />
-                <span className="truncate">{mozoName}</span>
-              </span>
-            )}
+            {mozoName && table.mozo_id && (() => {
+              const p = mozoPalette(table.mozo_id);
+              return (
+                <span
+                  className={cn(
+                    "inline-flex max-w-[180px] items-center gap-1 truncate rounded-full px-2 py-0.5 text-[11px] font-semibold ring-1",
+                    p.bg,
+                    p.text,
+                    p.ring,
+                  )}
+                >
+                  <span
+                    aria-hidden
+                    className={cn("h-1.5 w-1.5 shrink-0 rounded-full", p.dot)}
+                  />
+                  <span className="truncate">{mozoName}</span>
+                </span>
+              );
+            })()}
           </div>
         </div>
         <button

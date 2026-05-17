@@ -76,6 +76,9 @@ export const CreateReservationInputSchema = z.object({
     .max(500)
     .optional()
     .transform((v) => (!v ? null : v)),
+  /** Salón elegido cuando el negocio tiene más de uno. Si no viene, el
+   *  flujo asume el primer floor_plan (legacy single-salón). */
+  floor_plan_id: z.string().uuid().optional(),
 });
 
 export type CreateReservationInput = z.infer<typeof CreateReservationInputSchema>;
@@ -102,6 +105,14 @@ export const AvailabilityQuerySchema = z.object({
   business_slug: z.string().min(1),
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Fecha inválida (YYYY-MM-DD)"),
   party_size: z.coerce.number().int().min(1).max(100),
+  /** Si viene, restringe los horarios a las mesas de ese salón. */
+  floor_plan_id: z.string().uuid().optional(),
 });
+
+export const ListSalonesQuerySchema = z.object({
+  business_slug: z.string().min(1),
+});
+
+export type ListSalonesQuery = z.infer<typeof ListSalonesQuerySchema>;
 
 export type AvailabilityQuery = z.infer<typeof AvailabilityQuerySchema>;

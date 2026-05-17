@@ -28,6 +28,7 @@ export function NotificationsLauncher({
   userId,
   role,
   variant = "default",
+  fixed = false,
 }: {
   notifications: Notification[];
   unreadCount: number;
@@ -36,6 +37,9 @@ export function NotificationsLauncher({
   userId: string;
   role: string;
   variant?: "default" | "ghost";
+  /** Si true, el bell se posiciona fixed top-right (z-50, encima del
+   *  overlay del LocalShell y de cualquier header de página). */
+  fixed?: boolean;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -94,11 +98,21 @@ export function NotificationsLauncher({
 
   return (
     <>
-      <NotificationsBell
-        unreadCount={unreadCount}
-        variant={variant}
-        onClick={() => setOpen(true)}
-      />
+      {fixed ? (
+        <div className="fixed right-4 top-3 z-50">
+          <NotificationsBell
+            unreadCount={unreadCount}
+            variant={variant}
+            onClick={() => setOpen(true)}
+          />
+        </div>
+      ) : (
+        <NotificationsBell
+          unreadCount={unreadCount}
+          variant={variant}
+          onClick={() => setOpen(true)}
+        />
+      )}
       <NotificationsDrawer
         open={open}
         onOpenChange={setOpen}

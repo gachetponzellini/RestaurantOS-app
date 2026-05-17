@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { ChefHat, Check, Package, Play, Truck, UserPlus, UtensilsCrossed } from "lucide-react";
+import { ChefHat, Check, Package, Play, Truck, UtensilsCrossed } from "lucide-react";
 import { toast } from "sonner";
 
 import {
@@ -11,6 +11,7 @@ import {
 } from "@/lib/comandas/actions";
 import type { LocalComanda, LocalStation } from "@/lib/admin/local-query";
 import type { ComandaStatus } from "@/lib/comandas/types";
+import { mozoPalette } from "@/lib/mozo/colors";
 import type { MozoMember } from "@/lib/mozo/queries";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 
@@ -437,14 +438,20 @@ function ComandaCard({
         />
       </header>
 
-      {/* Mozo asignado — solo dine-in con mozo. Mismo chip que en el salón
-          para que el encargado mapee comanda → mozo de un vistazo. */}
-      {mozoName && (
-        <p className="inline-flex max-w-full items-center gap-1 truncate rounded-full bg-zinc-100 px-2 py-0.5 text-[10px] font-medium text-zinc-700 self-start">
-          <UserPlus className="size-2.5 flex-shrink-0" />
-          <span className="truncate">{mozoName}</span>
-        </p>
-      )}
+      {/* Mozo asignado — solo dine-in con mozo. Chip con su color del
+          palette (mismo que en el salón) para mapear comanda → mozo de un
+          vistazo, sin confundirse con los estados de mesa. */}
+      {mozoName && comanda.mozo_id && (() => {
+        const p = mozoPalette(comanda.mozo_id);
+        return (
+          <p
+            className={`inline-flex max-w-full items-center gap-1 truncate self-start rounded-full px-2 py-0.5 text-[10px] font-semibold ring-1 ${p.bg} ${p.text} ${p.ring}`}
+          >
+            <span aria-hidden className={`size-1.5 shrink-0 rounded-full ${p.dot}`} />
+            <span className="truncate">{mozoName}</span>
+          </p>
+        );
+      })()}
 
       {/* Sector + tanda + nº pedido */}
       <div className="flex items-center justify-between gap-2 text-[11px]">

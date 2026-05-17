@@ -73,19 +73,21 @@ export default async function AdminAuthedLayout({
         canManageBusiness={canManageBusiness(ctx)}
         initialPendingCount={pendingCount}
         isActive={business.is_active ?? true}
-        notificationsLauncher={
-          <NotificationsLauncher
-            notifications={notifications}
-            unreadCount={unreadCount}
-            businessSlug={business_slug}
-            businessId={business.id}
-            userId={ctx.user.id}
-            role={notiRole}
-            variant="ghost"
-          />
-        }
       />
       <div className="min-w-0 flex-1">{children}</div>
+
+      {/* Bell fixed top-right — visible en todas las pantallas admin,
+          z-50 queda por encima del overlay del LocalShell (z-30) y de los
+          page headers. Sheets/dialogs portados pueden subir por encima. */}
+      <NotificationsLauncher
+        notifications={notifications}
+        unreadCount={unreadCount}
+        businessSlug={business_slug}
+        businessId={business.id}
+        userId={ctx.user.id}
+        role={notiRole}
+        fixed
+      />
     </div>
   );
 }

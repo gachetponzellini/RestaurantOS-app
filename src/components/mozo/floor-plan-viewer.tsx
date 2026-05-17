@@ -30,9 +30,17 @@ type Props = {
   tables: FloorTable[];
   extras?: Record<string, TableExtra>; // keyed by table.id
   onTableClick?: (table: FloorTable) => void;
+  /**
+   * Modo "pintura" — cuando está activo, las mesas se tiñen por mozo
+   * asignado (en vez de color de estado) y el click llama a `onTableClick`
+   * con la intención de asignar (el padre decide qué hacer). Cada mesa
+   * mira su `extras[id].mozoColor` para decidir el tinte; sin color =
+   * sin asignar = gris.
+   */
+  paintMode?: boolean;
 };
 
-export function FloorPlanViewer({ plan, tables, extras = {}, onTableClick }: Props) {
+export function FloorPlanViewer({ plan, tables, extras = {}, onTableClick, paintMode = false }: Props) {
   const active = tables.filter((t) => t.status === "active");
 
   return (
@@ -59,6 +67,7 @@ export function FloorPlanViewer({ plan, tables, extras = {}, onTableClick }: Pro
             key={table.id}
             table={table}
             extra={extras[table.id]}
+            paintMode={paintMode}
             onClick={() => onTableClick?.(table)}
           />
         ))}
@@ -78,17 +87,31 @@ function formatTime(iso: string) {
 function ViewerTable({
   table,
   extra,
+  paintMode,
   onClick,
 }: {
   table: FloorTable;
   extra?: TableExtra;
+  paintMode: boolean;
   onClick: () => void;
 }) {
   const cx = table.width / 2;
   const cy = table.height / 2;
   const transform = `translate(${table.x} ${table.y}) rotate(${table.rotation} ${cx} ${cy})`;
   const opStatus = table.operational_status ?? "libre";
-  const { fill, stroke } = STATUS_COLORS[opStatus];
+
+  // En paint mode: ganan los colores del mozo asignado sobre el estado.
+  // Sin mozo → gris zinc (señal de "sin asignar" en este modo).
+  const statusColors = STATUS_COLORS[opStatus];
+  const fill = paintMode
+    ? extra?.mozoColor
+      ? `${extra.mozoColor}40` // alpha ~25% para que el label se lea
+      : "#f4f4f5"
+    : statusColors.fill;
+  const stroke = paintMode
+    ? extra?.mozoColor ?? "#a1a1aa"
+    : statusColors.stroke;
+  const strokeWidth = paintMode ? 3 : 2.5;
 
   const labelSize = Math.min(table.width, table.height) * 0.22;
   const subSize = Math.max(9, labelSize * 0.62);
@@ -98,12 +121,14 @@ function ViewerTable({
   const hasReservation = !!extra?.reservation;
   const minutesOpen = extra?.minutesOpen;
 
-  // Línea secundaria bajo el label
+  // Línea secundaria bajo el label (oculta en paint mode para no saturar).
   let subLine: string | null = null;
-  if (hasReservation && opStatus === "libre") {
-    subLine = `${extra!.reservation!.starts_at ? formatTime(extra!.reservation!.starts_at) : ""} · ${extra!.reservation!.party_size}p`;
-  } else if (minutesOpen != null && minutesOpen >= 0) {
-    subLine = `${minutesOpen}m`;
+  if (!paintMode) {
+    if (hasReservation && opStatus === "libre") {
+      subLine = `${extra!.reservation!.starts_at ? formatTime(extra!.reservation!.starts_at) : ""} · ${extra!.reservation!.party_size}p`;
+    } else if (minutesOpen != null && minutesOpen >= 0) {
+      subLine = `${minutesOpen}m`;
+    }
   }
 
   return (
@@ -117,7 +142,7 @@ function ViewerTable({
           ry={table.height / 2}
           fill={fill}
           stroke={stroke}
-          strokeWidth={2.5}
+          strokeWidth={strokeWidth}
           style={{ filter: "drop-shadow(0 2px 4px rgb(0 0 0 / 0.1))" }}
         />
       ) : (
@@ -129,7 +154,7 @@ function ViewerTable({
           rx={table.shape === "rect" ? 10 : 6}
           fill={fill}
           stroke={stroke}
-          strokeWidth={2.5}
+          strokeWidth={strokeWidth}
           style={{ filter: "drop-shadow(0 2px 4px rgb(0 0 0 / 0.1))" }}
         />
       )}

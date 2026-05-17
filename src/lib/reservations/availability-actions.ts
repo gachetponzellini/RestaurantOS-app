@@ -3,11 +3,15 @@
 import { actionError, actionOk, type ActionResult } from "@/lib/actions";
 import { computeAvailableSlots } from "@/lib/reservations/availability";
 import {
+  getBusinessSalones,
   getBusinessTables,
   getReservationSettings,
   getReservationsInRange,
 } from "@/lib/reservations/queries";
-import { AvailabilityQuerySchema } from "@/lib/reservations/schema";
+import {
+  AvailabilityQuerySchema,
+  ListSalonesQuerySchema,
+} from "@/lib/reservations/schema";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
@@ -16,6 +20,8 @@ type AvailableSlotDTO = {
   starts_at: string;
   ends_at: string;
 };
+
+type SalonDTO = { id: string; name: string };
 
 /**
  * Public-facing action — anonymous users can call this to populate the slot
@@ -41,7 +47,10 @@ export async function fetchAvailability(
   if (!b) return actionError("Negocio no encontrado.");
 
   const settings = await getReservationSettings(b.id, { useService: true });
-  const tables = await getBusinessTables(b.id, { useService: true });
+  const tables = await getBusinessTables(b.id, {
+    useService: true,
+    floorPlanId: parsed.data.floor_plan_id ?? null,
+  });
 
   // Pull reservations covering the full day (in business timezone) plus one
   // settings.slot_duration so adjacent-day spillovers count.
@@ -70,4 +79,29 @@ export async function fetchAvailability(
       ends_at: s.ends_at.toISOString(),
     })),
   );
+}
+
+/**
+ * Public-facing action — anonymous users can call this to know if the
+ * business has multiple bookable salones. Returns the ordered list
+ * `[{id, name}]`. Only salones with at least one active table are included.
+ */
+export async function fetchBusinessSalones(
+  input: unknown,
+): Promise<ActionResult<SalonDTO[]>> {
+  const parsed = ListSalonesQuerySchema.safeParse(input);
+  if (!parsed.success) {
+    return actionError(parsed.error.issues[0]?.message ?? "Datos inválidos.");
+  }
+  const service = createSupabaseServiceClient() as unknown as SupabaseClient;
+  const { data: business } = await service
+    .from("businesses")
+    .select("id")
+    .eq("slug", parsed.data.business_slug)
+    .maybeSingle();
+  const b = business as { id: string } | null;
+  if (!b) return actionError("Negocio no encontrado.");
+
+  const salones = await getBusinessSalones(b.id, { useService: true });
+  return actionOk(salones);
 }

@@ -13,6 +13,8 @@ import type { ReservationSettings } from "@/lib/reservations/types";
 
 type Slot = { slot: string; starts_at: string; ends_at: string };
 
+type Salon = { id: string; name: string };
+
 type Props = {
   slug: string;
   businessName: string;
@@ -23,6 +25,7 @@ type Props = {
     ReservationSettings,
     "advance_days_max" | "max_party_size" | "slot_duration_min" | "schedule"
   >;
+  salones: Salon[];
   user: {
     isLoggedIn: boolean;
     name: string | null;
@@ -119,9 +122,17 @@ export function ReservarFlow({
   coverImageUrl,
   logoUrl,
   settings,
+  salones,
   user,
 }: Props) {
   const router = useRouter();
+  const multiSalon = salones.length > 1;
+  // Con un único salón (o ninguno), el flujo legacy se mantiene: no se
+  // muestra picker y el server filtra por el primer floor_plan del negocio.
+  // Con más de un salón forzamos al cliente a elegir antes de ver horarios.
+  const [salonId, setSalonId] = useState<string | null>(
+    multiSalon ? null : (salones[0]?.id ?? null),
+  );
   const [date, setDate] = useState<string>(todayInTz());
   const [partySize, setPartySize] = useState<number>(2);
   const [slots, setSlots] = useState<Slot[] | null>(null);
@@ -146,6 +157,13 @@ export function ReservarFlow({
 
   useEffect(() => {
     setSelectedSlot(null);
+    // Sin salón elegido en modo multi-salón, no tiene sentido pegarle al
+    // server: dejamos slots=null para mostrar el placeholder de "elegí salón".
+    if (multiSalon && !salonId) {
+      setSlots(null);
+      setLoadingSlots(false);
+      return;
+    }
     setSlots(null);
     setLoadingSlots(true);
     const t = setTimeout(() => {
@@ -154,6 +172,7 @@ export function ReservarFlow({
           business_slug: slug,
           date,
           party_size: partySize,
+          ...(salonId ? { floor_plan_id: salonId } : {}),
         });
         if (result.ok) setSlots(result.data);
         else setSlots([]);
@@ -161,7 +180,7 @@ export function ReservarFlow({
       });
     }, 120);
     return () => clearTimeout(t);
-  }, [date, partySize, slug]);
+  }, [date, partySize, slug, salonId, multiSalon]);
 
   useEffect(() => {
     if (!selectedSlot) return;
@@ -197,6 +216,7 @@ export function ReservarFlow({
         customer_name: name.trim(),
         customer_phone: phone.trim(),
         notes,
+        ...(salonId ? { floor_plan_id: salonId } : {}),
       });
       if (result.ok) {
         router.push(`/${slug}/reservar/confirmacion?id=${result.data.id}`);
@@ -539,9 +559,51 @@ export function ReservarFlow({
         </div>
       </Section>
 
+      {/* Section: Salón (solo si hay más de uno) */}
+      {multiSalon ? (
+        <Section label="Salón">
+          <div
+            style={{
+              display: "flex",
+              flexWrap: "wrap",
+              gap: 8,
+            }}
+          >
+            {salones.map((s) => {
+              const active = salonId === s.id;
+              return (
+                <button
+                  key={s.id}
+                  type="button"
+                  onClick={() => setSalonId(s.id)}
+                  style={{
+                    height: 44,
+                    padding: "0 16px",
+                    borderRadius: 12,
+                    border: `1px solid ${active ? "var(--primary)" : "var(--hairline-2)"}`,
+                    background: active ? "var(--primary)" : "var(--bg)",
+                    color: active ? "var(--primary-foreground)" : "var(--ink)",
+                    fontSize: 14,
+                    fontWeight: 600,
+                    letterSpacing: -0.1,
+                    cursor: "pointer",
+                    transition: "all 180ms",
+                    fontFamily: "inherit",
+                  }}
+                >
+                  {s.name}
+                </button>
+              );
+            })}
+          </div>
+        </Section>
+      ) : null}
+
       {/* Section: Horarios */}
       <Section label={`Horarios — ${formatLongDate(date)}`}>
-        {loadingSlots ? (
+        {multiSalon && !salonId ? (
+          <PickSalonHint />
+        ) : loadingSlots ? (
           <SlotsSkeleton />
         ) : slots && slots.length === 0 ? (
           <EmptySlots />
@@ -882,6 +944,24 @@ function EmptySlots() {
       <span style={{ color: "var(--ink-3)", fontSize: 12 }}>
         Probá otra fecha o ajustá la cantidad.
       </span>
+    </div>
+  );
+}
+
+function PickSalonHint() {
+  return (
+    <div
+      style={{
+        padding: "20px 16px",
+        textAlign: "center",
+        borderRadius: 12,
+        border: "1px dashed var(--hairline-2)",
+        color: "var(--ink-2)",
+        fontSize: 13,
+        lineHeight: 1.5,
+      }}
+    >
+      Elegí un salón para ver los horarios disponibles.
     </div>
   );
 }

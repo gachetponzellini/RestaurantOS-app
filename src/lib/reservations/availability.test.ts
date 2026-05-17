@@ -16,7 +16,7 @@ const baseSettings = {
 function makeTable(over: Partial<FloorTable> & { id: string; seats: number }): FloorTable {
   return {
     id: over.id,
-    floor_plan_id: "fp",
+    floor_plan_id: over.floor_plan_id ?? "fp",
     label: over.label ?? `Mesa ${over.id}`,
     seats: over.seats,
     shape: over.shape ?? "circle",
@@ -161,6 +161,46 @@ describe("computeAvailableSlots", () => {
       now: new Date("2026-04-21T03:00:00Z"),
     });
     expect(slots).toEqual([]);
+  });
+
+  it("only considers the tables it is given (multi-salón filtering)", () => {
+    // En el flujo real, getBusinessTables(businessId, { floorPlanId })
+    // entrega solo las mesas del salón elegido. Acá simulamos los dos casos:
+    // si llamamos con las mesas del salón A (solo t1 chica), no hay slot para 6;
+    // si llamamos con las del salón B (t2 grande), todos los slots aparecen.
+    const tablesSalonA = [
+      makeTable({ id: "t1", seats: 2, floor_plan_id: "salon-a" }),
+    ];
+    const tablesSalonB = [
+      makeTable({ id: "t2", seats: 8, floor_plan_id: "salon-b" }),
+    ];
+
+    const slotsA = computeAvailableSlots({
+      date: "2026-04-21",
+      partySize: 6,
+      settings: { ...baseSettings, schedule: SCHEDULE_OPEN_TUE },
+      tables: tablesSalonA,
+      reservations: [],
+      timezone: TZ,
+      now: new Date("2026-04-21T03:00:00Z"),
+    });
+    expect(slotsA).toEqual([]);
+
+    const slotsB = computeAvailableSlots({
+      date: "2026-04-21",
+      partySize: 6,
+      settings: { ...baseSettings, schedule: SCHEDULE_OPEN_TUE },
+      tables: tablesSalonB,
+      reservations: [],
+      timezone: TZ,
+      now: new Date("2026-04-21T03:00:00Z"),
+    });
+    expect(slotsB.map((s) => s.slot)).toEqual([
+      "12:00",
+      "13:30",
+      "20:30",
+      "22:00",
+    ]);
   });
 
   it("ignores cancelled / completed reservations", () => {

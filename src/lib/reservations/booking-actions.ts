@@ -65,6 +65,9 @@ type CreateContext = {
   customerPhone: string;
   notes: string | null;
   forcedTableId?: string | null;
+  /** Restringe el pool de mesas al salón elegido. Si null, comportamiento
+   *  legacy (primer floor_plan del negocio). */
+  floorPlanId?: string | null;
 };
 
 /**
@@ -107,7 +110,10 @@ async function createReservationCommon(
     }
   }
 
-  const tables = await getBusinessTables(ctx.businessId, { useService: true });
+  const tables = await getBusinessTables(ctx.businessId, {
+    useService: true,
+    floorPlanId: ctx.floorPlanId ?? null,
+  });
   const bufferMs = settings.buffer_min * 60_000;
 
   // Window we'll lookup overlapping reservations across — slightly wider than
@@ -246,6 +252,7 @@ export async function createReservationFromCustomer(
     customerName: parsed.data.customer_name,
     customerPhone: parsed.data.customer_phone,
     notes: parsed.data.notes,
+    floorPlanId: parsed.data.floor_plan_id ?? null,
   });
   if (result.ok) {
     revalidatePath(`/${parsed.data.business_slug}/reservar`);

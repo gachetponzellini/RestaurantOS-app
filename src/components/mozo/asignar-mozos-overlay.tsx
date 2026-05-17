@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Check, UserMinus, X } from "lucide-react";
 import { toast } from "sonner";
 
+import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { assignMozoToTable } from "@/lib/mozo/actions";
 import type { FloorPlanWithTables } from "@/lib/admin/floor-plan/queries";
 import { initialsFromName, mozoColor } from "@/lib/mozo/colors";
@@ -112,8 +113,6 @@ export function AsignarMozosOverlay({
     onClose();
   };
 
-  if (!open) return null;
-
   const activePlan = floorPlans.find((fp) => fp.plan.id === activePlanId);
 
   // Extras para el viewer: cada mesa pintada con el color de su mozo asignado.
@@ -131,22 +130,26 @@ export function AsignarMozosOverlay({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col bg-zinc-100/80 backdrop-blur-sm md:bg-zinc-900/40">
-      {/* Sheet container */}
-      <div className="mx-auto flex h-full w-full max-w-screen-xl flex-col bg-white md:my-4 md:h-[calc(100dvh-2rem)] md:rounded-2xl md:shadow-xl">
-        {/* Header */}
+    <Sheet open={open} onOpenChange={(o) => !o && handleClose()}>
+      <SheetContent
+        side="right"
+        showCloseButton={false}
+        className="flex w-full flex-col gap-0 bg-white p-0 sm:max-w-3xl"
+      >
+        {/* Header — mismo lenguaje que los otros drawers (TableDetail,
+            OrderDetailSheet): title + acciones a la derecha + close button. */}
         <header className="flex items-center justify-between gap-3 border-b border-zinc-200 px-4 py-3">
           <div className="min-w-0">
             <p className="text-[0.6rem] font-semibold uppercase tracking-[0.18em] text-zinc-500">
               Modo pintura
             </p>
-            <h2 className="text-lg font-semibold tracking-tight text-zinc-900">
+            <SheetTitle className="text-lg font-semibold tracking-tight text-zinc-900">
               Distribuir mozos
-            </h2>
+            </SheetTitle>
           </div>
           <div className="flex items-center gap-2">
             {totalSinAsignar > 0 && (
-              <span className="hidden sm:inline-flex items-center gap-1 rounded-full bg-zinc-100 px-2.5 py-1 text-xs font-semibold text-zinc-700">
+              <span className="hidden items-center gap-1 rounded-full bg-zinc-100 px-2.5 py-1 text-xs font-semibold text-zinc-700 sm:inline-flex">
                 {totalSinAsignar} sin asignar
               </span>
             )}
@@ -161,6 +164,14 @@ export function AsignarMozosOverlay({
             >
               <Check className="size-4" />
               Listo
+            </button>
+            <button
+              type="button"
+              onClick={handleClose}
+              className="hover:bg-muted -mr-1 inline-flex size-8 items-center justify-center rounded-md transition-colors"
+              aria-label="Cerrar"
+            >
+              <X className="size-4" />
             </button>
           </div>
         </header>
@@ -296,8 +307,8 @@ export function AsignarMozosOverlay({
             )}
           </main>
         </div>
-      </div>
-    </div>
+      </SheetContent>
+    </Sheet>
   );
 }
 

@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { Bike, ChevronRight, Clock, MapPin, ShoppingBag, UtensilsCrossed } from "lucide-react";
 import { toast } from "sonner";
 
-import { updateKitchenStatusForOrder } from "@/lib/mozo/actions";
+import { updateKitchenStatusForOrder } from "@/lib/cocina/actions";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 

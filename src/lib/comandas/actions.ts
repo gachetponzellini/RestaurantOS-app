@@ -194,6 +194,12 @@ export async function enviarComanda(
   if (existing) {
     orderId = (existing as { id: string }).id;
   } else {
+    // `mozo_id` es snapshot inmutable: el mozo que abrió la orden (primer
+    // envío). NO se actualiza en transferencias de mesa (eso lo refleja
+    // `tables.mozo_id`, que sí es mutable). La propina al "mozo que
+    // atendió" usa `payments.attributed_mozo_id`, derivado del último
+    // que cargó items via `order_items.loaded_by`. Ver DT-002 (resuelto)
+    // en wiki/deuda-tecnica.md y wiki/casos-de-uso/CU-09-asignacion-mozo.md.
     const { data: created, error: orderErr } = await service
       .from("orders")
       // eslint-disable-next-line @typescript-eslint/no-explicit-any

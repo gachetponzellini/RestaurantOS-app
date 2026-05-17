@@ -4,6 +4,13 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { BusinessRole } from "@/lib/admin/context";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 
+// SEGURIDAD — estas queries usan `.or(\`user_id.eq.${userId},target_role.eq.${role}\`)`
+// con interpolación directa. `userId` y `role` DEBEN venir de session/types del
+// backend (`ctx.user.id`, `ctx.role`), NUNCA de input externo crudo. El patrón
+// con interpolación no escapa contra injection en PostgREST .or() — si algún día
+// estos params vinieran de afuera, hay que reescribir usando filtros separados.
+// Ver DT-007 en wiki/deuda-tecnica.md.
+
 type GenericClient = SupabaseClient;
 
 export type Notification = {

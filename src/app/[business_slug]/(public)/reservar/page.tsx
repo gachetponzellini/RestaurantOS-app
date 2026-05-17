@@ -1,7 +1,10 @@
 import { notFound } from "next/navigation";
 
 import { ReservarFlow } from "@/components/reservations/reservar-flow";
-import { getReservationSettings } from "@/lib/reservations/queries";
+import {
+  getBusinessSalones,
+  getReservationSettings,
+} from "@/lib/reservations/queries";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { getBusiness } from "@/lib/tenant";
 
@@ -40,9 +43,10 @@ export default async function ReservarPage({
     business.address ??
     null;
 
-  const reservationSettings = await getReservationSettings(business.id, {
-    useService: true,
-  });
+  const [reservationSettings, salones] = await Promise.all([
+    getReservationSettings(business.id, { useService: true }),
+    getBusinessSalones(business.id, { useService: true }),
+  ]);
 
   return (
     <ReservarFlow
@@ -57,6 +61,7 @@ export default async function ReservarPage({
         slot_duration_min: reservationSettings.slot_duration_min,
         schedule: reservationSettings.schedule,
       }}
+      salones={salones}
       user={{ isLoggedIn: !!user, name, phone, email }}
     />
   );
