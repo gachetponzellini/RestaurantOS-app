@@ -17,6 +17,7 @@ import type { BusinessRole } from "@/lib/admin/context";
 import {
   aplicarPropinaYDescuento,
   cancelarItemEnCuenta,
+  dividirPorComensal,
   dividirPorItems,
   dividirPorPersonas,
   limpiarDivision,
@@ -240,6 +241,11 @@ export function CuentaClient({
                       >
                         {it.product_name}
                       </p>
+                      {(it as { seat_number?: number | null }).seat_number != null && (
+                        <span className="mt-0.5 inline-flex items-center gap-1 rounded-full bg-violet-100 px-1.5 py-0.5 text-[0.6rem] font-semibold text-violet-700">
+                          Comensal {(it as { seat_number: number }).seat_number}
+                        </span>
+                      )}
                       {it.notes && (
                         <p className="mt-0.5 text-xs text-zinc-500">
                           {it.notes}
@@ -626,10 +632,15 @@ function DividirModal({
   onDone: () => void;
 }) {
   const [, startTransition] = useTransition();
-  const [tab, setTab] = useState<"personas" | "items">("personas");
+  const [tab, setTab] = useState<"personas" | "items" | "comensal">("personas");
   const [count, setCount] = useState(2);
   const [mapping, setMapping] = useState<Record<string, number>>({});
   const [numSplits, setNumSplits] = useState(2);
+
+  const hasSeatNumbers = useMemo(
+    () => items.some((it) => (it as { seat_number?: number | null }).seat_number != null),
+    [items],
+  );
 
   useEffect(() => {
     if (!open) {
@@ -652,13 +663,18 @@ function DividirModal({
           <DialogTitle>Dividir cuenta</DialogTitle>
         </DialogHeader>
         <Tabs value={tab} onValueChange={(v) => setTab(v as typeof tab)}>
-          <TabsList className="mb-4 grid grid-cols-2">
+          <TabsList className={cn("mb-4 grid", hasSeatNumbers ? "grid-cols-3" : "grid-cols-2")}>
             <TabsTrigger value="personas">
-              <Users className="mr-2 size-4" /> Personas iguales
+              <Users className="mr-2 size-4" /> Personas
             </TabsTrigger>
             <TabsTrigger value="items">
               <Scissors className="mr-2 size-4" /> Por items
             </TabsTrigger>
+            {hasSeatNumbers && (
+              <TabsTrigger value="comensal">
+                <Users className="mr-2 size-4" /> Comensal
+              </TabsTrigger>
+            )}
           </TabsList>
           <TabsContent value="personas" className="space-y-4">
             <div>
@@ -807,6 +823,65 @@ function DividirModal({
               {allAssigned ? "Confirmar" : "Asigná todos los items"}
             </Button>
           </TabsContent>
+          {hasSeatNumbers && (
+            <TabsContent value="comensal" className="space-y-4">
+              <div className="rounded-xl bg-violet-50 p-3 ring-1 ring-violet-100">
+                <p className="text-sm font-semibold text-violet-900">
+                  Dividir por comensal
+                </p>
+                <p className="mt-1 text-xs text-violet-700">
+                  Se agrupan automáticamente los items por número de comensal asignado al pedir.
+                </p>
+              </div>
+              <ul className="max-h-56 space-y-1 overflow-y-auto">
+                {(() => {
+                  const seatMap = new Map<number | null, typeof items>();
+                  for (const it of items) {
+                    const key = (it as { seat_number?: number | null }).seat_number ?? null;
+                    const bucket = seatMap.get(key) ?? [];
+                    bucket.push(it);
+                    seatMap.set(key, bucket);
+                  }
+                  const entries = Array.from(seatMap.entries()).sort((a, b) => {
+                    if (a[0] === null) return 1;
+                    if (b[0] === null) return -1;
+                    return a[0] - b[0];
+                  });
+                  return entries.map(([seat, seatItems]) => (
+                    <li
+                      key={seat ?? "null"}
+                      className="rounded-lg bg-zinc-50 p-2.5"
+                    >
+                      <p className="text-sm font-semibold text-zinc-900">
+                        {seat != null ? `Comensal ${seat}` : "Sin asignar"}
+                        <span className="ml-1 text-xs font-normal text-zinc-500">
+                          · {seatItems.length} {seatItems.length === 1 ? "item" : "items"}
+                        </span>
+                      </p>
+                      <p className="text-xs text-zinc-500 tabular-nums">
+                        {formatCurrency(seatItems.reduce((a, it) => a + it.subtotal_cents, 0))}
+                      </p>
+                    </li>
+                  ));
+                })()}
+              </ul>
+              <Button
+                className="w-full"
+                onClick={() =>
+                  startTransition(async () => {
+                    const r = await dividirPorComensal(orderId, slug);
+                    if (!r.ok) toast.error(r.error);
+                    else {
+                      toast.success("Dividido por comensal");
+                      onDone();
+                    }
+                  })
+                }
+              >
+                Confirmar división por comensal
+              </Button>
+            </TabsContent>
+          )}
         </Tabs>
       </DialogContent>
     </Dialog>

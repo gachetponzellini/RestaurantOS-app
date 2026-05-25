@@ -4,8 +4,9 @@ import { useState } from "react";
 
 import { I, ImageTile } from "@/components/delivery/primitives";
 import { formatCurrency } from "@/lib/currency";
-import type { MenuDailyMenu } from "@/lib/menu";
+import type { MenuDailyMenu, MenuDailyMenuChoiceGroup } from "@/lib/menu";
 import { useCart } from "@/stores/cart";
+import type { CartSelectedChoice } from "@/stores/cart";
 
 /**
  * Drawer de detalle del menú del día. Muestra todos los componentes + botón
@@ -27,15 +28,38 @@ export function DailyMenuSheet({
 }) {
   const addItem = useCart(slug, (s) => s.addItem);
   const [quantity, setQuantity] = useState(1);
+  const [selections, setSelections] = useState<
+    Map<string, CartSelectedChoice>
+  >(new Map());
 
-  // Reset de cantidad cuando cambia el menú seleccionado (no se mezcla entre
-  // aperturas). `open` también lo cierra visualmente antes del reset, pero
-  // mantenemos el valor en 1 al reabrir.
   if (!open || !menu) return null;
 
   const lineTotal = menu.price_cents * quantity;
 
+  const allChoicesResolved =
+    menu.choice_groups.length === 0 ||
+    menu.choice_groups.every((g) => selections.has(g.choice_group_id));
+
+  const handleSelect = (
+    group: MenuDailyMenuChoiceGroup,
+    productId: string,
+    productName: string,
+  ) => {
+    setSelections((prev) => {
+      const next = new Map(prev);
+      next.set(group.choice_group_id, {
+        choice_group_id: group.choice_group_id,
+        choice_group_label: group.label,
+        product_id: productId,
+        product_name: productName,
+        modifiers: [],
+      });
+      return next;
+    });
+  };
+
   const handleAdd = () => {
+    if (!allChoicesResolved) return;
     addItem({
       id: crypto.randomUUID(),
       kind: "daily_menu",
@@ -45,6 +69,7 @@ export function DailyMenuSheet({
         label: c.label,
         description: c.description,
       })),
+      selected_choices: [...selections.values()],
       product_name: menu.name,
       unit_price_cents: menu.price_cents,
       quantity,
@@ -52,6 +77,7 @@ export function DailyMenuSheet({
       modifiers: [],
     });
     setQuantity(1);
+    setSelections(new Map());
     onOpenChange(false);
   };
 
@@ -204,63 +230,145 @@ export function DailyMenuSheet({
                 gap: 12,
               }}
             >
-              {menu.components.map((c, idx) => (
-                <li
-                  key={c.id}
-                  style={{
-                    display: "flex",
-                    gap: 12,
-                    alignItems: "flex-start",
-                    paddingBottom: 12,
-                    borderBottom:
-                      idx === menu.components.length - 1
-                        ? "none"
-                        : "1px solid var(--hairline)",
-                  }}
-                >
-                  <span
+              {menu.components
+                .filter((c) => c.kind !== "choice")
+                .map((c, idx) => (
+                  <li
+                    key={c.id}
                     style={{
-                      flexShrink: 0,
-                      width: 22,
-                      height: 22,
-                      borderRadius: 99,
-                      background: "#FFF0CF",
-                      color: "#8A5E18",
-                      fontSize: 11,
-                      fontWeight: 700,
                       display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
+                      gap: 12,
+                      alignItems: "flex-start",
+                      paddingBottom: 12,
+                      borderBottom: "1px solid var(--hairline)",
                     }}
                   >
-                    {idx + 1}
-                  </span>
-                  <div style={{ flex: 1 }}>
-                    <div
+                    <span
                       style={{
-                        fontSize: 14,
-                        fontWeight: 600,
-                        color: "var(--ink)",
+                        flexShrink: 0,
+                        width: 22,
+                        height: 22,
+                        borderRadius: 99,
+                        background: "#FFF0CF",
+                        color: "#8A5E18",
+                        fontSize: 11,
+                        fontWeight: 700,
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
                       }}
                     >
-                      {c.label}
-                    </div>
-                    {c.description && (
+                      {c.kind === "product" ? "✓" : idx + 1}
+                    </span>
+                    <div style={{ flex: 1 }}>
                       <div
                         style={{
-                          fontSize: 12.5,
-                          color: "var(--ink-2)",
-                          marginTop: 2,
-                          lineHeight: 1.4,
+                          fontSize: 14,
+                          fontWeight: 600,
+                          color: "var(--ink)",
                         }}
                       >
-                        {c.description}
+                        {c.kind === "product" && c.product_name
+                          ? `${c.label}: ${c.product_name}`
+                          : c.label}
                       </div>
-                    )}
-                  </div>
-                </li>
-              ))}
+                      {c.description && (
+                        <div
+                          style={{
+                            fontSize: 12.5,
+                            color: "var(--ink-2)",
+                            marginTop: 2,
+                            lineHeight: 1.4,
+                          }}
+                        >
+                          {c.description}
+                        </div>
+                      )}
+                    </div>
+                  </li>
+                ))}
             </ul>
+
+            {menu.choice_groups.map((group) => {
+              const selected = selections.get(group.choice_group_id);
+              return (
+                <div key={group.choice_group_id} style={{ marginTop: 16 }}>
+                  <div
+                    style={{
+                      fontSize: 12,
+                      fontWeight: 700,
+                      textTransform: "uppercase",
+                      letterSpacing: 0.5,
+                      color: "#8A5E18",
+                      marginBottom: 8,
+                    }}
+                  >
+                    {group.label}
+                  </div>
+                  <div
+                    style={{
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 6,
+                    }}
+                  >
+                    {group.options.map((opt) => {
+                      const isSelected =
+                        selected?.product_id === opt.product_id;
+                      return (
+                        <button
+                          key={opt.id}
+                          type="button"
+                          onClick={() =>
+                            handleSelect(
+                              group,
+                              opt.product_id!,
+                              opt.product_name ?? opt.label,
+                            )
+                          }
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 10,
+                            padding: "10px 12px",
+                            borderRadius: 12,
+                            border: isSelected
+                              ? "2px solid var(--accent)"
+                              : "1px solid var(--hairline-2)",
+                            background: isSelected
+                              ? "rgba(var(--accent-rgb, 0,0,0), 0.04)"
+                              : "var(--bg)",
+                            cursor: "pointer",
+                            textAlign: "left",
+                          }}
+                        >
+                          <span
+                            style={{
+                              width: 20,
+                              height: 20,
+                              borderRadius: 99,
+                              border: isSelected
+                                ? "6px solid var(--accent)"
+                                : "2px solid var(--hairline-2)",
+                              flexShrink: 0,
+                            }}
+                          />
+                          <span
+                            style={{
+                              fontSize: 14,
+                              fontWeight: isSelected ? 600 : 400,
+                              color: "var(--ink)",
+                            }}
+                          >
+                            {opt.product_name ?? opt.label}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
           </div>
 
           <div style={{ height: 12 }} />
@@ -330,16 +438,16 @@ export function DailyMenuSheet({
             </button>
           </div>
           <button
-            disabled={disabled}
+            disabled={disabled || !allChoicesResolved}
             onClick={handleAdd}
             style={{
               flex: 1,
               height: 48,
               borderRadius: 99,
-              background: disabled ? "#D8CFC0" : "var(--accent)",
+              background: disabled || !allChoicesResolved ? "#D8CFC0" : "var(--accent)",
               color: "#fff",
               border: "none",
-              cursor: disabled ? "not-allowed" : "pointer",
+              cursor: disabled || !allChoicesResolved ? "not-allowed" : "pointer",
               fontSize: 15,
               fontWeight: 600,
               letterSpacing: -0.1,

@@ -17,6 +17,7 @@ const item = (id: string, sub: number, cancelled = false): CuentaItem => ({
   station_id: null,
   cancelled_at: cancelled ? new Date().toISOString() : null,
   loaded_by: null,
+  seat_number: null,
 });
 
 describe("calculateTotals", () => {

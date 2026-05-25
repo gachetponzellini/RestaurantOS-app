@@ -2,11 +2,18 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
+import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { actionError, actionOk, type ActionResult } from "@/lib/actions";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 import { BUSINESS_ROLES, type BusinessRoleInput } from "@/lib/admin/roles";
+
+// Post-migration types not yet regenerated; cast to bypass strict table checks.
+// Remove after running `pnpm db:types` against a DB with 0045_rrhh applied.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type AnyClient = SupabaseClient<any, any, any>;
+const svc = () => createSupabaseServiceClient() as unknown as AnyClient;
 
 const FullNameSchema = z
   .string()
@@ -21,12 +28,20 @@ const PhoneSchema = z
   .optional()
   .transform((v) => (v === "" ? undefined : v));
 
+const PinSchema = z
+  .string()
+  .trim()
+  .optional()
+  .transform((v) => (v === "" ? undefined : v))
+  .refine((v) => !v || /^\d{4}$/.test(v), "El PIN debe ser de 4 dígitos numéricos.");
+
 const InviteInput = z.object({
   business_slug: z.string().min(1),
   email: z.string().email("Email inválido."),
   role: z.enum(BUSINESS_ROLES),
   full_name: FullNameSchema,
   phone: PhoneSchema,
+  pin: PinSchema,
 });
 
 export type InvitePayload = {
@@ -38,11 +53,12 @@ export type InvitePayload = {
 
 const CreateWithPasswordInput = z.object({
   business_slug: z.string().min(1),
-  email: z.string().email("Email inválido."),
-  password: z.string().min(8, "Contraseña muy corta (mínimo 8).").max(72),
+  email: z.string().email("Email inválido.").optional(),
+  password: z.string().min(8, "Contraseña muy corta (mínimo 8).").max(72).optional(),
   role: z.enum(BUSINESS_ROLES),
   full_name: FullNameSchema,
   phone: PhoneSchema,
+  pin: PinSchema,
 });
 
 export type CreateMemberPayload = {
@@ -66,7 +82,7 @@ async function assertCanManage(businessSlug: string) {
   } = await supabase.auth.getUser();
   if (!user) return { ok: false as const, error: "No autenticado." };
 
-  const service = createSupabaseServiceClient();
+  const service = svc();
   const { data: business } = await service
     .from("businesses")
     .select("id")
@@ -106,6 +122,7 @@ async function assertCanManage(businessSlug: string) {
 function revalidateEmpleados(slug: string) {
   revalidatePath(`/${slug}/admin/empleados`);
   revalidatePath(`/${slug}/admin/usuarios`);
+  revalidatePath(`/${slug}/admin/rrhh`);
 }
 
 export async function inviteBusinessMemberByAdmin(
@@ -115,12 +132,23 @@ export async function inviteBusinessMemberByAdmin(
   if (!parsed.success) {
     return actionError(parsed.error.issues[0]?.message ?? "Datos inválidos.");
   }
-  const { business_slug, email, role, full_name, phone } = parsed.data;
+  const { business_slug, email, role, full_name, phone, pin } = parsed.data;
 
   const guard = await assertCanManage(business_slug);
   if (!guard.ok) return actionError(guard.error);
 
-  const service = createSupabaseServiceClient();
+  const service = svc();
+
+  if (pin) {
+    const { data: pinConflict } = await service
+      .from("business_users")
+      .select("user_id")
+      .eq("business_id", guard.businessId)
+      .eq("pin", pin)
+      .is("disabled_at", null)
+      .maybeSingle();
+    if (pinConflict) return actionError("Ese PIN ya está en uso en este negocio.");
+  }
 
   const {
     data: { users: allUsers },
@@ -184,7 +212,7 @@ export async function inviteBusinessMemberByAdmin(
       role,
       full_name,
       phone: phone ?? null,
-      // Reactivar membership si previamente fue deshabilitada (re-invite).
+      pin: pin ?? null,
       disabled_at: null,
     },
     { onConflict: "business_id,user_id" },
@@ -253,26 +281,45 @@ export async function createBusinessMemberWithPassword(
       parsed.error.issues[0]?.message ?? "Datos inválidos.",
     );
   }
-  const { business_slug, email, password, role, full_name, phone } = parsed.data;
+  const { business_slug, role, full_name, phone, pin } = parsed.data;
+  let { email, password } = parsed.data;
 
   const guard = await assertCanManage(business_slug);
   if (!guard.ok) return actionError(guard.error);
 
-  const service = createSupabaseServiceClient();
+  const service = svc();
+
+  if (pin) {
+    const { data: pinConflict } = await service
+      .from("business_users")
+      .select("user_id")
+      .eq("business_id", guard.businessId)
+      .eq("pin", pin)
+      .is("disabled_at", null)
+      .maybeSingle();
+    if (pinConflict) return actionError("Ese PIN ya está en uso en este negocio.");
+  }
+
+  if (role === "personal") {
+    if (!pin) return actionError("El rol Personal requiere un PIN de 4 dígitos.");
+    email = `personal-${pin}@${business_slug}.internal`;
+    password = crypto.randomUUID().slice(0, 16);
+  } else {
+    if (!email) return actionError("El email es obligatorio.");
+    if (!password) return actionError("La contraseña es obligatoria.");
+  }
 
   const {
     data: { users: allUsers },
   } = await service.auth.admin.listUsers({ perPage: 200 });
   const existing = allUsers.find(
-    (u) => u.email?.toLowerCase() === email.toLowerCase(),
+    (u) => u.email?.toLowerCase() === email!.toLowerCase(),
   );
 
   let userId: string;
   let wasCreated = false;
 
   if (existing) {
-    // Actualizamos la contraseña del usuario existente así el admin puede
-    // compartir la nueva. También marcamos welcomed_at si no lo tenía.
     const { error: updErr } = await service.auth.admin.updateUserById(
       existing.id,
       {
@@ -295,8 +342,8 @@ export async function createBusinessMemberWithPassword(
   } else {
     const { data: created, error: createErr } =
       await service.auth.admin.createUser({
-        email,
-        password,
+        email: email!,
+        password: password!,
         email_confirm: true,
         user_metadata: {
           full_name,
@@ -314,7 +361,7 @@ export async function createBusinessMemberWithPassword(
   const { error: userUpsertErr } = await service
     .from("users")
     .upsert(
-      { id: userId, email },
+      { id: userId, email: email! },
       { onConflict: "id" },
     );
   if (userUpsertErr) {
@@ -329,7 +376,7 @@ export async function createBusinessMemberWithPassword(
       role,
       full_name,
       phone: phone ?? null,
-      // Reactivar si la membership existía deshabilitada.
+      pin: pin ?? null,
       disabled_at: null,
     },
     { onConflict: "business_id,user_id" },
@@ -341,8 +388,8 @@ export async function createBusinessMemberWithPassword(
 
   revalidateEmpleados(business_slug);
   return actionOk({
-    email,
-    password,
+    email: email!,
+    password: password!,
     role,
     wasCreated,
   });
@@ -367,7 +414,7 @@ export async function disableBusinessMember(
     return actionError("No podés deshabilitarte a vos mismo.");
   }
 
-  const service = createSupabaseServiceClient();
+  const service = svc();
 
   const { error } = await service
     .from("business_users")
@@ -390,7 +437,7 @@ export async function enableBusinessMember(
   const guard = await assertCanManage(businessSlug);
   if (!guard.ok) return actionError(guard.error);
 
-  const service = createSupabaseServiceClient();
+  const service = svc();
 
   const { error } = await service
     .from("business_users")
@@ -423,7 +470,7 @@ export async function updateMemberProfile(
   if (phone !== undefined) patch.phone = phone ?? null;
   if (Object.keys(patch).length === 0) return actionOk(null);
 
-  const service = createSupabaseServiceClient();
+  const service = svc();
   const { error } = await service
     .from("business_users")
     .update(patch)

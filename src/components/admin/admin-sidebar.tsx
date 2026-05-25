@@ -7,18 +7,19 @@ import { useEffect, useRef, useState } from "react";
 import { Menu } from "@base-ui/react/menu";
 import {
   ArrowLeft,
-  BarChart3,
+  // BarChart3,
   CalendarDays,
+  Clock,
   History,
   LayoutDashboard,
   LayoutGrid,
   LogOut,
-  Megaphone,
+  // Megaphone,
   MessageSquare,
   Package,
   Settings,
   ShoppingBag,
-  Tag,
+  // Tag,
   Users,
   Wallet,
 } from "lucide-react";
@@ -92,24 +93,25 @@ function buildNav(slug: string, showBusinessTools: boolean): NavItem[] {
       icon: <CalendarDays className="size-5" strokeWidth={1.75} />,
       match: (p) => p.startsWith(`${adminBase}/reservas`),
     },
-    {
-      href: `${adminBase}/promociones`,
-      label: "Promociones",
-      icon: <Tag className="size-5" strokeWidth={1.75} />,
-      match: (p) => p.startsWith(`${adminBase}/promociones`),
-    },
-    {
-      href: `${adminBase}/campanas`,
-      label: "Campañas",
-      icon: <Megaphone className="size-5" strokeWidth={1.75} />,
-      match: (p) => p.startsWith(`${adminBase}/campanas`),
-    },
-    {
-      href: `${adminBase}/reportes`,
-      label: "Reportes",
-      icon: <BarChart3 className="size-5" strokeWidth={1.75} />,
-      match: (p) => p.startsWith(`${adminBase}/reportes`),
-    },
+    // MVP: ocultos hasta validar flujos core
+    // {
+    //   href: `${adminBase}/promociones`,
+    //   label: "Promociones",
+    //   icon: <Tag className="size-5" strokeWidth={1.75} />,
+    //   match: (p) => p.startsWith(`${adminBase}/promociones`),
+    // },
+    // {
+    //   href: `${adminBase}/campanas`,
+    //   label: "Campañas",
+    //   icon: <Megaphone className="size-5" strokeWidth={1.75} />,
+    //   match: (p) => p.startsWith(`${adminBase}/campanas`),
+    // },
+    // {
+    //   href: `${adminBase}/reportes`,
+    //   label: "Reportes",
+    //   icon: <BarChart3 className="size-5" strokeWidth={1.75} />,
+    //   match: (p) => p.startsWith(`${adminBase}/reportes`),
+    // },
     {
       href: `${adminBase}/chatbot`,
       label: "Chatbot",
@@ -126,10 +128,11 @@ function buildNav(slug: string, showBusinessTools: boolean): NavItem[] {
         match: (p) => p.startsWith(`${adminBase}/cajas`),
       },
       {
-        href: `${adminBase}/empleados`,
-        label: "Empleados",
-        icon: <Users className="size-5" strokeWidth={1.75} />,
+        href: `${adminBase}/rrhh`,
+        label: "RRHH",
+        icon: <Clock className="size-5" strokeWidth={1.75} />,
         match: (p) =>
+          p.startsWith(`${adminBase}/rrhh`) ||
           p.startsWith(`${adminBase}/empleados`) ||
           p.startsWith(`${adminBase}/usuarios`),
       },

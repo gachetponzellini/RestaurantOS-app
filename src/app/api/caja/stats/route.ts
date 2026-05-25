@@ -2,32 +2,29 @@ import { NextResponse } from "next/server";
 
 import { ensureMozoAccess } from "@/lib/mozo/auth";
 import {
-  getMovimientosByTurno,
-  getPaymentsByTurno,
-  getTurnoLiveStats,
+  getCajaLiveStats,
+  getMovimientosPeriodoActual,
+  getPaymentsPeriodoActual,
 } from "@/lib/caja/queries";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 
-// Endpoint de polling para stats vivos de un turno. El cliente lo llama cada
-// 30s. Cross-tenant: el turno tiene que pertenecer al business del usuario,
-// y el usuario tiene que ser miembro (mozo+) de ese business.
 export async function GET(req: Request) {
   const url = new URL(req.url);
-  const turnoId = url.searchParams.get("turno");
-  if (!turnoId) {
-    return NextResponse.json({ error: "missing turno" }, { status: 400 });
+  const cajaId = url.searchParams.get("caja");
+  if (!cajaId) {
+    return NextResponse.json({ error: "missing caja" }, { status: 400 });
   }
 
   const service = createSupabaseServiceClient();
-  const { data: turnoRow } = await service
-    .from("caja_turnos")
+  const { data: cajaRow } = await service
+    .from("cajas")
     .select("id, business_id")
-    .eq("id", turnoId)
+    .eq("id", cajaId)
     .maybeSingle();
-  if (!turnoRow) {
+  if (!cajaRow) {
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }
-  const businessId = (turnoRow as { business_id: string }).business_id;
+  const businessId = (cajaRow as { business_id: string }).business_id;
 
   const { data: bizRow } = await service
     .from("businesses")
@@ -38,20 +35,16 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }
 
-  // ensureMozoAccess valida sesión + membership; redirige si falla, lo que
-  // en un endpoint REST devuelve 307. Atajamos para responder 401 limpio.
   try {
     await ensureMozoAccess(businessId, bizRow.slug as string);
   } catch {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
-  // Stats + movimientos + payments en un solo fetch para no duplicar polling.
-  // La card del turno los mezcla en una lista cronológica unificada.
   const [stats, movimientos, payments] = await Promise.all([
-    getTurnoLiveStats(turnoId, businessId),
-    getMovimientosByTurno(turnoId, businessId),
-    getPaymentsByTurno(turnoId, businessId),
+    getCajaLiveStats(cajaId, businessId),
+    getMovimientosPeriodoActual(cajaId, businessId),
+    getPaymentsPeriodoActual(cajaId, businessId),
   ]);
   return NextResponse.json({ stats, movimientos, payments });
 }

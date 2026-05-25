@@ -12,6 +12,7 @@ import {
   MoreHorizontal,
   QrCode,
   Trash2,
+  Wallet,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -50,6 +51,7 @@ import type {
   OrderSplit,
   PaymentMethod,
 } from "@/lib/billing/types";
+import type { PaymentMethodConfig } from "@/lib/caja/types";
 import { formatCurrency } from "@/lib/currency";
 import { cn } from "@/lib/utils";
 
@@ -86,7 +88,7 @@ export function CobrarDesktopClient({
     splits.find((s) => s.status !== "paid" && s.status !== "cancelled")?.id ??
       null,
   );
-  const [cajaTurnoId, setCajaTurnoId] = useState<string>(init.cajas[0].id);
+  const [cajaId, setCajaId] = useState<string>(init.cajas[0].id);
   const activeSplit = splits.find((s) => s.id === activeSplitId) ?? null;
 
   const total = cuenta.totals.total_cents;
@@ -149,8 +151,8 @@ export function CobrarDesktopClient({
                 Caja para registrar el cobro
               </Label>
               <Select
-                value={cajaTurnoId}
-                onValueChange={(v) => v && setCajaTurnoId(v)}
+                value={cajaId}
+                onValueChange={(v) => v && setCajaId(v)}
               >
                 <SelectTrigger className="mt-1.5">
                   <SelectValue />
@@ -158,7 +160,7 @@ export function CobrarDesktopClient({
                 <SelectContent>
                   {init.cajas.map((c) => (
                     <SelectItem key={c.id} value={c.id}>
-                      {c.caja_name} · {c.encargado_name ?? "—"}
+                      {c.name}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -225,9 +227,10 @@ export function CobrarDesktopClient({
               key={activeSplit.id}
               split={activeSplit}
               orderId={cuenta.order.id}
-              cajaTurnoId={cajaTurnoId}
+              cajaId={cajaId}
               slug={slug}
               isImplicit={init.hasImplicitSplit}
+              methodConfigs={init.methodConfigs}
               onPaid={({ orderClosed }) => {
                 if (orderClosed) {
                   toast.success("Mesa cobrada");
@@ -403,34 +406,51 @@ const METHODS: Array<{
     icon: QrCode,
   },
   {
+    value: "transfer",
+    label: "Transferencia",
+    description: "CBU/CVU o alias. Anotá la referencia.",
+    icon: Wallet,
+  },
+  {
     value: "other",
     label: "Otro",
-    description: "Cheque, transferencia, cortesía, etc.",
+    description: "Cheque, cortesía, etc.",
     icon: MoreHorizontal,
   },
 ];
 
+function calculateAdjustment(baseCents: number, percent: number): { adjustmentCents: number; finalCents: number } {
+  const adjustmentCents = Math.round(baseCents * percent / 100);
+  return { adjustmentCents, finalCents: baseCents + adjustmentCents };
+}
+
 function CobrarSplitPanel({
   split,
   orderId,
-  cajaTurnoId,
+  cajaId,
   slug,
   isImplicit,
+  methodConfigs,
   onPaid,
   onClear,
 }: {
   split: OrderSplit;
   orderId: string;
-  cajaTurnoId: string;
+  cajaId: string;
   slug: string;
   isImplicit: boolean;
+  methodConfigs: PaymentMethodConfig[];
   onPaid: (result: { orderClosed: boolean }) => void;
   onClear: () => void;
 }) {
   const [, startTransition] = useTransition();
   const remaining = split.expected_amount_cents - split.paid_amount_cents;
   const [method, setMethod] = useState<PaymentMethod | null>(null);
+  const configForMethod = methodConfigs.find((c) => c.method === method);
+  const adjustmentPercent = configForMethod?.adjustment_percent ?? 0;
+  const { adjustmentCents, finalCents } = calculateAdjustment(remaining, adjustmentPercent);
   const [amount, setAmount] = useState(remaining);
+  const [hasSetAmount, setHasSetAmount] = useState(false);
   const [tip, setTip] = useState(0);
   const [lastFour, setLastFour] = useState("");
   const [cardBrand, setCardBrand] = useState<
@@ -439,6 +459,12 @@ function CobrarSplitPanel({
   const [notes, setNotes] = useState("");
   const [mpInitPoint, setMpInitPoint] = useState<string | null>(null);
   const [mpPaymentId, setMpPaymentId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (method && !hasSetAmount) {
+      setAmount(finalCents);
+    }
+  }, [method, finalCents, hasSetAmount]);
 
   useEffect(() => {
     if (!mpPaymentId) return;
@@ -478,7 +504,7 @@ function CobrarSplitPanel({
           method,
           amount_cents: amount,
           tip_cents: tip,
-          caja_turno_id: cajaTurnoId,
+          caja_id: cajaId,
           slug,
         });
         if (!r.ok) {
@@ -497,14 +523,16 @@ function CobrarSplitPanel({
         method,
         amount_cents: amount,
         tip_cents: tip,
-        caja_turno_id: cajaTurnoId,
+        caja_id: cajaId,
         last_four:
           method === "card_manual" && lastFour.length === 4
             ? lastFour
             : undefined,
         card_brand: method === "card_manual" ? cardBrand : undefined,
         notes:
-          method === "other" || method === "card_manual" ? notes : undefined,
+          method === "other" || method === "card_manual" || method === "transfer" ? notes : undefined,
+        adjustment_percent: adjustmentPercent,
+        adjustment_cents: adjustmentCents,
         slug,
       });
       if (!r.ok) {
@@ -600,11 +628,14 @@ function CobrarSplitPanel({
         <div className="space-y-2">
           {METHODS.map((m) => {
             const Icon = m.icon;
+            const mc = methodConfigs.find((c) => c.method === m.value);
+            const adj = mc?.adjustment_percent ?? 0;
+            const { finalCents: adjFinal } = calculateAdjustment(remaining, adj);
             return (
               <button
                 key={m.value}
                 type="button"
-                onClick={() => setMethod(m.value)}
+                onClick={() => { setMethod(m.value); setHasSetAmount(false); }}
                 className="flex w-full items-center gap-3 rounded-xl bg-white p-3 text-left ring-1 ring-zinc-200/70 transition hover:bg-zinc-50 hover:ring-zinc-300"
               >
                 <div className="flex size-10 flex-shrink-0 items-center justify-center rounded-full bg-zinc-100 text-zinc-700">
@@ -612,11 +643,18 @@ function CobrarSplitPanel({
                 </div>
                 <div className="min-w-0 flex-1">
                   <p className="text-sm font-semibold text-zinc-900">
-                    {m.label}
+                    {mc?.label ?? m.label}
+                    {adj !== 0 && (
+                      <span className={cn("ml-1 text-xs font-medium", adj < 0 ? "text-emerald-600" : "text-rose-600")}>
+                        {adj > 0 ? "+" : ""}{adj}%
+                      </span>
+                    )}
                   </p>
                   <p className="text-xs text-zinc-500">{m.description}</p>
                 </div>
-                <ArrowRight className="size-4 text-zinc-400" />
+                <span className="text-sm font-semibold text-zinc-900 tabular-nums">
+                  {formatCurrency(adjFinal)}
+                </span>
               </button>
             );
           })}
@@ -655,21 +693,26 @@ function CobrarSplitPanel({
             <Input
               type="number"
               value={amount / 100}
-              onChange={(e) =>
-                setAmount(
-                  Math.max(0, Math.round(Number(e.target.value) * 100)),
-                )
-              }
+              onChange={(e) => {
+                setAmount(Math.max(0, Math.round(Number(e.target.value) * 100)));
+                setHasSetAmount(true);
+              }}
               inputMode="decimal"
             />
-            {method === "cash" && amount > remaining && (
+            {adjustmentPercent !== 0 && (
+              <p className={cn("text-xs font-medium", adjustmentPercent < 0 ? "text-emerald-700" : "text-rose-600")}>
+                {adjustmentPercent < 0 ? "Descuento" : "Recargo"} {adjustmentPercent > 0 ? "+" : ""}{adjustmentPercent}%: {formatCurrency(adjustmentCents)}
+                <span className="ml-1 text-zinc-500">(base {formatCurrency(remaining)})</span>
+              </p>
+            )}
+            {method === "cash" && amount > finalCents && (
               <p className="text-xs font-semibold text-emerald-700">
-                Vuelto: {formatCurrency(amount - remaining)}
+                Vuelto: {formatCurrency(amount - finalCents)}
               </p>
             )}
           </div>
 
-          {(method === "cash" || method === "card_manual") && (
+          {(method === "cash" || method === "card_manual" || method === "transfer") && (
             <div className="grid gap-1.5">
               <Label>Propina (opcional)</Label>
               <Input
@@ -726,11 +769,11 @@ function CobrarSplitPanel({
             </>
           )}
 
-          {(method === "other" || method === "card_manual") && (
+          {(method === "other" || method === "card_manual" || method === "transfer") && (
             <div className="grid gap-1.5">
               <Label>
                 Notas
-                {method === "other" && (
+                {(method === "other" || method === "transfer") && (
                   <span className="ml-1 text-rose-600">*</span>
                 )}
               </Label>
@@ -739,9 +782,11 @@ function CobrarSplitPanel({
                 onChange={(e) => setNotes(e.target.value)}
                 rows={2}
                 placeholder={
-                  method === "other"
-                    ? "Cheque #1234, transferencia desde…"
-                    : "Opcional"
+                  method === "transfer"
+                    ? "Alias o referencia de la transferencia…"
+                    : method === "other"
+                      ? "Cheque #1234, cortesía…"
+                      : "Opcional"
                 }
               />
             </div>
@@ -751,7 +796,7 @@ function CobrarSplitPanel({
             className="w-full"
             disabled={
               amount <= 0 ||
-              (method === "other" && notes.trim() === "") ||
+              ((method === "other" || method === "transfer") && notes.trim() === "") ||
               (method === "card_manual" &&
                 lastFour !== "" &&
                 lastFour.length !== 4)

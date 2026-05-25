@@ -48,7 +48,7 @@ export default async function OrderDetailPage({
   const tz = business.timezone;
   const status = order.status as OrderStatus;
   const history = (order.order_status_history ?? []).toSorted(
-    (a, b) =>
+    (a: any, b: any) =>
       new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
   );
 
@@ -97,60 +97,91 @@ export default async function OrderDetailPage({
       )}
 
       <Surface padding="default">
-        <SurfaceHeader
-          eyebrow={`${order.order_items.length} ${order.order_items.length === 1 ? "ítem" : "ítems"}`}
-          title="Detalle del pedido"
-        />
-        <ul className="mt-5 space-y-4">
-          {order.order_items.map((item) => {
-            const menuSnap = item.daily_menu_snapshot as
-              | {
-                  name?: string;
-                  components?: {
-                    label: string;
-                    description: string | null;
-                  }[];
-                }
-              | null;
-            const isMenu = !!item.daily_menu_id;
-            return (
-              <li key={item.id} className="grid gap-1">
-                <div className="flex items-start justify-between gap-2">
-                  <span className="font-semibold text-zinc-900">
-                    {item.quantity}× {item.product_name}
-                    {isMenu && (
-                      <span className="ml-2 rounded-full bg-amber-100 px-2 py-0.5 text-[0.6rem] font-semibold uppercase tracking-wider text-amber-900">
-                        Menú del día
-                      </span>
-                    )}
-                  </span>
-                  <span className="shrink-0 font-semibold tabular-nums text-zinc-900">
-                    {formatCurrency(item.subtotal_cents)}
-                  </span>
-                </div>
-                {isMenu && menuSnap?.components && (
-                  <ul className="ml-4 grid gap-0.5 text-xs text-zinc-500">
-                    {menuSnap.components.map((c, idx) => (
-                      <li key={idx}>· {c.label}</li>
-                    ))}
-                  </ul>
-                )}
-                {item.order_item_modifiers.length > 0 && (
-                  <p className="text-xs font-medium uppercase tracking-wider text-zinc-500">
-                    {item.order_item_modifiers
-                      .map((m) => m.modifier_name)
-                      .join(" · ")}
-                  </p>
-                )}
-                {item.notes && (
-                  <p className="text-xs italic text-zinc-500">
-                    &quot;{item.notes}&quot;
-                  </p>
-                )}
-              </li>
-            );
-          })}
-        </ul>
+        {(() => {
+          const allItems = order.order_items ?? [];
+          const parentItems = allItems.filter((i: any) => !i.is_combo_component);
+          return (
+            <>
+              <SurfaceHeader
+                eyebrow={`${parentItems.length} ${parentItems.length === 1 ? "ítem" : "ítems"}`}
+                title="Detalle del pedido"
+              />
+              <ul className="mt-5 space-y-4">
+                {parentItems.map((item: any) => {
+                  const menuSnap = item.daily_menu_snapshot as
+                    | {
+                        name?: string;
+                        components?: {
+                          label: string;
+                          description: string | null;
+                        }[];
+                      }
+                    | null;
+                  const isMenu = !!item.daily_menu_id;
+                  const children = allItems.filter(
+                    (c: any) => c.parent_order_item_id === item.id,
+                  );
+                  return (
+                    <li key={item.id} className="grid gap-1">
+                      <div className="flex items-start justify-between gap-2">
+                        <span className="font-semibold text-zinc-900">
+                          {item.quantity}× {item.product_name}
+                          {isMenu && (
+                            <span className="ml-2 rounded-full bg-amber-100 px-2 py-0.5 text-[0.6rem] font-semibold uppercase tracking-wider text-amber-900">
+                              Menú del día
+                            </span>
+                          )}
+                        </span>
+                        <span className="shrink-0 font-semibold tabular-nums text-zinc-900">
+                          {formatCurrency(item.subtotal_cents)}
+                        </span>
+                      </div>
+                      {isMenu && menuSnap?.components && (
+                        <ul className="ml-4 grid gap-0.5 text-xs text-zinc-500">
+                          {menuSnap.components.map(
+                            (c: { label: string }, idx: number) => (
+                              <li key={idx}>· {c.label}</li>
+                            ),
+                          )}
+                        </ul>
+                      )}
+                      {children.length > 0 && (
+                        <ul className="ml-4 mt-1 grid gap-1 text-xs text-zinc-500">
+                          {children.map((child: any) => (
+                            <li key={child.id} className="flex items-baseline justify-between">
+                              <span>
+                                ↳ {child.quantity}× {child.product_name}
+                              </span>
+                              {(child.order_item_modifiers ?? []).length > 0 && (
+                                <span className="ml-2 text-[11px]">
+                                  {child.order_item_modifiers
+                                    .map((m: any) => m.modifier_name)
+                                    .join(" · ")}
+                                </span>
+                              )}
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                      {item.order_item_modifiers.length > 0 && (
+                        <p className="text-xs font-medium uppercase tracking-wider text-zinc-500">
+                          {item.order_item_modifiers
+                            .map((m: any) => m.modifier_name)
+                            .join(" · ")}
+                        </p>
+                      )}
+                      {item.notes && (
+                        <p className="text-xs italic text-zinc-500">
+                          &quot;{item.notes}&quot;
+                        </p>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            </>
+          );
+        })()}
         <dl className="mt-6 space-y-2 border-t border-zinc-100 pt-5 text-sm tabular-nums">
           <div className="flex justify-between">
             <dt className="text-zinc-500">Subtotal</dt>
@@ -176,7 +207,7 @@ export default async function OrderDetailPage({
       <Surface padding="default">
         <SurfaceHeader eyebrow="Historial" title="Línea de tiempo" />
         <ol className="mt-5 space-y-3 text-sm">
-          {history.map((h, idx) => (
+          {history.map((h: any, idx: number) => (
             <li key={idx} className="flex items-start gap-3">
               <span className="mt-1 inline-flex size-2 shrink-0 rounded-full bg-zinc-900" />
               <div className="flex flex-1 flex-wrap items-baseline justify-between gap-2">

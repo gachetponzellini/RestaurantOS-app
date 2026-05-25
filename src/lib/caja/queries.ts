@@ -1,29 +1,39 @@
 import "server-only";
 
+import type { SupabaseClient } from "@supabase/supabase-js";
+
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 
 import { calculateExpectedCash } from "./expected-cash";
 import type {
-  ActiveTurnoView,
   Caja,
+  CajaConEstado,
+  CajaCorte,
+  CajaLiveStats,
   CajaMovimiento,
-  CajaTurno,
   PaymentMethod,
-  TurnoLiveStats,
+  PaymentMethodConfig,
 } from "./types";
+
+// Post-migration types not yet regenerated; cast to bypass strict table checks.
+// Remove after running `pnpm db:types` against a DB with 0044 applied.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type AnyClient = SupabaseClient<any, any, any>;
+const db = () => createSupabaseServiceClient() as unknown as AnyClient;
 
 const EMPTY_BY_METHOD: Record<PaymentMethod, number> = {
   cash: 0,
   card_manual: 0,
   mp_link: 0,
   mp_qr: 0,
+  transfer: 0,
   other: 0,
 };
 
 export async function getCajasForBusiness(
   businessId: string,
 ): Promise<Caja[]> {
-  const service = createSupabaseServiceClient();
+  const service = db();
   const { data } = await service
     .from("cajas")
     .select("id, business_id, name, is_active, sort_order")
@@ -34,14 +44,10 @@ export async function getCajasForBusiness(
   return (data ?? []) as Caja[];
 }
 
-/**
- * Trae todas las cajas del business (activas + inactivas), pensada para
- * la pantalla de gestión donde el admin ve también las pausadas.
- */
 export async function getAllCajasForBusiness(
   businessId: string,
 ): Promise<Caja[]> {
-  const service = createSupabaseServiceClient();
+  const service = db();
   const { data } = await service
     .from("cajas")
     .select("id, business_id, name, is_active, sort_order")
@@ -52,154 +58,80 @@ export async function getAllCajasForBusiness(
   return (data ?? []) as Caja[];
 }
 
-export async function getActiveTurnos(
+async function getUltimoCorte(
+  cajaId: string,
   businessId: string,
-): Promise<ActiveTurnoView[]> {
-  const service = createSupabaseServiceClient();
+): Promise<CajaCorte | null> {
+  const service = db();
   const { data } = await service
-    .from("caja_turnos")
-    .select(
-      "id, caja_id, business_id, encargado_id, opening_cash_cents, expected_cash_cents, closing_cash_cents, difference_cents, closing_notes, status, opened_at, closed_at, cajas!inner(name)",
-    )
+    .from("caja_cortes")
+    .select("*")
+    .eq("caja_id", cajaId)
     .eq("business_id", businessId)
-    .eq("status", "open")
-    .order("opened_at", { ascending: true });
-
-  if (!data || data.length === 0) return [];
-
-  const encargadoIds = Array.from(
-    new Set(data.map((row) => (row as { encargado_id: string }).encargado_id)),
-  );
-  const { data: encargados } = await service
-    .from("users")
-    .select("id, full_name")
-    .in("id", encargadoIds);
-  const nameById = new Map(
-    (encargados ?? []).map((u) => [u.id as string, u.full_name as string | null]),
-  );
-
-  return data.map((row) => {
-    const r = row as unknown as CajaTurno & {
-      cajas: { name: string } | { name: string }[];
-    };
-    const cajaName = Array.isArray(r.cajas) ? r.cajas[0].name : r.cajas.name;
-    return {
-      id: r.id,
-      caja_id: r.caja_id,
-      business_id: r.business_id,
-      encargado_id: r.encargado_id,
-      opening_cash_cents: r.opening_cash_cents,
-      expected_cash_cents: r.expected_cash_cents,
-      closing_cash_cents: r.closing_cash_cents,
-      difference_cents: r.difference_cents,
-      closing_notes: r.closing_notes,
-      status: r.status,
-      opened_at: r.opened_at,
-      closed_at: r.closed_at,
-      caja_name: cajaName,
-      encargado_name: nameById.get(r.encargado_id) ?? null,
-    };
-  });
-}
-
-/**
- * Carga un turno por id con cross-tenant defense (chequea business_id).
- * Devuelve null si no existe o pertenece a otro business.
- */
-export async function getTurnoById(
-  turnoId: string,
-  businessId: string,
-): Promise<CajaTurno | null> {
-  const service = createSupabaseServiceClient();
-  const { data } = await service
-    .from("caja_turnos")
-    .select(
-      "id, caja_id, business_id, encargado_id, opening_cash_cents, expected_cash_cents, closing_cash_cents, difference_cents, closing_notes, status, opened_at, closed_at",
-    )
-    .eq("id", turnoId)
+    .order("created_at", { ascending: false })
+    .limit(1)
     .maybeSingle();
-  if (!data) return null;
-  const row = data as CajaTurno;
-  if (row.business_id !== businessId) return null;
-  return row;
+  return data as CajaCorte | null;
 }
 
-/**
- * Turnos cerrados del día (calendario local del business — pero usamos
- * UTC y filtramos por opened_at >= hoy 00:00 UTC para mantenerlo simple).
- * Devuelve los snapshots con encargado_name y caja_name resueltos para
- * mostrar en el board admin.
- */
-export async function getTurnosCerradosHoy(
+export async function getCajasConEstado(
   businessId: string,
-): Promise<ActiveTurnoView[]> {
-  const service = createSupabaseServiceClient();
-  const todayStart = new Date();
-  todayStart.setHours(0, 0, 0, 0);
+): Promise<CajaConEstado[]> {
+  const cajas = await getCajasForBusiness(businessId);
+  const service = db();
 
-  const { data } = await service
-    .from("caja_turnos")
-    .select(
-      "id, caja_id, business_id, encargado_id, opening_cash_cents, expected_cash_cents, closing_cash_cents, difference_cents, closing_notes, status, opened_at, closed_at, cajas!inner(name)",
-    )
-    .eq("business_id", businessId)
-    .eq("status", "closed")
-    .gte("opened_at", todayStart.toISOString())
-    .order("closed_at", { ascending: false });
+  const results: CajaConEstado[] = [];
+  for (const caja of cajas) {
+    const { data: corte } = await service
+      .from("caja_cortes")
+      .select("*")
+      .eq("caja_id", caja.id)
+      .eq("business_id", businessId)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
 
-  if (!data || data.length === 0) return [];
+    const ultimoCorte = corte as CajaCorte | null;
+    const { data: cajaRow } = await service
+      .from("cajas")
+      .select("created_at")
+      .eq("id", caja.id)
+      .single();
+    const cajaCreatedAt = (cajaRow as { created_at: string } | null)?.created_at ?? new Date().toISOString();
 
-  const encargadoIds = Array.from(
-    new Set(data.map((row) => (row as { encargado_id: string }).encargado_id)),
-  );
-  const { data: encargados } = await service
-    .from("users")
-    .select("id, full_name")
-    .in("id", encargadoIds);
-  const nameById = new Map(
-    (encargados ?? []).map((u) => [u.id as string, u.full_name as string | null]),
-  );
+    results.push({
+      ...caja,
+      ultimo_corte: ultimoCorte,
+      periodo_desde: ultimoCorte?.created_at ?? cajaCreatedAt,
+    });
+  }
 
-  return data.map((row) => {
-    const r = row as unknown as CajaTurno & {
-      cajas: { name: string } | { name: string }[];
-    };
-    const cajaName = Array.isArray(r.cajas) ? r.cajas[0].name : r.cajas.name;
-    return {
-      ...r,
-      caja_name: cajaName,
-      encargado_name: nameById.get(r.encargado_id) ?? null,
-    };
-  });
+  return results;
 }
 
-export async function getMovimientosByTurno(
-  turnoId: string,
+export async function getMovimientosPeriodoActual(
+  cajaId: string,
   businessId: string,
 ): Promise<CajaMovimiento[]> {
-  const turno = await getTurnoById(turnoId, businessId);
-  if (!turno) return [];
-  const service = createSupabaseServiceClient();
-  const { data } = await service
+  const ultimoCorte = await getUltimoCorte(cajaId, businessId);
+  const service = db();
+
+  let query = service
     .from("caja_movimientos")
-    .select(
-      "id, caja_turno_id, business_id, kind, amount_cents, reason, created_by, created_at",
-    )
-    .eq("caja_turno_id", turnoId)
+    .select("id, caja_id, business_id, kind, amount_cents, reason, created_by, created_at")
+    .eq("caja_id", cajaId)
+    .eq("business_id", businessId)
     .order("created_at", { ascending: true });
+
+  if (ultimoCorte) {
+    query = query.gt("created_at", ultimoCorte.created_at);
+  }
+
+  const { data } = await query;
   return (data ?? []) as CajaMovimiento[];
 }
 
-/**
- * Payments paid del turno con la info que le interesa al staff: mesa
- * (si es dine_in), mozo atribuido, cliente, método, monto + propina.
- *
- * Usado por la tab Caja para listar cada cobro como un movimiento más
- * dentro de la lista cronológica del turno (junto a sangrías e ingresos).
- *
- * Cross-tenant: filtra por `business_id` del turno antes de leer.
- */
-export type TurnoPayment = {
+export type CajaPayment = {
   id: string;
   method: PaymentMethod;
   amount_cents: number;
@@ -213,24 +145,25 @@ export type TurnoPayment = {
   attributed_mozo_name: string | null;
 };
 
-export async function getPaymentsByTurno(
-  turnoId: string,
+export async function getPaymentsPeriodoActual(
+  cajaId: string,
   businessId: string,
-): Promise<TurnoPayment[]> {
-  const turno = await getTurnoById(turnoId, businessId);
-  if (!turno) return [];
-  const service = createSupabaseServiceClient();
+): Promise<CajaPayment[]> {
+  const ultimoCorte = await getUltimoCorte(cajaId, businessId);
+  const service = db();
 
-  // Trae payments + order (mesa label, customer_name, delivery_type, mozo).
-  // Solo "paid" — los pending/refunded no son ingresos reales.
-  const { data } = await service
+  let query = service
     .from("payments")
     .select(
       "id, method, amount_cents, tip_cents, created_at, attributed_mozo_id, order_id, orders!inner(order_number, delivery_type, customer_name, table_id, tables!orders_table_id_fkey(label))",
     )
-    .eq("caja_turno_id", turnoId)
+    .eq("caja_id", cajaId)
     .eq("payment_status", "paid")
     .order("created_at", { ascending: true });
+
+  if (ultimoCorte) {
+    query = query.gt("created_at", ultimoCorte.created_at);
+  }
 
   type Row = {
     id: string;
@@ -254,9 +187,10 @@ export async function getPaymentsByTurno(
       tables: { label: string } | { label: string }[] | null;
     }[] | null;
   };
+
+  const { data } = await query;
   const rows = (data ?? []) as unknown as Row[];
 
-  // Resolver nombres de mozos en una sola query (evita N+1).
   const mozoIds = Array.from(
     new Set(rows.map((r) => r.attributed_mozo_id).filter((x): x is string => !!x)),
   );
@@ -295,30 +229,39 @@ export async function getPaymentsByTurno(
   });
 }
 
-/**
- * Stats vivos del turno (calculadas on-the-fly, sin cache).
- *
- * Cross-tenant: chequea business_id del turno antes de leer payments.
- */
-export async function getTurnoLiveStats(
-  turnoId: string,
+export async function getCajaLiveStats(
+  cajaId: string,
   businessId: string,
-): Promise<TurnoLiveStats | null> {
-  const turno = await getTurnoById(turnoId, businessId);
-  if (!turno) return null;
+): Promise<CajaLiveStats | null> {
+  const service = db();
 
-  const service = createSupabaseServiceClient();
+  const { data: cajaRow } = await service
+    .from("cajas")
+    .select("id, business_id, is_active, created_at")
+    .eq("id", cajaId)
+    .maybeSingle();
+  if (!cajaRow) return null;
+  if ((cajaRow as { business_id: string }).business_id !== businessId) return null;
+
+  const ultimoCorte = await getUltimoCorte(cajaId, businessId);
+  const periodoDesdeFecha = ultimoCorte?.created_at ?? (cajaRow as { created_at: string }).created_at;
+
+  let paymentsQuery = service
+    .from("payments")
+    .select("method, amount_cents, tip_cents")
+    .eq("caja_id", cajaId)
+    .eq("payment_status", "paid");
+  paymentsQuery = paymentsQuery.gt("created_at", periodoDesdeFecha);
+
+  let movQuery = service
+    .from("caja_movimientos")
+    .select("kind, amount_cents")
+    .eq("caja_id", cajaId);
+  movQuery = movQuery.gt("created_at", periodoDesdeFecha);
 
   const [paymentsRes, movimientosRes] = await Promise.all([
-    service
-      .from("payments")
-      .select("method, amount_cents, tip_cents, payment_status")
-      .eq("caja_turno_id", turnoId)
-      .eq("payment_status", "paid"),
-    service
-      .from("caja_movimientos")
-      .select("kind, amount_cents")
-      .eq("caja_turno_id", turnoId),
+    paymentsQuery,
+    movQuery,
   ]);
 
   const payments = (paymentsRes.data ?? []) as Array<{
@@ -327,7 +270,7 @@ export async function getTurnoLiveStats(
     tip_cents: number;
   }>;
   const movimientos = (movimientosRes.data ?? []) as Array<{
-    kind: "apertura" | "cierre" | "sangria" | "ingreso";
+    kind: "sangria" | "ingreso";
     amount_cents: number;
   }>;
 
@@ -341,17 +284,103 @@ export async function getTurnoLiveStats(
   }
 
   const expected_cash_cents = calculateExpectedCash({
-    opening_cash_cents: turno.opening_cash_cents,
+    last_closing_cash_cents: ultimoCorte?.closing_cash_cents ?? 0,
     payments,
     movimientos,
   });
 
   return {
-    turno_id: turnoId,
+    caja_id: cajaId,
     total_ventas_cents,
     total_propinas_cents,
     ventas_por_metodo,
     cobros_count: payments.length,
     expected_cash_cents,
+    periodo_desde: periodoDesdeFecha,
   };
+}
+
+export async function getPaymentMethodConfigs(
+  businessId: string,
+): Promise<PaymentMethodConfig[]> {
+  const service = db();
+  const { data } = await service
+    .from("payment_method_configs")
+    .select("id, business_id, method, adjustment_percent, label, is_active, sort_order")
+    .eq("business_id", businessId)
+    .eq("is_active", true)
+    .order("sort_order", { ascending: true });
+  return ((data ?? []) as unknown as PaymentMethodConfig[]).map((r) => ({
+    ...r,
+    adjustment_percent: Number(r.adjustment_percent),
+  }));
+}
+
+export async function getAllPaymentMethodConfigs(
+  businessId: string,
+): Promise<PaymentMethodConfig[]> {
+  const service = db();
+  const { data } = await service
+    .from("payment_method_configs")
+    .select("id, business_id, method, adjustment_percent, label, is_active, sort_order")
+    .eq("business_id", businessId)
+    .order("sort_order", { ascending: true });
+  return ((data ?? []) as unknown as PaymentMethodConfig[]).map((r) => ({
+    ...r,
+    adjustment_percent: Number(r.adjustment_percent),
+  }));
+}
+
+export async function getCortesByCaja(
+  cajaId: string,
+  businessId: string,
+): Promise<CajaCorte[]> {
+  const service = db();
+  const { data } = await service
+    .from("caja_cortes")
+    .select("*")
+    .eq("caja_id", cajaId)
+    .eq("business_id", businessId)
+    .order("created_at", { ascending: false });
+  return (data ?? []) as CajaCorte[];
+}
+
+export async function getCortesHoy(
+  businessId: string,
+): Promise<(CajaCorte & { caja_name: string; encargado_name: string | null })[]> {
+  const service = db();
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+
+  const { data } = await service
+    .from("caja_cortes")
+    .select("*, cajas!inner(name)")
+    .eq("business_id", businessId)
+    .gte("created_at", todayStart.toISOString())
+    .order("created_at", { ascending: false });
+
+  if (!data || data.length === 0) return [];
+
+  const encargadoIds = Array.from(
+    new Set(data.map((row) => (row as { encargado_id: string }).encargado_id)),
+  );
+  const { data: encargados } = await service
+    .from("users")
+    .select("id, full_name")
+    .in("id", encargadoIds);
+  const nameById = new Map(
+    (encargados ?? []).map((u) => [u.id as string, u.full_name as string | null]),
+  );
+
+  return data.map((row) => {
+    const r = row as unknown as CajaCorte & {
+      cajas: { name: string } | { name: string }[];
+    };
+    const cajaName = Array.isArray(r.cajas) ? r.cajas[0].name : r.cajas.name;
+    return {
+      ...r,
+      caja_name: cajaName,
+      encargado_name: nameById.get(r.encargado_id) ?? null,
+    };
+  });
 }

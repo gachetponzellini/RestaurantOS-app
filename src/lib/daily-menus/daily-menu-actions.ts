@@ -53,17 +53,23 @@ async function syncComponents(
       label: component.label,
       description: component.description ?? null,
       sort_order: idx,
+      kind: component.kind ?? "text",
+      product_id: component.product_id ?? null,
+      choice_group_id: component.choice_group_id ?? null,
+      choice_group_label: component.choice_group_label ?? null,
     };
     if (component.id) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const { error } = await supabase
         .from("daily_menu_components")
-        .update(payload)
+        .update(payload as any)
         .eq("id", component.id);
       if (error) return "No pudimos actualizar un componente.";
     } else {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const { error } = await supabase
         .from("daily_menu_components")
-        .insert(payload);
+        .insert(payload as any);
       if (error) return "No pudimos crear un componente.";
     }
   }

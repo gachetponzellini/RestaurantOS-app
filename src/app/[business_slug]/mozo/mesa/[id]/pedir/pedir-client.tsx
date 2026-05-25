@@ -30,6 +30,7 @@ import {
   Sparkles,
   Star,
   Trash2,
+  Users,
   UtensilsCrossed,
   Wine,
   X,
@@ -43,6 +44,7 @@ import {
   cancelarItem,
   enviarComanda,
   type EnviarComandaItem,
+  type EnviarComandaDailyMenuItem,
 } from "@/lib/comandas/actions";
 import type { ComandaConItems } from "@/lib/comandas/queries";
 import type { ComandaStatus } from "@/lib/comandas/types";
@@ -58,7 +60,30 @@ import { canCancelItem } from "@/lib/permissions/can";
 
 import { ProductModal, type AddToCartItem } from "@/components/mozo/product-modal";
 
-type CartItem = AddToCartItem & { _key: string };
+type CartProductItem = AddToCartItem & { _key: string; seat_number: number | null };
+type CartDailyMenuItem = {
+  _key: string;
+  kind: "daily_menu";
+  daily_menu_id: string;
+  product_name: string;
+  unit_price_cents: number;
+  quantity: number;
+  notes: string;
+  line_subtotal_cents: number;
+  seat_number: number | null;
+  selected_choices: {
+    choice_group_id: string;
+    choice_group_label: string;
+    product_id: string;
+    product_name: string;
+    modifier_ids: string[];
+  }[];
+};
+type CartItem = CartProductItem | CartDailyMenuItem;
+
+function isDailyMenuCart(c: CartItem): c is CartDailyMenuItem {
+  return "kind" in c && c.kind === "daily_menu";
+}
 
 type Props = {
   slug: string;
@@ -314,6 +339,10 @@ export function MozoPedirClient({
   const [openDailyMenu, setOpenDailyMenu] = useState<DailyMenuForMozo | null>(null);
   const [cart, setCart] = useState<CartItem[]>([]);
 
+  const [seatMode, setSeatMode] = useState(false);
+  const [activeSeat, setActiveSeat] = useState(1);
+  const [seatCount, setSeatCount] = useState(3);
+
   const [cancelTarget, setCancelTarget] = useState<{
     orderItemId: string;
     productName: string;
@@ -340,6 +369,7 @@ export function MozoPedirClient({
   const tabTouched: Record<TabId, boolean> = useMemo(() => {
     const out: Record<TabId, boolean> = {};
     for (const item of cart) {
+      if (isDailyMenuCart(item)) continue;
       const tabId = productTabId.get(item.product_id);
       if (!tabId) continue;
       out[tabId] = true;
@@ -389,7 +419,7 @@ export function MozoPedirClient({
   const cartCount = cart.reduce((a, c) => a + c.quantity, 0);
 
   const addToCart = (item: AddToCartItem) => {
-    setCart((prev) => [...prev, { ...item, _key: crypto.randomUUID() }]);
+    setCart((prev) => [...prev, { ...item, _key: crypto.randomUUID(), seat_number: seatMode ? activeSeat : null }]);
   };
 
   const removeFromCart = (key: string) => {
@@ -404,6 +434,9 @@ export function MozoPedirClient({
           const nextQty = c.quantity + delta;
           if (nextQty < 1) return c;
           if (nextQty > 99) return c;
+          if (isDailyMenuCart(c)) {
+            return { ...c, quantity: nextQty, line_subtotal_cents: c.unit_price_cents * nextQty };
+          }
           const modsTotal = c.modifiers.reduce(
             (a, m) => a + m.price_delta_cents,
             0,
@@ -418,12 +451,28 @@ export function MozoPedirClient({
   // ── Acciones server ──
   const handleSend = () => {
     if (cart.length === 0) return;
-    const items: EnviarComandaItem[] = cart.map((c) => ({
-      product_id: c.product_id,
-      quantity: c.quantity,
-      notes: c.notes || null,
-      modifier_ids: c.modifiers.map((m) => m.id),
-    }));
+    const items: (EnviarComandaItem | EnviarComandaDailyMenuItem)[] = cart.map((c) => {
+      if (isDailyMenuCart(c)) {
+        return {
+          kind: "daily_menu" as const,
+          daily_menu_id: c.daily_menu_id,
+          quantity: c.quantity,
+          notes: c.notes || null,
+          selected_choices: c.selected_choices.map((sc) => ({
+            choice_group_id: sc.choice_group_id,
+            product_id: sc.product_id,
+            modifier_ids: sc.modifier_ids,
+          })),
+        };
+      }
+      return {
+        product_id: c.product_id,
+        quantity: c.quantity,
+        notes: c.notes || null,
+        modifier_ids: c.modifiers.map((m) => m.id),
+        seat_number: c.seat_number,
+      };
+    });
     startTransition(async () => {
       const r = await enviarComanda({ tableId: table.id, items, slug });
       if (!r.ok) {
@@ -536,6 +585,39 @@ export function MozoPedirClient({
             )}
           </div>
         )}
+        {/* Seat selector */}
+        {step === "catalogo" && seatMode && (
+          <div className="border-t border-zinc-100 bg-violet-50/50">
+            <div className="mx-auto flex max-w-md items-center gap-2 px-3 py-2">
+              <span className="text-[11px] font-semibold text-violet-700">Comensal:</span>
+              <div className="flex gap-1">
+                {Array.from({ length: seatCount }, (_, i) => i + 1).map((n) => (
+                  <button
+                    key={n}
+                    onClick={() => setActiveSeat(n)}
+                    className={`flex h-8 w-8 items-center justify-center rounded-full text-xs font-bold transition active:scale-95 ${
+                      activeSeat === n
+                        ? "bg-violet-600 text-white"
+                        : "bg-white text-violet-700 ring-1 ring-violet-200"
+                    }`}
+                  >
+                    {n}
+                  </button>
+                ))}
+                <button
+                  onClick={() => {
+                    const next = seatCount + 1;
+                    setSeatCount(next);
+                    setActiveSeat(next);
+                  }}
+                  className="flex h-8 w-8 items-center justify-center rounded-full bg-white text-violet-700 ring-1 ring-violet-200 active:scale-95"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
         {/* Tabs */}
         {step === "catalogo" && !isSearching && tabs.length > 0 && (
           <div className="border-t border-zinc-100">
@@ -604,6 +686,14 @@ export function MozoPedirClient({
             stationNameById={stationNameById}
             userCanCancel={userCanCancel}
             pending={pending}
+            seatMode={seatMode}
+            seatCount={seatCount}
+            onToggleSeatMode={() => setSeatMode((v) => !v)}
+            onItemSeatChange={(key, seat) =>
+              setCart((prev) =>
+                prev.map((c) => (c._key === key ? { ...c, seat_number: seat } : c)),
+              )
+            }
             onChangeQty={changeQuantity}
             onRemove={removeFromCart}
             onCancelItem={(id, name) =>
@@ -655,10 +745,28 @@ export function MozoPedirClient({
         onAdd={addToCart}
       />
 
-      {/* ─── Modal: detalle del menú del día ─── */}
+      {/* ─── Modal: agregar menú del día ─── */}
       <DailyMenuModal
         menu={openDailyMenu}
         onClose={() => setOpenDailyMenu(null)}
+        onAdd={(menu, quantity, selectedChoices) => {
+          setCart((prev) => [
+            ...prev,
+            {
+              _key: crypto.randomUUID(),
+              kind: "daily_menu" as const,
+              daily_menu_id: menu.id,
+              product_name: menu.name,
+              unit_price_cents: menu.price_cents,
+              quantity,
+              notes: "",
+              line_subtotal_cents: menu.price_cents * quantity,
+              seat_number: seatMode ? activeSeat : null,
+              selected_choices: selectedChoices,
+            },
+          ]);
+          setOpenDailyMenu(null);
+        }}
       />
 
       {/* ─── Modal: cancelar item ─── */}
@@ -676,7 +784,7 @@ export function MozoPedirClient({
           >
             <div className="flex items-start justify-between gap-3">
               <h3 className="font-heading text-base font-bold text-zinc-900">
-                Cancelar “{cancelTarget.productName}”
+                Cancelar &ldquo;{cancelTarget.productName}&rdquo;
               </h3>
               <button
                 onClick={() => {
@@ -1037,11 +1145,41 @@ function DailyMenuCard({
 function DailyMenuModal({
   menu,
   onClose,
+  onAdd,
 }: {
   menu: DailyMenuForMozo | null;
   onClose: () => void;
+  onAdd: (
+    menu: DailyMenuForMozo,
+    quantity: number,
+    selectedChoices: CartDailyMenuItem["selected_choices"],
+  ) => void;
 }) {
+  const [quantity, setQuantity] = useState(1);
+  const [selections, setSelections] = useState<
+    Map<string, CartDailyMenuItem["selected_choices"][number]>
+  >(new Map());
+
+  useEffect(() => {
+    if (menu) {
+      setQuantity(1);
+      setSelections(new Map());
+    }
+  }, [menu]);
+
   if (!menu) return null;
+
+  const fixedComponents = menu.components.filter((c) => c.kind !== "choice");
+  const allChoicesResolved =
+    menu.choice_groups.length === 0 ||
+    menu.choice_groups.every((g) => selections.has(g.choice_group_id));
+  const lineTotal = menu.price_cents * quantity;
+
+  const handleAdd = () => {
+    if (!allChoicesResolved) return;
+    onAdd(menu, quantity, [...selections.values()]);
+  };
+
   return (
     <div
       onClick={onClose}
@@ -1049,82 +1187,167 @@ function DailyMenuModal({
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-md max-h-[92dvh] overflow-y-auto rounded-t-3xl bg-white pb-[max(1.25rem,env(safe-area-inset-bottom))] shadow-2xl"
+        className="flex w-full max-w-md max-h-[92dvh] flex-col rounded-t-3xl bg-white shadow-2xl"
       >
         <div className="flex justify-center py-2">
           <span className="h-1 w-10 rounded-full bg-zinc-200" />
         </div>
 
-        {menu.image_url && (
-          <div className="px-5">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={menu.image_url}
-              alt=""
-              className="h-44 w-full rounded-2xl object-cover"
-            />
-          </div>
-        )}
-
-        <div className="px-5 pt-4">
-          <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-emerald-700">
-            Menú del día
-          </p>
-          <h3 className="mt-0.5 font-heading text-xl font-extrabold leading-tight text-zinc-900">
-            {menu.name}
-          </h3>
-          {menu.description && (
-            <p className="mt-1 text-sm text-zinc-600">{menu.description}</p>
+        <div className="flex-1 overflow-y-auto">
+          {menu.image_url && (
+            <div className="px-5">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={menu.image_url}
+                alt=""
+                className="h-44 w-full rounded-2xl object-cover"
+              />
+            </div>
           )}
-          <p className="mt-2 text-xl font-extrabold text-emerald-700 tabular-nums">
-            {formatCurrency(menu.price_cents)}
-          </p>
-        </div>
 
-        {menu.components.length > 0 && (
-          <div className="mt-4 px-5">
-            <p className="text-xs font-bold uppercase tracking-wide text-zinc-500">
-              Incluye
+          <div className="px-5 pt-4">
+            <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-emerald-700">
+              Menú del día
             </p>
-            <ol className="mt-2 space-y-2">
-              {menu.components.map((c, idx) => (
-                <li
-                  key={c.id}
-                  className="flex items-start gap-3 rounded-2xl bg-zinc-50 p-3 ring-1 ring-zinc-100"
-                >
-                  <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-xs font-bold text-white">
-                    {idx + 1}
-                  </span>
-                  <div className="min-w-0">
-                    <p className="text-sm font-semibold text-zinc-900">
-                      {c.label}
-                    </p>
-                    {c.description && (
-                      <p className="mt-0.5 text-xs text-zinc-600">
-                        {c.description}
-                      </p>
-                    )}
-                  </div>
-                </li>
-              ))}
-            </ol>
+            <h3 className="mt-0.5 font-heading text-xl font-extrabold leading-tight text-zinc-900">
+              {menu.name}
+            </h3>
+            {menu.description && (
+              <p className="mt-1 text-sm text-zinc-600">{menu.description}</p>
+            )}
+            <p className="mt-2 text-xl font-extrabold text-emerald-700 tabular-nums">
+              {formatCurrency(menu.price_cents)}
+            </p>
           </div>
-        )}
 
-        <div className="mt-4 px-5">
-          <p className="rounded-2xl bg-amber-50 px-3 py-2 text-xs text-amber-900 ring-1 ring-amber-100">
-            Para mostrar al cliente. Si lo elige, cargá los productos del menú
-            como items individuales en cada curso.
-          </p>
+          {fixedComponents.length > 0 && (
+            <div className="mt-4 px-5">
+              <p className="text-xs font-bold uppercase tracking-wide text-zinc-500">
+                Incluye
+              </p>
+              <ol className="mt-2 space-y-2">
+                {fixedComponents.map((c, idx) => (
+                  <li
+                    key={c.id}
+                    className="flex items-start gap-3 rounded-2xl bg-zinc-50 p-3 ring-1 ring-zinc-100"
+                  >
+                    <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-xs font-bold text-white">
+                      {c.kind === "product" ? "✓" : idx + 1}
+                    </span>
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-zinc-900">
+                        {c.kind === "product" && c.product_name
+                          ? `${c.label}: ${c.product_name}`
+                          : c.label}
+                      </p>
+                      {c.description && (
+                        <p className="mt-0.5 text-xs text-zinc-600">
+                          {c.description}
+                        </p>
+                      )}
+                    </div>
+                  </li>
+                ))}
+              </ol>
+            </div>
+          )}
+
+          {menu.choice_groups.map((group) => {
+            const selected = selections.get(group.choice_group_id);
+            return (
+              <div key={group.choice_group_id} className="mt-4 px-5">
+                <p className="text-xs font-bold uppercase tracking-wide text-emerald-700">
+                  {group.label}
+                </p>
+                <div className="mt-2 space-y-1.5">
+                  {group.options.map((opt) => {
+                    const isSelected = selected?.product_id === opt.product_id;
+                    return (
+                      <button
+                        key={opt.id}
+                        type="button"
+                        onClick={() =>
+                          setSelections((prev) => {
+                            const next = new Map(prev);
+                            next.set(group.choice_group_id, {
+                              choice_group_id: group.choice_group_id,
+                              choice_group_label: group.label,
+                              product_id: opt.product_id!,
+                              product_name: opt.product_name ?? opt.label,
+                              modifier_ids: [],
+                            });
+                            return next;
+                          })
+                        }
+                        className={`flex w-full items-center gap-3 rounded-2xl p-3 text-left transition ${
+                          isSelected
+                            ? "bg-emerald-50 ring-2 ring-emerald-500"
+                            : "bg-zinc-50 ring-1 ring-zinc-100"
+                        }`}
+                      >
+                        <span
+                          className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full ${
+                            isSelected
+                              ? "bg-emerald-600"
+                              : "border-2 border-zinc-300"
+                          }`}
+                        >
+                          {isSelected && (
+                            <Check className="h-3 w-3 text-white" strokeWidth={3} />
+                          )}
+                        </span>
+                        <span
+                          className={`text-sm ${
+                            isSelected
+                              ? "font-semibold text-zinc-900"
+                              : "text-zinc-700"
+                          }`}
+                        >
+                          {opt.product_name ?? opt.label}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+
+          <div className="h-4" />
         </div>
 
-        <div className="mt-4 px-5">
-          <button
-            onClick={onClose}
-            className="flex h-12 w-full items-center justify-center rounded-2xl bg-zinc-900 text-base font-semibold text-white active:scale-[0.98]"
-          >
-            Listo
-          </button>
+        <div className="border-t border-zinc-200 bg-white px-5 pt-3 pb-[max(1.25rem,env(safe-area-inset-bottom))]">
+          <div className="flex items-center gap-3">
+            <div className="flex items-center rounded-full ring-1 ring-zinc-200">
+              <button
+                onClick={() => setQuantity(Math.max(1, quantity - 1))}
+                className="flex h-11 w-11 items-center justify-center text-zinc-700 active:bg-zinc-50"
+                aria-label="Menos"
+              >
+                <Minus className="h-4 w-4" />
+              </button>
+              <span className="w-6 text-center text-sm font-bold tabular-nums">
+                {quantity}
+              </span>
+              <button
+                onClick={() => setQuantity(Math.min(99, quantity + 1))}
+                className="flex h-11 w-11 items-center justify-center text-zinc-700 active:bg-zinc-50"
+                aria-label="Más"
+              >
+                <Plus className="h-4 w-4" />
+              </button>
+            </div>
+            <button
+              disabled={!allChoicesResolved}
+              onClick={handleAdd}
+              className="flex h-12 flex-1 items-center justify-between rounded-2xl bg-emerald-600 px-4 text-white active:scale-[0.98] disabled:opacity-50"
+            >
+              <span className="text-base font-semibold">Agregar</span>
+              <span className="text-base font-bold tabular-nums">
+                {formatCurrency(lineTotal)}
+              </span>
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -1152,6 +1375,10 @@ function ResumenStep({
   stationNameById,
   userCanCancel,
   pending,
+  seatMode,
+  seatCount,
+  onToggleSeatMode,
+  onItemSeatChange,
   onChangeQty,
   onRemove,
   onCancelItem,
@@ -1163,6 +1390,10 @@ function ResumenStep({
   stationNameById: Record<string, string>;
   userCanCancel: boolean;
   pending: boolean;
+  seatMode: boolean;
+  seatCount: number;
+  onToggleSeatMode: () => void;
+  onItemSeatChange: (key: string, seat: number | null) => void;
   onChangeQty: (key: string, delta: number) => void;
   onRemove: (key: string) => void;
   onCancelItem: (orderItemId: string, productName: string) => void;
@@ -1172,24 +1403,39 @@ function ResumenStep({
   return (
     <div className="space-y-5">
       <section>
-        <header className="mb-2 flex items-center justify-between">
-          <div>
-            <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-500">
-              Para enviar
-            </p>
-            <h2 className="font-heading text-base font-bold text-zinc-900">
-              {cart.length === 0
-                ? "Sin items nuevos"
-                : `${cart.length} ${cart.length === 1 ? "item" : "items"} · sin enviar`}
-            </h2>
+        <header className="mb-2 space-y-2">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-500">
+                Para enviar
+              </p>
+              <h2 className="font-heading text-base font-bold text-zinc-900">
+                {cart.length === 0
+                  ? "Sin items nuevos"
+                  : `${cart.length} ${cart.length === 1 ? "item" : "items"} · sin enviar`}
+              </h2>
+            </div>
+            <button
+              onClick={onAddMore}
+              className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700 ring-1 ring-emerald-200 active:scale-[0.96]"
+            >
+              <Plus className="h-3.5 w-3.5" />
+              Agregar
+            </button>
           </div>
-          <button
-            onClick={onAddMore}
-            className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700 ring-1 ring-emerald-200 active:scale-[0.96]"
-          >
-            <Plus className="h-3.5 w-3.5" />
-            Agregar
-          </button>
+          {cart.length > 0 && (
+            <button
+              onClick={onToggleSeatMode}
+              className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold ring-1 transition ${
+                seatMode
+                  ? "bg-violet-600 text-white ring-violet-600"
+                  : "bg-white text-violet-700 ring-violet-200"
+              }`}
+            >
+              <Users className="h-3.5 w-3.5" />
+              {seatMode ? "Comensales activados" : "Asignar comensales"}
+            </button>
+          )}
         </header>
 
         {cart.length === 0 ? (
@@ -1212,16 +1458,37 @@ function ResumenStep({
                 <div className="flex items-start gap-2 p-3">
                   <div className="min-w-0 flex-1">
                     <p className="text-sm font-semibold text-zinc-900">
+                      {isDailyMenuCart(c) && (
+                        <span className="mr-1.5 inline-flex items-center rounded bg-emerald-100 px-1.5 py-0.5 align-middle text-[10px] font-bold uppercase tracking-wide text-emerald-700">
+                          Menú
+                        </span>
+                      )}
                       {c.product_name}
+                      {c.seat_number != null && (
+                        <button
+                          onClick={() => {
+                            const next = c.seat_number === seatCount ? null : (c.seat_number ?? 0) + 1;
+                            onItemSeatChange(c._key, next);
+                          }}
+                          className="ml-1.5 inline-flex items-center gap-0.5 rounded-full bg-violet-100 px-1.5 py-0.5 text-[10px] font-bold text-violet-700 active:bg-violet-200"
+                        >
+                          C{c.seat_number}
+                        </button>
+                      )}
                     </p>
-                    {c.modifiers.length > 0 && (
+                    {!isDailyMenuCart(c) && c.modifiers.length > 0 && (
                       <p className="mt-0.5 text-xs text-zinc-500">
                         {c.modifiers.map((m) => m.name).join(" · ")}
                       </p>
                     )}
+                    {isDailyMenuCart(c) && c.selected_choices.length > 0 && (
+                      <p className="mt-0.5 text-xs text-zinc-500">
+                        {c.selected_choices.map((sc) => sc.product_name).join(" · ")}
+                      </p>
+                    )}
                     {c.notes && (
                       <p className="mt-0.5 text-xs italic text-zinc-500">
-                        “{c.notes}”
+                        &quot;{c.notes}&quot;
                       </p>
                     )}
                     <p className="mt-1 text-xs font-semibold text-emerald-700 tabular-nums">
@@ -1328,7 +1595,7 @@ function ResumenStep({
                           )}
                           {it.notes && (
                             <p className="mt-0.5 text-xs italic text-zinc-500">
-                              “{it.notes}”
+                              &ldquo;{it.notes}&rdquo;
                             </p>
                           )}
                         </div>

@@ -1,13 +1,18 @@
 import { notFound, redirect } from "next/navigation";
 
+import { CreditCard } from "lucide-react";
+
 import { BusinessSettingsForm } from "@/components/admin/settings/business-settings-form";
 import { GenerateImagesCard } from "@/components/admin/settings/generate-images-card";
+import { PaymentMethodsConfig } from "@/components/admin/settings/payment-methods-config";
+import { SettingsSection } from "@/components/admin/settings/settings-section";
 import { PageHeader, PageShell } from "@/components/admin/shell/page-shell";
 import {
   canManageBusiness,
   ensureAdminAccess,
 } from "@/lib/admin/context";
 import { BRANDING_DEFAULTS } from "@/lib/branding/tokens";
+import { getAllPaymentMethodConfigs } from "@/lib/caja/queries";
 import { currentDayOfWeek } from "@/lib/day-of-week";
 import { getMenu } from "@/lib/menu";
 import { getBusiness, getBusinessSettings } from "@/lib/tenant";
@@ -25,7 +30,10 @@ export default async function ConfiguracionPage({
   if (!canManageBusiness(ctx)) redirect(`/${business_slug}/admin`);
 
   const settings = getBusinessSettings(business);
-  const menu = await getMenu(business.id, currentDayOfWeek(business.timezone));
+  const [menu, methodConfigs] = await Promise.all([
+    getMenu(business.id, currentDayOfWeek(business.timezone)),
+    getAllPaymentMethodConfigs(business.id),
+  ]);
   const sampleProducts = menu.categories
     .flatMap((c) => c.products)
     .slice(0, 3)
@@ -122,6 +130,16 @@ export default async function ConfiguracionPage({
         initial={initial}
         sampleProducts={sampleProducts}
       />
+
+      <div className="mt-8">
+        <SettingsSection
+          icon={<CreditCard className="size-5" />}
+          title="Métodos de pago"
+          description="Configurá recargos o descuentos por método de pago. Se aplican automáticamente al cobrar."
+        >
+          <PaymentMethodsConfig slug={business_slug} configs={methodConfigs} />
+        </SettingsSection>
+      </div>
 
       <div className="mt-8">
         <GenerateImagesCard slug={business_slug} />

@@ -34,7 +34,6 @@ vi.mock("next/cache", () => ({
   revalidateTag: vi.fn(),
 }));
 
-const { abrirTurno } = await import("@/lib/caja/actions");
 const { dividirPorPersonas } = await import("./cuenta-actions");
 const {
   iniciarCobro,
@@ -55,7 +54,6 @@ describe.skipIf(!dbAvailable)("billing/cobro (integration)", () => {
   let mozoId: string;
   let encargadoId: string;
   let cajaId: string;
-  let turnoId: string;
   let tableId: string;
 
   const seedUser = async (label: string) => {
@@ -139,11 +137,6 @@ describe.skipIf(!dbAvailable)("billing/cobro (integration)", () => {
       .select("id")
       .single();
     cajaId = caja!.id;
-
-    CURRENT_USER_ID = encargadoId;
-    const r = await abrirTurno(cajaId, 100_000, businessSlug);
-    if (!r.ok) throw new Error(`abrirTurno failed: ${r.error}`);
-    turnoId = r.data.turno.id;
   });
 
   afterAll(async () => {
@@ -156,8 +149,7 @@ describe.skipIf(!dbAvailable)("billing/cobro (integration)", () => {
     }
   });
 
-  it("iniciarCobro sin caja open → falla", { timeout: 30_000 }, async () => {
-    // Simular: cerrar el turno temporalmente con otra orden.
+  it("iniciarCobro con caja activa → devuelve cajas disponibles", { timeout: 30_000 }, async () => {
     const fake = await newOrder("X");
     CURRENT_USER_ID = mozoId;
     const r = await iniciarCobro(fake.orderId, businessSlug);
@@ -182,7 +174,7 @@ describe.skipIf(!dbAvailable)("billing/cobro (integration)", () => {
       method: "cash",
       amount_cents: 10_000,
       tip_cents: 0,
-      caja_turno_id: turnoId,
+      caja_id: cajaId,
       slug: businessSlug,
     });
     expect(r.ok).toBe(true);
@@ -222,7 +214,7 @@ describe.skipIf(!dbAvailable)("billing/cobro (integration)", () => {
       method: "cash",
       amount_cents: s1.expected_amount_cents,
       tip_cents: 0,
-      caja_turno_id: turnoId,
+      caja_id: cajaId,
       slug: businessSlug,
     });
     expect(r1.ok).toBe(true);
@@ -236,7 +228,7 @@ describe.skipIf(!dbAvailable)("billing/cobro (integration)", () => {
       tip_cents: 1_000,
       last_four: "1234",
       card_brand: "visa",
-      caja_turno_id: turnoId,
+      caja_id: cajaId,
       slug: businessSlug,
     });
     expect(r2.ok).toBe(true);
@@ -251,7 +243,7 @@ describe.skipIf(!dbAvailable)("billing/cobro (integration)", () => {
       method: "mp_link",
       amount_cents: 10_000,
       tip_cents: 0,
-      caja_turno_id: turnoId,
+      caja_id: cajaId,
       slug: businessSlug,
     });
     expect(r.ok).toBe(false);
@@ -267,7 +259,7 @@ describe.skipIf(!dbAvailable)("billing/cobro (integration)", () => {
       .insert({
         order_id: orderId,
         business_id: businessId,
-        caja_turno_id: turnoId,
+        caja_id: cajaId,
         method: "mp_qr",
         amount_cents: 10_000,
         tip_cents: 0,
@@ -297,7 +289,7 @@ describe.skipIf(!dbAvailable)("billing/cobro (integration)", () => {
       method: "cash",
       amount_cents: 10_000,
       tip_cents: 0,
-      caja_turno_id: turnoId,
+      caja_id: cajaId,
       slug: businessSlug,
     });
 
@@ -401,7 +393,7 @@ describe.skipIf(!dbAvailable)("billing/cobro (integration)", () => {
       method: "cash",
       amount_cents: 5_000,
       tip_cents: 0,
-      caja_turno_id: turnoId,
+      caja_id: cajaId,
       slug: businessSlug,
     });
     expect(r.ok).toBe(false);
@@ -415,7 +407,7 @@ describe.skipIf(!dbAvailable)("billing/cobro (integration)", () => {
     await supabase.from("payments").insert({
       order_id: orderId,
       business_id: businessId,
-      caja_turno_id: turnoId,
+      caja_id: cajaId,
       method: "cash",
       amount_cents: 10_000,
       tip_cents: 0,

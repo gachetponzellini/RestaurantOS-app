@@ -6,6 +6,17 @@ export type DailyMenuComponent = {
   id: string;
   label: string;
   description: string | null;
+  kind: "text" | "product" | "choice";
+  product_id: string | null;
+  product_name: string | null;
+  choice_group_id: string | null;
+  choice_group_label: string | null;
+};
+
+export type DailyMenuChoiceGroup = {
+  choice_group_id: string;
+  label: string;
+  options: DailyMenuComponent[];
 };
 
 export type DailyMenuForMozo = {
@@ -15,6 +26,8 @@ export type DailyMenuForMozo = {
   price_cents: number;
   image_url: string | null;
   components: DailyMenuComponent[];
+  choice_groups: DailyMenuChoiceGroup[];
+  has_choices: boolean;
 };
 
 /**
@@ -37,7 +50,7 @@ export async function getDailyMenusForToday(
   const { data, error } = await supabase
     .from("daily_menus")
     .select(
-      "id, name, description, price_cents, image_url, sort_order, daily_menu_components(id, label, description, sort_order)",
+      "id, name, description, price_cents, image_url, sort_order, daily_menu_components(id, label, description, sort_order, kind, product_id, choice_group_id, choice_group_label, products(id, name, image_url))",
     )
     .eq("business_id", businessId)
     .eq("is_active", true)
@@ -50,19 +63,47 @@ export async function getDailyMenusForToday(
     return [];
   }
 
-  return (data ?? []).map((m) => ({
-    id: m.id,
-    name: m.name,
-    description: m.description,
-    price_cents: Number(m.price_cents),
-    image_url: m.image_url,
-    components: (m.daily_menu_components ?? [])
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return ((data ?? []) as any[]).map((m) => {
+    const components: DailyMenuComponent[] = (m.daily_menu_components ?? [])
       .slice()
-      .sort((a, b) => a.sort_order - b.sort_order)
-      .map((c) => ({
+      .sort((a: { sort_order: number }, b: { sort_order: number }) => a.sort_order - b.sort_order)
+      .map((c: any) => ({
         id: c.id,
         label: c.label,
         description: c.description,
-      })),
-  }));
+        kind: c.kind ?? "text",
+        product_id: c.product_id ?? null,
+        product_name: c.products?.name ?? null,
+        choice_group_id: c.choice_group_id ?? null,
+        choice_group_label: c.choice_group_label ?? null,
+      }));
+
+    const groupMap = new Map<string, DailyMenuChoiceGroup>();
+    for (const c of components) {
+      if (c.kind === "choice" && c.choice_group_id) {
+        let group = groupMap.get(c.choice_group_id);
+        if (!group) {
+          group = {
+            choice_group_id: c.choice_group_id,
+            label: c.choice_group_label ?? "Elegí una opción",
+            options: [],
+          };
+          groupMap.set(c.choice_group_id, group);
+        }
+        group.options.push(c);
+      }
+    }
+
+    return {
+      id: m.id,
+      name: m.name,
+      description: m.description,
+      price_cents: Number(m.price_cents),
+      image_url: m.image_url,
+      components,
+      choice_groups: [...groupMap.values()],
+      has_choices: groupMap.size > 0,
+    };
+  });
 }

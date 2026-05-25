@@ -55,14 +55,15 @@ export async function getTodayOrders(
   const { data } = await supabase
     .from("orders")
     .select(
-      "id, order_number, created_at, customer_name, customer_phone, delivery_type, total_cents, status, payment_method, payment_status, cancelled_reason, order_items(product_name, quantity)",
+      "id, order_number, created_at, customer_name, customer_phone, delivery_type, total_cents, status, payment_method, payment_status, cancelled_reason, order_items(product_name, quantity, is_combo_component)",
     )
     .eq("business_id", businessId)
     .neq("delivery_type", "dine_in")
     .gte("created_at", since)
     .order("created_at", { ascending: false });
 
-  return (data ?? []).map((o) => ({
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return (data ?? []).map((o: any) => ({
     id: o.id,
     order_number: o.order_number,
     created_at: o.created_at,
@@ -78,10 +79,12 @@ export async function getTodayOrders(
     payment_method: o.payment_method,
     payment_status: o.payment_status,
     cancelled_reason: o.cancelled_reason,
-    items: (o.order_items ?? []).map((i) => ({
-      product_name: i.product_name,
-      quantity: i.quantity,
-    })),
+    items: (o.order_items ?? [])
+      .filter((i: any) => !i.is_combo_component)
+      .map((i: any) => ({
+        product_name: i.product_name,
+        quantity: i.quantity,
+      })),
   }));
 }
 
@@ -157,7 +160,7 @@ export async function getOrdersList(
   let query = supabase
     .from("orders")
     .select(
-      "id, order_number, created_at, customer_name, customer_phone, delivery_type, total_cents, status, payment_method, payment_status, cancelled_reason, order_items(product_name, quantity)",
+      "id, order_number, created_at, customer_name, customer_phone, delivery_type, total_cents, status, payment_method, payment_status, cancelled_reason, order_items(product_name, quantity, is_combo_component)",
       { count: "exact" },
     )
     .eq("business_id", businessId);
@@ -194,7 +197,8 @@ export async function getOrdersList(
 
   const { data, count } = await query;
 
-  const orders: AdminOrder[] = (data ?? []).map((o) => ({
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const orders: AdminOrder[] = (data ?? []).map((o: any) => ({
     id: o.id,
     order_number: o.order_number,
     created_at: o.created_at,
@@ -210,10 +214,12 @@ export async function getOrdersList(
     payment_method: o.payment_method,
     payment_status: o.payment_status,
     cancelled_reason: o.cancelled_reason,
-    items: (o.order_items ?? []).map((i) => ({
-      product_name: i.product_name,
-      quantity: i.quantity,
-    })),
+    items: (o.order_items ?? [])
+      .filter((i: any) => !i.is_combo_component)
+      .map((i: any) => ({
+        product_name: i.product_name,
+        quantity: i.quantity,
+      })),
   }));
 
   const total = count ?? 0;
@@ -233,11 +239,12 @@ export async function getOrderDetail(orderId: string) {
        subtotal_cents, delivery_fee_cents, total_cents,
        status, cancelled_reason, payment_method, payment_status,
        order_items(id, product_name, quantity, unit_price_cents, subtotal_cents, notes,
-         daily_menu_id, daily_menu_snapshot,
+         daily_menu_id, daily_menu_snapshot, is_combo_component, parent_order_item_id,
          order_item_modifiers(modifier_name, price_delta_cents)),
        order_status_history(status, notes, created_at)`,
     )
     .eq("id", orderId)
     .maybeSingle();
-  return data;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return data as any;
 }

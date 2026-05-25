@@ -3,20 +3,30 @@ import { describe, expect, it } from "vitest";
 import { calculateExpectedCash } from "./expected-cash";
 
 describe("calculateExpectedCash", () => {
-  it("sin movimientos ni payments: devuelve solo el opening", () => {
+  it("sin movimientos ni payments: devuelve last_closing_cash", () => {
     expect(
       calculateExpectedCash({
-        opening_cash_cents: 100_000,
+        last_closing_cash_cents: 100_000,
         payments: [],
         movimientos: [],
       }),
     ).toBe(100_000);
   });
 
+  it("primer período sin corte previo: last_closing = 0", () => {
+    expect(
+      calculateExpectedCash({
+        last_closing_cash_cents: 0,
+        payments: [{ method: "cash", amount_cents: 50_000 }],
+        movimientos: [],
+      }),
+    ).toBe(50_000);
+  });
+
   it("suma cash payments e ignora otros métodos", () => {
     expect(
       calculateExpectedCash({
-        opening_cash_cents: 50_000,
+        last_closing_cash_cents: 50_000,
         payments: [
           { method: "cash", amount_cents: 10_000 },
           { method: "cash", amount_cents: 25_000 },
@@ -32,14 +42,12 @@ describe("calculateExpectedCash", () => {
   it("suma ingresos y resta sangrías", () => {
     expect(
       calculateExpectedCash({
-        opening_cash_cents: 100_000,
+        last_closing_cash_cents: 100_000,
         payments: [],
         movimientos: [
           { kind: "ingreso", amount_cents: 20_000 },
           { kind: "sangria", amount_cents: 30_000 },
           { kind: "sangria", amount_cents: 5_000 },
-          { kind: "apertura", amount_cents: 999_999 }, // ignorada (audit)
-          { kind: "cierre", amount_cents: 999_999 }, // ignorada
         ],
       }),
     ).toBe(100_000 + 20_000 - 30_000 - 5_000);
@@ -48,7 +56,7 @@ describe("calculateExpectedCash", () => {
   it("escenario completo: cash + ingreso + sangría + métodos varios", () => {
     expect(
       calculateExpectedCash({
-        opening_cash_cents: 200_000,
+        last_closing_cash_cents: 200_000,
         payments: [
           { method: "cash", amount_cents: 150_000 },
           { method: "cash", amount_cents: 80_000 },

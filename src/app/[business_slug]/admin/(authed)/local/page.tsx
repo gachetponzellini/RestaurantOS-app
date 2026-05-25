@@ -10,11 +10,9 @@ import { ensureAdminAccess } from "@/lib/admin/context";
 import { getFloorPlansForBusiness } from "@/lib/admin/floor-plan/queries";
 import { getActiveComandas, getStationsForLocal } from "@/lib/admin/local-query";
 import { getTodayOrders } from "@/lib/admin/orders-query";
-import {
-  getActiveTurnos,
-  getCajasForBusiness,
-} from "@/lib/caja/queries";
+import { getCajasConEstado } from "@/lib/caja/queries";
 import { getMozosByBusiness } from "@/lib/mozo/queries";
+import { getCurrentPresent } from "@/lib/rrhh/clock-actions";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 import { getBusiness } from "@/lib/tenant";
 
@@ -52,17 +50,13 @@ export default async function LocalEnVivoPage({
     { data: dineInOrders },
     { data: reservations },
     mozos,
-    cajaTurnos,
     cajas,
+    initialPresent,
   ] = await Promise.all([
     getTodayOrders(business.id, business.timezone),
     getActiveComandas(business.id),
     getStationsForLocal(business.id),
     getFloorPlansForBusiness(business.id),
-    // Mismo criterio que en /mozo: solo orders **abiertas** de mesa. Una
-    // por mesa por el partial unique. Las cerradas ya no son "actuales".
-    // Traemos customer_name + items + comandas con su estado para que el
-    // drawer del salón muestre el resumen completo (paridad con mozo).
     service
       .from("orders")
       .select(
@@ -82,8 +76,8 @@ export default async function LocalEnVivoPage({
       .lt("starts_at", tomorrowStart.toISOString())
       .order("starts_at", { ascending: true }),
     getMozosByBusiness(business.id),
-    getActiveTurnos(business.id),
-    getCajasForBusiness(business.id),
+    getCajasConEstado(business.id),
+    getCurrentPresent(business_slug),
   ]);
 
   // /admin/local toma full viewport (overlay sobre el sidebar) — sin
@@ -170,8 +164,8 @@ export default async function LocalEnVivoPage({
         mozos={mozos}
         currentUserId={ctx.user.id}
         role={ctx.isPlatformAdmin ? "admin" : (ctx.role ?? "admin")}
-        cajaTurnos={cajaTurnos}
         cajas={cajas}
+        initialPresent={initialPresent}
       />
     </>
   );

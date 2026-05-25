@@ -4,8 +4,8 @@ import { revalidatePath } from "next/cache";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { actionError, actionOk, type ActionResult } from "@/lib/actions";
-import { getActiveTurnos } from "@/lib/caja/queries";
-import type { ActiveTurnoView, PaymentMethod } from "@/lib/caja/types";
+import { getCajasForBusiness, getPaymentMethodConfigs } from "@/lib/caja/queries";
+import type { Caja, PaymentMethod, PaymentMethodConfig } from "@/lib/caja/types";
 import { requireMozoActionContext } from "@/lib/mozo/auth";
 import { canCancelItem } from "@/lib/permissions/can";
 import { createPreference } from "@/lib/payments/mercadopago";
@@ -75,20 +75,20 @@ async function loadSplit(
   return row;
 }
 
-async function loadTurno(
+async function loadCaja(
   service: GenericClient,
-  turnoId: string,
+  cajaId: string,
   businessId: string,
-): Promise<{ id: string; status: "open" | "closed" } | null> {
+): Promise<{ id: string; is_active: boolean } | null> {
   const { data } = await service
-    .from("caja_turnos")
-    .select("id, business_id, status")
-    .eq("id", turnoId)
+    .from("cajas")
+    .select("id, business_id, is_active")
+    .eq("id", cajaId)
     .maybeSingle();
   if (!data) return null;
-  const row = data as { id: string; business_id: string; status: "open" | "closed" };
+  const row = data as { id: string; business_id: string; is_active: boolean };
   if (row.business_id !== businessId) return null;
-  return { id: row.id, status: row.status };
+  return { id: row.id, is_active: row.is_active };
 }
 
 /**
@@ -212,9 +212,10 @@ export async function closeOrderIfFullyPaid(
 
 export type IniciarCobroResult = {
   order: LoadedOrder;
-  splits: OrderSplit[]; // Si la order no tiene splits, devolvemos uno virtual.
+  splits: OrderSplit[];
   hasImplicitSplit: boolean;
-  cajas: ActiveTurnoView[];
+  cajas: Caja[];
+  methodConfigs: PaymentMethodConfig[];
 };
 
 export async function iniciarCobro(
@@ -235,9 +236,12 @@ export async function iniciarCobro(
     return actionError("La orden ya está cerrada.");
   }
 
-  const cajas = await getActiveTurnos(business.id);
+  const [cajas, methodConfigs] = await Promise.all([
+    getCajasForBusiness(business.id),
+    getPaymentMethodConfigs(business.id),
+  ]);
   if (cajas.length === 0) {
-    return actionError("No hay caja abierta. Pedile al encargado que abra el turno.");
+    return actionError("No hay caja configurada. Pedile al admin que cree una.");
   }
 
   const { data: splitsData } = await service
@@ -257,6 +261,7 @@ export async function iniciarCobro(
     splits,
     hasImplicitSplit,
     cajas,
+    methodConfigs,
   });
 }
 
@@ -268,10 +273,12 @@ export type RegistrarPagoInput = {
   method: PaymentMethod;
   amount_cents: number;
   tip_cents: number;
-  caja_turno_id: string;
+  caja_id: string;
   last_four?: string;
   card_brand?: "visa" | "mastercard" | "amex" | "otro";
   notes?: string;
+  adjustment_percent?: number;
+  adjustment_cents?: number;
   slug: string;
 };
 
@@ -290,7 +297,7 @@ export async function registrarPago(
 
   const service = createSupabaseServiceClient() as unknown as GenericClient;
 
-  // Cross-tenant: order, split (si hay), caja_turno.
+  // Cross-tenant: order, split (si hay), caja.
   const order = await loadOrder(service, input.orderId, business.id);
   if (!order) return actionError("Orden no encontrada.");
   if (order.lifecycle_status !== "open") {
@@ -309,11 +316,9 @@ export async function registrarPago(
     }
   }
 
-  const turno = await loadTurno(service, input.caja_turno_id, business.id);
-  if (!turno) return actionError("Turno de caja no encontrado.");
-  if (turno.status !== "open") {
-    return actionError("El turno de caja está cerrado.");
-  }
+  const caja = await loadCaja(service, input.caja_id, business.id);
+  if (!caja) return actionError("Caja no encontrada.");
+  if (!caja.is_active) return actionError("La caja está inactiva.");
 
   // Validación específica por método.
   if (input.method === "card_manual") {
@@ -321,8 +326,15 @@ export async function registrarPago(
       return actionError("Los últimos 4 dígitos deben ser 4.");
     }
   }
-  if (input.method === "other" && (!input.notes || input.notes.trim() === "")) {
-    return actionError('Para método "otro", se requiere una nota.');
+  if (
+    (input.method === "other" || input.method === "transfer") &&
+    (!input.notes || input.notes.trim() === "")
+  ) {
+    return actionError(
+      input.method === "transfer"
+        ? "Para transferencia, anotá el alias o referencia."
+        : 'Para método "otro", se requiere una nota.',
+    );
   }
 
   if (input.method === "mp_link" || input.method === "mp_qr") {
@@ -333,7 +345,7 @@ export async function registrarPago(
 
   const attributed = await deriveAttributedMozo(service, order.id);
   const payment_status =
-    input.method === "cash" || input.method === "card_manual" || input.method === "other"
+    input.method === "cash" || input.method === "card_manual" || input.method === "transfer" || input.method === "other"
       ? "paid"
       : "pending";
 
@@ -343,7 +355,7 @@ export async function registrarPago(
       order_id: order.id,
       business_id: business.id,
       split_id: input.splitId,
-      caja_turno_id: input.caja_turno_id,
+      caja_id: input.caja_id,
       operated_by: ctx.userId,
       attributed_mozo_id: attributed,
       method: input.method,
@@ -353,9 +365,11 @@ export async function registrarPago(
       card_brand: input.card_brand ?? null,
       payment_status,
       notes: input.notes?.trim() || null,
+      adjustment_percent: input.adjustment_percent ?? 0,
+      adjustment_cents: input.adjustment_cents ?? 0,
     })
     .select(
-      "id, order_id, business_id, split_id, caja_turno_id, operated_by, attributed_mozo_id, method, amount_cents, tip_cents, last_four, card_brand, mp_payment_id, mp_preference_id, payment_status, notes, refunded_at, refunded_reason, created_at",
+      "id, order_id, business_id, split_id, caja_id, operated_by, attributed_mozo_id, method, amount_cents, tip_cents, last_four, card_brand, mp_payment_id, mp_preference_id, payment_status, notes, refunded_at, refunded_reason, created_at",
     )
     .single();
 
@@ -394,7 +408,7 @@ export type IniciarPagoMpInput = {
   method: "mp_link" | "mp_qr";
   amount_cents: number;
   tip_cents: number;
-  caja_turno_id: string;
+  caja_id: string;
   slug: string;
 };
 
@@ -434,9 +448,9 @@ export async function iniciarPagoMp(
     if (split.status === "cancelled") return actionError("El split fue cancelado.");
   }
 
-  const turno = await loadTurno(service, input.caja_turno_id, business.id);
-  if (!turno || turno.status !== "open") {
-    return actionError("Turno de caja inválido.");
+  const cajaForMp = await loadCaja(service, input.caja_id, business.id);
+  if (!cajaForMp || !cajaForMp.is_active) {
+    return actionError("Caja inválida o inactiva.");
   }
 
   // Insert payment row pendiente para que el webhook pueda asociar el id.
@@ -447,7 +461,7 @@ export async function iniciarPagoMp(
       order_id: order.id,
       business_id: business.id,
       split_id: input.splitId,
-      caja_turno_id: input.caja_turno_id,
+      caja_id: input.caja_id,
       operated_by: ctx.userId,
       attributed_mozo_id: attributed,
       method: input.method,

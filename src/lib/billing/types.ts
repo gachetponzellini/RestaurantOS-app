@@ -2,13 +2,13 @@
 // Tipos del dominio Billing (CU-03 cuenta + CU-04 cobro).
 //
 // Re-exporta PaymentMethod desde lib/caja para no duplicar el tipo: caja es
-// donde live el modelo del payment + caja_turno y donde nació primero.
+// donde vive el modelo del payment y donde nació primero.
 // ============================================
 
 import type { PaymentMethod } from "@/lib/caja/types";
 export type { PaymentMethod };
 
-export type SplitMode = "por_personas" | "por_items";
+export type SplitMode = "por_personas" | "por_items" | "por_comensal";
 export type SplitStatus = "pending" | "paid" | "cancelled";
 
 export type OrderSplit = {
@@ -30,7 +30,7 @@ export type Payment = {
   order_id: string;
   business_id: string;
   split_id: string | null;
-  caja_turno_id: string;
+  caja_id: string;
   operated_by: string | null;
   attributed_mozo_id: string | null;
   method: PaymentMethod;
@@ -55,8 +55,8 @@ export type CuentaItem = {
   notes: string | null;
   station_id: string | null;
   cancelled_at: string | null;
-  // ID del mozo que cargó el item (para atribución de propina).
   loaded_by: string | null;
+  seat_number: number | null;
 };
 
 export type CuentaTotals = {

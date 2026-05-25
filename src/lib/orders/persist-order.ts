@@ -122,6 +122,16 @@ export async function persistOrder(
   // Importante: chequeamos `available_days` contra el DOW *en el TZ del negocio*.
   // Así no pasa que el servidor en UTC piense que es martes cuando en Argentina
   // sigue siendo lunes — y viceversa.
+  type DailyMenuComponentRow = {
+    id: string;
+    label: string;
+    description: string | null;
+    sort_order: number;
+    kind: string;
+    product_id: string | null;
+    choice_group_id: string | null;
+    choice_group_label: string | null;
+  };
   type DailyMenuRow = {
     id: string;
     name: string;
@@ -131,9 +141,7 @@ export async function persistOrder(
     is_active: boolean;
     is_available: boolean;
     business_id: string;
-    daily_menu_components:
-      | { id: string; label: string; description: string | null; sort_order: number }[]
-      | null;
+    daily_menu_components: DailyMenuComponentRow[] | null;
   };
   const menuIds = [...new Set(menuItems.map((i) => i.daily_menu_id))];
   const menuById = new Map<string, DailyMenuRow>();
@@ -141,14 +149,15 @@ export async function persistOrder(
     const { data: menus } = await supabase
       .from("daily_menus")
       .select(
-        "id, name, price_cents, image_url, available_days, is_active, is_available, business_id, daily_menu_components(id, label, description, sort_order)",
+        "id, name, price_cents, image_url, available_days, is_active, is_available, business_id, daily_menu_components(id, label, description, sort_order, kind, product_id, choice_group_id, choice_group_label)",
       )
       .in("id", menuIds);
     if (!menus || menus.length !== menuIds.length) {
       return actionError("Algún menú del día ya no está disponible.");
     }
     const todayDow = currentDayOfWeek(business.timezone);
-    for (const raw of menus) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    for (const raw of menus as any[]) {
       const m: DailyMenuRow = {
         id: raw.id,
         name: raw.name,
@@ -199,7 +208,7 @@ export async function persistOrder(
         daily_menu_snapshot: {
           name: string;
           image_url: string | null;
-          components: { label: string; description: string | null }[];
+          components: { label: string; description: string | null; kind?: string; product_id?: string | null }[];
         };
         product_name: string;
         unit_price_cents: number;
@@ -207,6 +216,8 @@ export async function persistOrder(
         notes: string | null;
         subtotal_cents: number;
         modifiers: never[];
+        fixed_product_ids: string[];
+        selected_choices: { product_id: string; modifier_ids: string[] }[];
       };
 
   let subtotalCents = 0;
@@ -218,7 +229,16 @@ export async function persistOrder(
       const components = (menu.daily_menu_components ?? [])
         .slice()
         .sort((a, b) => a.sort_order - b.sort_order)
-        .map((c) => ({ label: c.label, description: c.description }));
+        .map((c) => ({
+          label: c.label,
+          description: c.description,
+          kind: c.kind ?? "text",
+          product_id: c.product_id,
+        }));
+      const fixedProductIds = components
+        .filter((c) => c.kind === "product" && c.product_id)
+        .map((c) => c.product_id!);
+
       return {
         kind: "daily_menu",
         product_id: null,
@@ -234,6 +254,11 @@ export async function persistOrder(
         notes: inputItem.notes ?? null,
         subtotal_cents: lineSubtotal,
         modifiers: [],
+        fixed_product_ids: fixedProductIds,
+        selected_choices: (inputItem.selected_choices ?? []).map((sc) => ({
+          product_id: sc.product_id,
+          modifier_ids: sc.modifier_ids ?? [],
+        })),
       };
     }
     const product = productById.get(inputItem.product_id)!;
@@ -440,6 +465,82 @@ export async function persistOrder(
       if (modErr) {
         console.error("order_item_modifier insert", modErr);
         return actionError("No pudimos guardar los adicionales.");
+      }
+    }
+
+    if (line.kind === "daily_menu") {
+      const childProductIds = [
+        ...line.fixed_product_ids,
+        ...line.selected_choices.map((sc) => sc.product_id),
+      ];
+      if (childProductIds.length > 0) {
+        const uniqueChildIds = [...new Set(childProductIds)];
+        const missingIds = uniqueChildIds.filter((id) => !productById.has(id));
+        if (missingIds.length > 0) {
+          const { data: childProducts } = await supabase
+            .from("products")
+            .select("id, name, price_cents")
+            .in("id", missingIds);
+          for (const p of childProducts ?? []) {
+            productById.set(p.id, {
+              id: p.id,
+              name: p.name,
+              price_cents: Number(p.price_cents),
+            });
+          }
+        }
+
+        for (const childPid of line.fixed_product_ids) {
+          const childProduct = productById.get(childPid);
+          if (!childProduct) continue;
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          await supabase.from("order_items").insert({
+            order_id: order.id,
+            product_id: childPid,
+            product_name: childProduct.name,
+            unit_price_cents: 0,
+            quantity: line.quantity,
+            subtotal_cents: 0,
+            parent_order_item_id: inserted.id,
+            is_combo_component: true,
+          } as any);
+        }
+
+        for (const sc of line.selected_choices) {
+          const childProduct = productById.get(sc.product_id);
+          if (!childProduct) continue;
+          const { data: childInserted } = await supabase
+            .from("order_items")
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            .insert({
+              order_id: order.id,
+              product_id: sc.product_id,
+              product_name: childProduct.name,
+              unit_price_cents: 0,
+              quantity: line.quantity,
+              subtotal_cents: 0,
+              parent_order_item_id: inserted.id,
+              is_combo_component: true,
+            } as any)
+            .select("id")
+            .single();
+
+          if (childInserted && sc.modifier_ids.length > 0) {
+            const childMods = sc.modifier_ids
+              .map((id) => modifierById.get(id))
+              .filter((m): m is NonNullable<typeof m> => !!m);
+            if (childMods.length > 0) {
+              await supabase.from("order_item_modifiers").insert(
+                childMods.map((m) => ({
+                  order_item_id: childInserted.id,
+                  modifier_id: m.id,
+                  modifier_name: m.name,
+                  price_delta_cents: m.price_delta_cents,
+                })),
+              );
+            }
+          }
+        }
       }
     }
   }

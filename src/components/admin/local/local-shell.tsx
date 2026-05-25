@@ -5,20 +5,22 @@ import { useRouter, useSearchParams } from "next/navigation";
 
 import { CajaAdminBoard } from "@/components/admin/local/caja-admin-board";
 import { ComandasKanban } from "@/components/admin/local/comandas-kanban";
+import { FichajeTab } from "@/components/admin/local/fichaje-tab";
 import { SalonDesktop, type SalonOrderRef, type SalonReservationRef } from "@/components/admin/local/salon-desktop";
 import { OrdersRealtimeBoard } from "@/components/admin/orders-realtime-board";
 import type { LocalComanda, LocalStation } from "@/lib/admin/local-query";
 import type { AdminOrder } from "@/lib/admin/orders-query";
 import type { BusinessRole } from "@/lib/admin/context";
 import type { FloorPlanWithTables } from "@/lib/admin/floor-plan/queries";
-import type { ActiveTurnoView, Caja } from "@/lib/caja/types";
+import type { Caja, CajaConEstado } from "@/lib/caja/types";
 import type { MozoMember } from "@/lib/mozo/queries";
+import type { PresentEmployee } from "@/lib/rrhh/clock-actions";
 import { cn } from "@/lib/utils";
 
-type Tab = "pedidos" | "comandas" | "salon" | "caja";
+type Tab = "pedidos" | "comandas" | "salon" | "caja" | "fichaje";
 
 function isTab(v: string | null | undefined): v is Tab {
-  return v === "pedidos" || v === "comandas" || v === "salon" || v === "caja";
+  return v === "pedidos" || v === "comandas" || v === "salon" || v === "caja" || v === "fichaje";
 }
 
 function TabsInner({
@@ -34,8 +36,8 @@ function TabsInner({
   mozos,
   currentUserId,
   role,
-  cajaTurnos,
   cajas,
+  initialPresent,
 }: {
   slug: string;
   businessId: string;
@@ -49,8 +51,8 @@ function TabsInner({
   mozos: MozoMember[];
   currentUserId: string;
   role: BusinessRole;
-  cajaTurnos: ActiveTurnoView[];
-  cajas: Caja[];
+  cajas: CajaConEstado[];
+  initialPresent: PresentEmployee[];
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -104,9 +106,10 @@ function TabsInner({
       pedidos: pedidosNuevos,
       comandas: comandasActivas,
       salon: salonOcupadas,
-      caja: cajaTurnos.length,
+      caja: cajas.length,
+      fichaje: initialPresent.length,
     };
-  }, [initialOrders, initialComandas, allActiveTables, cajaTurnos.length]);
+  }, [initialOrders, initialComandas, allActiveTables, cajas.length, initialPresent.length]);
 
   const tabsBar = (
     <nav
@@ -118,7 +121,7 @@ function TabsInner({
         onClick={() => setTab("salon")}
         count={counts.salon}
       >
-        {floorPlans.length > 1 ? "Salones" : "Salón"}
+        Mesas
       </TabButton>
       <TabButton
         active={active === "comandas"}
@@ -140,6 +143,13 @@ function TabsInner({
         count={counts.caja}
       >
         Caja
+      </TabButton>
+      <TabButton
+        active={active === "fichaje"}
+        onClick={() => setTab("fichaje")}
+        count={counts.fichaje}
+      >
+        Fichaje
       </TabButton>
     </nav>
   );
@@ -195,8 +205,13 @@ function TabsInner({
         {active === "caja" && (
           <CajaAdminBoard
             slug={slug}
-            initialTurnos={cajaTurnos}
             cajas={cajas}
+          />
+        )}
+        {active === "fichaje" && (
+          <FichajeTab
+            slug={slug}
+            initialPresent={initialPresent}
           />
         )}
       </div>
@@ -257,8 +272,8 @@ export function LocalShell(props: {
   mozos: MozoMember[];
   currentUserId: string;
   role: BusinessRole;
-  cajaTurnos: ActiveTurnoView[];
-  cajas: Caja[];
+  cajas: CajaConEstado[];
+  initialPresent: PresentEmployee[];
 }) {
   return (
     <Suspense fallback={null}>

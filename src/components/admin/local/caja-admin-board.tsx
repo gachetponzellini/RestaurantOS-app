@@ -10,7 +10,6 @@ import {
   CreditCard,
   Link2,
   Lock,
-  LockOpen,
   MoreHorizontal,
   QrCode,
   RefreshCw,
@@ -32,124 +31,116 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import {
-  abrirCajaConDefault,
-  abrirTurno,
-  cerrarTurno,
+  hacerCorte,
   registrarIngreso,
   registrarSangria,
 } from "@/lib/caja/actions";
-import type { TurnoPayment } from "@/lib/caja/queries";
+import type { CajaPayment } from "@/lib/caja/queries";
 import type {
-  ActiveTurnoView,
-  Caja,
+  CajaConEstado,
+  CajaLiveStats,
   CajaMovimiento,
   PaymentMethod,
-  TurnoLiveStats,
 } from "@/lib/caja/types";
 import { formatCurrency } from "@/lib/currency";
 import { cn } from "@/lib/utils";
 
 type Props = {
   slug: string;
-  initialTurnos: ActiveTurnoView[];
-  /** Cajas configuradas del negocio (solo activas, ordenadas por sort_order).
-   *  Cada una se renderiza como un slot en el grid: TurnoCard si tiene turno
-   *  abierto, AbrirCajaSlot si no. */
-  cajas: Caja[];
+  cajas: CajaConEstado[];
 };
 
-const OPENING_PRESETS = [10_000_00, 50_000_00, 100_000_00]; // $10.000 / $50.000 / $100.000
-
-/**
- * Tab Caja del operativo `/admin/local`. Autosuficiente para el flujo diario:
- *
- *   - Sin caja abierta → CTA grande inline con efectivo inicial.
- *   - Con caja abierta → card con KPIs vivos + sangría / ingreso / cerrar.
- *   - Cerradas del día → lista compacta abajo.
- *
- * Filosofía: el encargado piensa en "abrir caja" / "cerrar caja", no en
- * "turnos" ni en "configurar cajas". El concepto de caja física se maneja
- * de forma transparente: si no hay cajas, se crea "Caja Principal" en el
- * primer abrir. La config multi-caja vive en `/caja` (link discreto al pie).
- */
-export function CajaAdminBoard({
-  slug,
-  initialTurnos,
-  cajas,
-}: Props) {
+export function CajaAdminBoard({ slug, cajas }: Props) {
   const router = useRouter();
-  const [statsByTurno, setStatsByTurno] = useState<
-    Record<string, TurnoLiveStats | null>
+  const [statsByCaja, setStatsByCaja] = useState<
+    Record<string, CajaLiveStats | null>
   >({});
-  const [movimientosByTurno, setMovimientosByTurno] = useState<
+  const [movimientosByCaja, setMovimientosByCaja] = useState<
     Record<string, CajaMovimiento[]>
   >({});
-  const [paymentsByTurno, setPaymentsByTurno] = useState<
-    Record<string, TurnoPayment[]>
+  const [paymentsByCaja, setPaymentsByCaja] = useState<
+    Record<string, CajaPayment[]>
   >({});
   const [refreshKey, setRefreshKey] = useState(0);
 
-  // Polling de stats + movimientos + payments de turnos abiertos (cada 30s).
-  // Todo en un solo endpoint para no triplicar polling.
   useEffect(() => {
     let cancelled = false;
     const load = async () => {
       const entries = await Promise.all(
-        initialTurnos.map(async (t) => {
+        cajas.map(async (c) => {
           try {
-            const res = await fetch(`/api/caja/stats?turno=${t.id}`);
+            const res = await fetch(`/api/caja/stats?caja=${c.id}`);
             const data = await res.json();
             return [
-              t.id,
+              c.id,
               data?.stats ?? null,
               data?.movimientos ?? [],
               data?.payments ?? [],
             ] as const;
           } catch {
-            return [t.id, null, [], []] as const;
+            return [c.id, null, [], []] as const;
           }
         }),
       );
       if (!cancelled) {
-        setStatsByTurno(
+        setStatsByCaja(
           Object.fromEntries(entries.map((e) => [e[0], e[1]])),
         );
-        setMovimientosByTurno(
+        setMovimientosByCaja(
           Object.fromEntries(entries.map((e) => [e[0], e[2]])),
         );
-        setPaymentsByTurno(
+        setPaymentsByCaja(
           Object.fromEntries(entries.map((e) => [e[0], e[3]])),
         );
       }
     };
-    if (initialTurnos.length > 0) load();
+    if (cajas.length > 0) load();
     const i = setInterval(load, 30_000);
     return () => {
       cancelled = true;
       clearInterval(i);
     };
-  }, [initialTurnos, refreshKey]);
+  }, [cajas, refreshKey]);
 
-  // Mapa caja_id → turno open, para resolver el estado de cada slot.
-  const turnoByCajaId = new Map(initialTurnos.map((t) => [t.caja_id, t]));
-
-  // Caso 0 cajas: pantalla virgen, CTA único centrado que auto-crea
-  // "Caja Principal" al abrirla.
   if (cajas.length === 0) {
     return (
       <div className="space-y-5">
-        <AbrirCajaPrimera
-          slug={slug}
-          onOpened={() => router.refresh()}
-        />
-        <ConfigurarCajasLink slug={slug} />
+        <Surface padding="default">
+          <div className="mx-auto flex max-w-md flex-col items-center gap-5 py-6 text-center">
+            <div
+              className="flex size-14 items-center justify-center rounded-full"
+              style={{ background: "var(--brand-soft, #F4F4F5)" }}
+            >
+              <Wallet
+                className="size-7"
+                style={{ color: "var(--brand, #18181B)" }}
+              />
+            </div>
+            <div>
+              <h3 className="text-xl font-semibold tracking-tight text-zinc-900">
+                Sin cajas configuradas
+              </h3>
+              <p className="mt-1 text-sm text-zinc-600">
+                Creá una caja desde la configuración para empezar a operar.
+              </p>
+            </div>
+            <Link
+              href={`/${slug}/admin/cajas`}
+              className="inline-flex items-center gap-2 rounded-full px-5 py-2.5 text-sm font-semibold transition hover:brightness-95"
+              style={{
+                background: "var(--brand, #18181B)",
+                color: "var(--brand-foreground, white)",
+              }}
+            >
+              <Settings className="size-4" />
+              Configurar cajas
+            </Link>
+          </div>
+        </Surface>
       </div>
     );
   }
 
-  // Layout: una columna full-width si hay 1 caja, 2 columnas si hay 2+.
-  // Cada slot muestra TurnoCard (operativa) o AbrirCajaSlot (CTA) según
-  // tenga o no turno open. Misma altura entre slots.
   const gridCols =
     cajas.length === 1
       ? "grid-cols-1"
@@ -157,329 +148,90 @@ export function CajaAdminBoard({
 
   return (
     <div className="space-y-5">
-      {/* Header con refresh (sin descripción pesada). */}
-      {initialTurnos.length > 0 && (
-        <div className="flex items-center justify-between gap-3">
-          <p className="text-[0.6rem] font-semibold uppercase tracking-[0.14em] text-zinc-500">
-            Refresco cada 30s
-          </p>
-          <button
-            type="button"
-            onClick={() => {
-              setRefreshKey((k) => k + 1);
-              router.refresh();
-            }}
-            className="inline-flex size-8 items-center justify-center rounded-full text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-900"
-            aria-label="Refrescar"
-          >
-            <RefreshCw className="size-3.5" />
-          </button>
-        </div>
-      )}
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-[0.6rem] font-semibold uppercase tracking-[0.14em] text-zinc-500">
+          Refresco cada 30s
+        </p>
+        <button
+          type="button"
+          onClick={() => {
+            setRefreshKey((k) => k + 1);
+            router.refresh();
+          }}
+          className="inline-flex size-8 items-center justify-center rounded-full text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-900"
+          aria-label="Refrescar"
+        >
+          <RefreshCw className="size-3.5" />
+        </button>
+      </div>
 
-      {/* Grid de cajas: cada slot es operativa o CTA según estado. */}
       <div className={cn("grid gap-4", gridCols)}>
-        {cajas.map((c) => {
-          const turno = turnoByCajaId.get(c.id);
-          if (turno) {
-            return (
-              <TurnoCard
-                key={c.id}
-                turno={turno}
-                stats={statsByTurno[turno.id] ?? null}
-                movimientos={movimientosByTurno[turno.id] ?? []}
-                payments={paymentsByTurno[turno.id] ?? []}
-                slug={slug}
-              />
-            );
-          }
-          return (
-            <AbrirCajaSlot
-              key={c.id}
-              caja={c}
-              slug={slug}
-              onOpened={() => router.refresh()}
-            />
-          );
-        })}
-      </div>
-
-      {/* Link discreto a configuración avanzada */}
-      <ConfigurarCajasLink slug={slug} />
-    </div>
-  );
-}
-
-// ── Sub-componentes para el render principal ───────────────────
-
-function ConfigurarCajasLink({ slug }: { slug: string }) {
-  return (
-    <div className="pt-1 text-center">
-      <Link
-        href={`/${slug}/admin/cajas`}
-        className="inline-flex items-center gap-1.5 text-xs font-medium text-zinc-500 transition hover:text-zinc-900"
-      >
-        <Settings className="size-3" />
-        Configurar cajas
-      </Link>
-    </div>
-  );
-}
-
-// ── Abrir caja (slot por-caja en el grid) ──────────────────────
-
-/**
- * Slot del grid para una caja sin turno abierto. Replica el shape visual
- * de TurnoCard (mismo ancho, header con nombre y pill de estado) pero el
- * body es el formulario de apertura. El CTA queda al pie en posición
- * equivalente al "Cerrar caja" del slot operativo — continuidad visual.
- */
-function AbrirCajaSlot({
-  caja,
-  slug,
-  onOpened,
-}: {
-  caja: Caja;
-  slug: string;
-  onOpened: () => void;
-}) {
-  const [pending, startTransition] = useTransition();
-  const [amountInput, setAmountInput] = useState<string>(
-    String(OPENING_PRESETS[1]! / 100),
-  );
-  const cents = Math.max(0, Math.round(Number(amountInput) * 100));
-
-  const handleAbrir = () => {
-    startTransition(async () => {
-      const r = await abrirTurno(caja.id, cents, slug);
-      if (!r.ok) {
-        toast.error(r.error);
-        return;
-      }
-      toast.success(`Caja abierta · ${caja.name}`);
-      onOpened();
-    });
-  };
-
-  return (
-    <article className="flex flex-col rounded-2xl bg-white ring-1 ring-zinc-200/70">
-      {/* Header simétrico al de TurnoCard. */}
-      <header className="flex items-start justify-between gap-3 border-b border-zinc-100 p-5">
-        <div className="min-w-0">
-          <h3 className="text-lg font-semibold tracking-tight text-zinc-900">
-            {caja.name}
-          </h3>
-          <p className="mt-0.5 text-xs text-zinc-500">Sin turno abierto</p>
-        </div>
-        <span className="inline-flex items-center gap-1.5 rounded-full bg-zinc-100 px-2 py-0.5 text-[0.65rem] font-semibold text-zinc-600">
-          <span className="inline-block size-1.5 rounded-full bg-zinc-400" />
-          Cerrada
-        </span>
-      </header>
-
-      {/* Body: form de apertura. */}
-      <div className="flex-1 space-y-4 p-5">
-        <div>
-          <Label className="text-xs font-medium text-zinc-600">
-            Efectivo inicial
-          </Label>
-          <div className="mt-2 flex flex-wrap gap-2">
-            {OPENING_PRESETS.map((p) => {
-              const active = cents === p;
-              return (
-                <button
-                  key={p}
-                  type="button"
-                  onClick={() => setAmountInput(String(p / 100))}
-                  className={cn(
-                    "rounded-full px-3 py-1.5 text-sm font-semibold ring-1 transition",
-                    active
-                      ? "bg-zinc-900 text-white ring-zinc-900"
-                      : "bg-white text-zinc-700 ring-zinc-200 hover:bg-zinc-50",
-                  )}
-                >
-                  {formatCurrency(p)}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-        <div>
-          <Label className="text-xs font-medium text-zinc-600">Otro monto</Label>
-          <div className="relative mt-1.5">
-            <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm font-semibold text-zinc-400">
-              $
-            </span>
-            <Input
-              type="number"
-              value={amountInput}
-              onChange={(e) => setAmountInput(e.target.value)}
-              placeholder="0"
-              inputMode="decimal"
-              className="pl-7 text-base tabular-nums"
-            />
-          </div>
-        </div>
-      </div>
-
-      {/* CTA al pie — misma posición que "Cerrar caja" del slot operativo. */}
-      <div className="border-t border-zinc-100 p-3">
-        <button
-          type="button"
-          onClick={handleAbrir}
-          disabled={pending || cents < 0}
-          className="flex w-full items-center justify-center gap-2 rounded-full px-4 py-2.5 text-sm font-semibold transition hover:brightness-95 active:translate-y-px disabled:opacity-60"
-          style={{
-            background: "var(--brand, #18181B)",
-            color: "var(--brand-foreground, white)",
-          }}
-        >
-          <LockOpen className="size-4" />
-          {pending ? "Abriendo…" : `Abrir con ${formatCurrency(cents)}`}
-        </button>
-      </div>
-    </article>
-  );
-}
-
-/**
- * Pantalla vacía: el local no tiene ninguna caja configurada. Un CTA único
- * full-width que auto-crea "Caja Principal" y le abre turno.
- */
-function AbrirCajaPrimera({
-  slug,
-  onOpened,
-}: {
-  slug: string;
-  onOpened: () => void;
-}) {
-  const [pending, startTransition] = useTransition();
-  const [amountInput, setAmountInput] = useState<string>(
-    String(OPENING_PRESETS[1]! / 100),
-  );
-  const cents = Math.max(0, Math.round(Number(amountInput) * 100));
-
-  const handleAbrir = () => {
-    startTransition(async () => {
-      const r = await abrirCajaConDefault(cents, slug);
-      if (!r.ok) {
-        toast.error(r.error);
-        return;
-      }
-      toast.success("Caja abierta");
-      onOpened();
-    });
-  };
-
-  return (
-    <Surface padding="default">
-      <div className="mx-auto flex max-w-md flex-col items-center gap-5 py-6 text-center">
-        <div
-          className="flex size-14 items-center justify-center rounded-full"
-          style={{ background: "var(--brand-soft, #F4F4F5)" }}
-        >
-          <Wallet
-            className="size-7"
-            style={{ color: "var(--brand, #18181B)" }}
+        {cajas.map((c) => (
+          <CajaCard
+            key={c.id}
+            caja={c}
+            stats={statsByCaja[c.id] ?? null}
+            movimientos={movimientosByCaja[c.id] ?? []}
+            payments={paymentsByCaja[c.id] ?? []}
+            slug={slug}
           />
-        </div>
-        <div>
-          <h3 className="text-xl font-semibold tracking-tight text-zinc-900">
-            Abrir caja
-          </h3>
-          <p className="mt-1 text-sm text-zinc-600">
-            Indicá el efectivo con el que arrancás.
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center justify-center gap-2">
-          {OPENING_PRESETS.map((p) => {
-            const active = cents === p;
-            return (
-              <button
-                key={p}
-                type="button"
-                onClick={() => setAmountInput(String(p / 100))}
-                className={cn(
-                  "rounded-full px-4 py-2 text-sm font-semibold ring-1 transition",
-                  active
-                    ? "bg-zinc-900 text-white ring-zinc-900"
-                    : "bg-white text-zinc-700 ring-zinc-200 hover:bg-zinc-50",
-                )}
-              >
-                {formatCurrency(p)}
-              </button>
-            );
-          })}
-        </div>
-        <div className="w-full max-w-xs">
-          <Label className="text-xs font-medium text-zinc-600">
-            Otro monto
-          </Label>
-          <div className="relative mt-1.5">
-            <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm font-semibold text-zinc-400">
-              $
-            </span>
-            <Input
-              type="number"
-              value={amountInput}
-              onChange={(e) => setAmountInput(e.target.value)}
-              placeholder="0"
-              inputMode="decimal"
-              className="pl-7 text-base tabular-nums"
-            />
-          </div>
-        </div>
-        <button
-          type="button"
-          onClick={handleAbrir}
-          disabled={pending || cents < 0}
-          className="inline-flex w-full max-w-xs items-center justify-center gap-2 rounded-full px-6 py-3 text-base font-semibold transition hover:brightness-95 active:translate-y-px disabled:opacity-60"
-          style={{
-            background: "var(--brand, #18181B)",
-            color: "var(--brand-foreground, white)",
-          }}
-        >
-          <LockOpen className="size-4" />
-          {pending ? "Abriendo…" : `Abrir caja con ${formatCurrency(cents)}`}
-        </button>
+        ))}
       </div>
-    </Surface>
+
+      <div className="pt-1 text-center">
+        <Link
+          href={`/${slug}/admin/cajas`}
+          className="inline-flex items-center gap-1.5 text-xs font-medium text-zinc-500 transition hover:text-zinc-900"
+        >
+          <Settings className="size-3" />
+          Configurar cajas
+        </Link>
+      </div>
+    </div>
   );
 }
 
-// ── Card de caja abierta con KPIs y acciones ───────────────────
+// ── Card de caja (siempre operativa) ─────────────────────────────
 
-function TurnoCard({
-  turno,
+function CajaCard({
+  caja,
   stats,
   movimientos,
   payments,
   slug,
 }: {
-  turno: ActiveTurnoView;
-  stats: TurnoLiveStats | null;
+  caja: CajaConEstado;
+  stats: CajaLiveStats | null;
   movimientos: CajaMovimiento[];
-  payments: TurnoPayment[];
+  payments: CajaPayment[];
   slug: string;
 }) {
   const router = useRouter();
   const [, startTransition] = useTransition();
   const [sangriaOpen, setSangriaOpen] = useState(false);
   const [ingresoOpen, setIngresoOpen] = useState(false);
-  const [cierreOpen, setCierreOpen] = useState(false);
+  const [corteOpen, setCorteOpen] = useState(false);
 
-  const expected = stats?.expected_cash_cents ?? turno.opening_cash_cents;
+  const expected = stats?.expected_cash_cents ?? 0;
   const ventas = stats?.total_ventas_cents ?? 0;
   const propinas = stats?.total_propinas_cents ?? 0;
   const cobros = stats?.cobros_count ?? 0;
   const porMetodo = stats?.ventas_por_metodo;
+  const periodoDesdeFecha = stats?.periodo_desde ?? caja.periodo_desde;
 
-  // Lista unificada de movimientos del turno: cobros + sangrías + ingresos
-  // en orden cronológico inverso (más reciente primero). La apertura
-  // (kind='apertura') queda implícita en el header de la card. El cierre
-  // todavía no existió.
+  const periodoLabel = (() => {
+    const d = new Date(periodoDesdeFecha);
+    const now = new Date();
+    const diffMin = Math.floor((now.getTime() - d.getTime()) / 60_000);
+    if (diffMin < 1) return "desde ahora";
+    if (diffMin < 60) return `desde hace ${diffMin}m`;
+    const h = Math.floor(diffMin / 60);
+    const m = diffMin % 60;
+    return m === 0 ? `desde hace ${h}h` : `desde hace ${h}h ${m}m`;
+  })();
+
   type Entry =
-    | { kind: "cobro"; createdAt: string; data: TurnoPayment }
+    | { kind: "cobro"; createdAt: string; data: CajaPayment }
     | { kind: "sangria" | "ingreso"; createdAt: string; data: CajaMovimiento };
   const entries: Entry[] = [
     ...payments.map((p) => ({
@@ -487,48 +239,31 @@ function TurnoCard({
       createdAt: p.created_at,
       data: p,
     })),
-    ...movimientos
-      .filter((m) => m.kind === "sangria" || m.kind === "ingreso")
-      .map((m) => ({
-        kind: m.kind as "sangria" | "ingreso",
-        createdAt: m.created_at,
-        data: m,
-      })),
+    ...movimientos.map((m) => ({
+      kind: m.kind as "sangria" | "ingreso",
+      createdAt: m.created_at,
+      data: m,
+    })),
   ].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-
-  // "Abierta hace X" — relativo, conversacional. La hora exacta queda
-  // implícita y no satura el header.
-  const minutesOpen = Math.floor(
-    (Date.now() - new Date(turno.opened_at).getTime()) / 60_000,
-  );
-  const elapsedLabel = (() => {
-    if (minutesOpen < 1) return "ahora";
-    if (minutesOpen < 60) return `hace ${minutesOpen}m`;
-    const h = Math.floor(minutesOpen / 60);
-    const m = minutesOpen % 60;
-    return m === 0 ? `hace ${h}h` : `hace ${h}h ${m}m`;
-  })();
 
   return (
     <article className="flex flex-col rounded-2xl bg-white ring-1 ring-zinc-200/70">
-      {/* Header simétrico al slot de "abrir caja". */}
       <header className="flex items-start justify-between gap-3 border-b border-zinc-100 p-5">
         <div className="min-w-0">
           <h3 className="text-lg font-semibold tracking-tight text-zinc-900">
-            {turno.caja_name}
+            {caja.name}
           </h3>
           <p className="mt-0.5 text-xs text-zinc-500">
-            Abierta {elapsedLabel}
-            {turno.encargado_name && ` por ${turno.encargado_name}`}
+            Período activo {periodoLabel}
+            {caja.ultimo_corte && " · último corte registrado"}
           </p>
         </div>
         <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2 py-0.5 text-[0.65rem] font-semibold text-emerald-800">
           <span className="inline-block size-1.5 rounded-full bg-emerald-500" />
-          Abierta
+          Activa
         </span>
       </header>
 
-      {/* Hero compacto: lo que deberías tener en caja. */}
       <div
         className="border-b border-zinc-100 p-5"
         style={{ background: "var(--brand-soft, #F4F4F5)" }}
@@ -540,16 +275,17 @@ function TurnoCard({
           {formatCurrency(expected)}
         </p>
         <p className="mt-1 text-xs text-zinc-600">
-          {formatCurrency(turno.opening_cash_cents)} apertura +{" "}
-          {formatCurrency(Math.max(0, expected - turno.opening_cash_cents))} cobrados
+          {caja.ultimo_corte
+            ? `${formatCurrency(caja.ultimo_corte.closing_cash_cents)} del corte anterior`
+            : "$0 inicio"}{" "}
+          + movimientos del período
         </p>
       </div>
 
-      {/* Cobros del turno: total + breakdown + propinas aparte. */}
       <div className="border-b border-zinc-100 p-5">
         <div className="flex items-baseline justify-between gap-2">
           <p className="text-[0.65rem] font-semibold uppercase tracking-[0.14em] text-zinc-500">
-            Cobros del turno
+            Cobros del período
           </p>
           <p className="text-sm font-bold tabular-nums text-zinc-900">
             <span className="text-zinc-500">{cobros} · </span>
@@ -558,31 +294,12 @@ function TurnoCard({
         </div>
         {porMetodo && cobros > 0 ? (
           <ul className="mt-3 space-y-1.5">
-            <MethodRow
-              label="Efectivo"
-              icon={<Banknote className="size-3.5" />}
-              amount={porMetodo.cash ?? 0}
-            />
-            <MethodRow
-              label="MercadoPago QR"
-              icon={<QrCode className="size-3.5" />}
-              amount={porMetodo.mp_qr ?? 0}
-            />
-            <MethodRow
-              label="MercadoPago link"
-              icon={<Link2 className="size-3.5" />}
-              amount={porMetodo.mp_link ?? 0}
-            />
-            <MethodRow
-              label="Tarjeta"
-              icon={<CreditCard className="size-3.5" />}
-              amount={porMetodo.card_manual ?? 0}
-            />
-            <MethodRow
-              label="Otro"
-              icon={<MoreHorizontal className="size-3.5" />}
-              amount={porMetodo.other ?? 0}
-            />
+            <MethodRow label="Efectivo" icon={<Banknote className="size-3.5" />} amount={porMetodo.cash ?? 0} />
+            <MethodRow label="MercadoPago QR" icon={<QrCode className="size-3.5" />} amount={porMetodo.mp_qr ?? 0} />
+            <MethodRow label="MercadoPago link" icon={<Link2 className="size-3.5" />} amount={porMetodo.mp_link ?? 0} />
+            <MethodRow label="Tarjeta" icon={<CreditCard className="size-3.5" />} amount={porMetodo.card_manual ?? 0} />
+            <MethodRow label="Transferencia" icon={<Wallet className="size-3.5" />} amount={porMetodo.transfer ?? 0} />
+            <MethodRow label="Otro" icon={<MoreHorizontal className="size-3.5" />} amount={porMetodo.other ?? 0} />
           </ul>
         ) : (
           <p className="mt-3 text-xs text-zinc-500">Todavía no hubo cobros.</p>
@@ -597,13 +314,10 @@ function TurnoCard({
         )}
       </div>
 
-      {/* Movimientos del turno: cobros + sangrías + ingresos en una sola
-          lista cronológica (más reciente arriba). Visible por default con
-          scroll interno — la lista puede crecer sin estirar la card. */}
       <div className="border-b border-zinc-100 p-5">
         <div className="flex items-baseline justify-between gap-2">
           <p className="text-[0.65rem] font-semibold uppercase tracking-[0.14em] text-zinc-500">
-            Movimientos del turno
+            Movimientos del período
           </p>
           <p className="text-xs font-semibold tabular-nums text-zinc-700">
             {entries.length}
@@ -626,8 +340,8 @@ function TurnoCard({
         )}
       </div>
 
-      {/* Acciones al pie — Sangría/Ingreso secundarios, Cerrar caja primario.
-          Posición simétrica al CTA "Abrir caja" del slot vacío. */}
+      {payments.length > 0 && <RendicionSection payments={payments} />}
+
       <div className="flex items-center gap-2 p-3">
         <button
           type="button"
@@ -645,33 +359,27 @@ function TurnoCard({
         </button>
         <button
           type="button"
-          onClick={() => setCierreOpen(true)}
+          onClick={() => setCorteOpen(true)}
           className="ml-auto inline-flex items-center gap-1.5 rounded-full px-4 py-2 text-xs font-semibold transition hover:brightness-95"
           style={{
             background: "var(--brand, #18181B)",
             color: "var(--brand-foreground, white)",
           }}
         >
-          <Lock className="size-3.5" /> Cerrar caja
+          <Lock className="size-3.5" /> Hacer corte
         </button>
       </div>
 
-      {/* Modales */}
       <MovimientoModal
         open={sangriaOpen}
         onOpenChange={setSangriaOpen}
         title="Registrar sangría"
-        description="Sacar efectivo de la caja (depósito en banco, pago a proveedor, etc.). Requiere motivo."
+        description="Sacar efectivo de la caja (depósito en banco, pago a proveedor, etc.)."
         requiereMotivo
         ctaLabel="Registrar sangría"
         onSubmit={(amount, reason) =>
           startTransition(async () => {
-            const r = await registrarSangria(
-              turno.id,
-              amount,
-              reason ?? "",
-              slug,
-            );
+            const r = await registrarSangria(caja.id, amount, reason ?? "", slug);
             if (!r.ok) toast.error(r.error);
             else {
               toast.success("Sangría registrada");
@@ -685,17 +393,12 @@ function TurnoCard({
         open={ingresoOpen}
         onOpenChange={setIngresoOpen}
         title="Registrar ingreso"
-        description="Sumar efectivo extra a la caja durante el turno."
+        description="Sumar efectivo extra a la caja."
         requiereMotivo={false}
         ctaLabel="Registrar ingreso"
         onSubmit={(amount, reason) =>
           startTransition(async () => {
-            const r = await registrarIngreso(
-              turno.id,
-              amount,
-              reason ?? null,
-              slug,
-            );
+            const r = await registrarIngreso(caja.id, amount, reason ?? null, slug);
             if (!r.ok) toast.error(r.error);
             else {
               toast.success("Ingreso registrado");
@@ -705,23 +408,22 @@ function TurnoCard({
           })
         }
       />
-      <CierreModal
-        open={cierreOpen}
-        onOpenChange={setCierreOpen}
-        cajaName={turno.caja_name}
-        opening={turno.opening_cash_cents}
+      <CorteModal
+        open={corteOpen}
+        onOpenChange={setCorteOpen}
+        cajaName={caja.name}
         ventas={ventas}
         propinas={propinas}
         expected={expected}
         onSubmit={(closing, notes) =>
           startTransition(async () => {
-            const r = await cerrarTurno(turno.id, closing, notes, slug);
+            const r = await hacerCorte(caja.id, closing, notes, null, slug);
             if (!r.ok) {
               toast.error(r.error);
               return;
             }
-            toast.success("Caja cerrada");
-            setCierreOpen(false);
+            toast.success("Corte registrado");
+            setCorteOpen(false);
             router.refresh();
           })
         }
@@ -729,6 +431,8 @@ function TurnoCard({
     </article>
   );
 }
+
+// ── Sub-componentes ──────────────────────────────────────────────
 
 function MethodRow({
   label,
@@ -739,25 +443,14 @@ function MethodRow({
   icon: React.ReactNode;
   amount: number;
 }) {
-  // Los métodos sin ventas se ven atenuados; los que sí, prominentes.
   const empty = amount === 0;
   return (
     <li className="flex items-center justify-between gap-3 text-sm">
-      <span
-        className={cn(
-          "inline-flex items-center gap-2",
-          empty ? "text-zinc-400" : "text-zinc-700",
-        )}
-      >
+      <span className={cn("inline-flex items-center gap-2", empty ? "text-zinc-400" : "text-zinc-700")}>
         {icon}
         {label}
       </span>
-      <span
-        className={cn(
-          "font-semibold tabular-nums",
-          empty ? "text-zinc-400" : "text-zinc-900",
-        )}
-      >
+      <span className={cn("font-semibold tabular-nums", empty ? "text-zinc-400" : "text-zinc-900")}>
         {empty ? "—" : formatCurrency(amount)}
       </span>
     </li>
@@ -788,62 +481,45 @@ function MovimientoRow({ mov }: { mov: CajaMovimiento }) {
         <div className="flex items-baseline justify-between gap-2">
           <p className="truncate text-sm font-semibold text-zinc-900">
             {isSangria ? "Sangría" : "Ingreso"}
-            <span className="ml-1.5 text-[10px] font-normal text-zinc-400 tabular-nums">
-              {time}
-            </span>
+            <span className="ml-1.5 text-[10px] font-normal text-zinc-400 tabular-nums">{time}</span>
           </p>
-          <p
-            className={cn(
-              "shrink-0 text-sm font-bold tabular-nums",
-              isSangria ? "text-rose-700" : "text-emerald-700",
-            )}
-          >
+          <p className={cn("shrink-0 text-sm font-bold tabular-nums", isSangria ? "text-rose-700" : "text-emerald-700")}>
             {isSangria ? "−" : "+"}
             {formatCurrency(mov.amount_cents)}
           </p>
         </div>
-        {mov.reason && (
-          <p className="mt-0.5 truncate text-xs text-zinc-500">{mov.reason}</p>
-        )}
+        {mov.reason && <p className="mt-0.5 truncate text-xs text-zinc-500">{mov.reason}</p>}
       </div>
     </li>
   );
 }
-
-// ── Fila de cobro (entra al turno via payment.caja_turno_id) ────
 
 const METHOD_LABEL: Record<PaymentMethod, string> = {
   cash: "Efectivo",
   mp_qr: "MercadoPago QR",
   mp_link: "MercadoPago link",
   card_manual: "Tarjeta",
+  transfer: "Transferencia",
   other: "Otro",
 };
 
 function methodIcon(method: PaymentMethod) {
   switch (method) {
-    case "cash":
-      return Banknote;
-    case "mp_qr":
-      return QrCode;
-    case "mp_link":
-      return Link2;
-    case "card_manual":
-      return CreditCard;
-    default:
-      return MoreHorizontal;
+    case "cash": return Banknote;
+    case "mp_qr": return QrCode;
+    case "mp_link": return Link2;
+    case "card_manual": return CreditCard;
+    case "transfer": return Wallet;
+    default: return MoreHorizontal;
   }
 }
 
-function CobroRow({ payment }: { payment: TurnoPayment }) {
+function CobroRow({ payment }: { payment: CajaPayment }) {
   const Icon = methodIcon(payment.method);
   const time = new Date(payment.created_at).toLocaleTimeString("es-AR", {
     hour: "2-digit",
     minute: "2-digit",
   });
-
-  // "Origen" del cobro: si fue dine_in con mesa → "Mesa N"; si no, intentar
-  // customer_name; sino, número de orden. Siempre algo identificable.
   const origen =
     payment.delivery_type === "dine_in" && payment.table_label
       ? `Mesa ${payment.table_label}`
@@ -859,9 +535,7 @@ function CobroRow({ payment }: { payment: TurnoPayment }) {
         <div className="flex items-baseline justify-between gap-2">
           <p className="truncate text-sm font-semibold text-zinc-900">
             {origen}
-            <span className="ml-1.5 text-[10px] font-normal text-zinc-400 tabular-nums">
-              {time}
-            </span>
+            <span className="ml-1.5 text-[10px] font-normal text-zinc-400 tabular-nums">{time}</span>
           </p>
           <p className="shrink-0 text-sm font-bold tabular-nums text-zinc-900">
             +{formatCurrency(payment.amount_cents)}
@@ -871,10 +545,7 @@ function CobroRow({ payment }: { payment: TurnoPayment }) {
           <p className="truncate text-xs text-zinc-500">
             {METHOD_LABEL[payment.method]}
             {payment.attributed_mozo_name && (
-              <>
-                <span className="mx-1 text-zinc-300">·</span>
-                {payment.attributed_mozo_name}
-              </>
+              <><span className="mx-1 text-zinc-300">·</span>{payment.attributed_mozo_name}</>
             )}
           </p>
           {payment.tip_cents > 0 && (
@@ -888,7 +559,7 @@ function CobroRow({ payment }: { payment: TurnoPayment }) {
   );
 }
 
-// ── Movimiento modal (sangría / ingreso) ───────────────────────
+// ── Modales ──────────────────────────────────────────────────────
 
 function MovimientoModal({
   open,
@@ -911,10 +582,7 @@ function MovimientoModal({
   const [reason, setReason] = useState("");
 
   useEffect(() => {
-    if (!open) {
-      setAmount("");
-      setReason("");
-    }
+    if (!open) { setAmount(""); setReason(""); }
   }, [open]);
 
   const cents = Math.max(0, Math.round(Number(amount) * 100));
@@ -923,64 +591,31 @@ function MovimientoModal({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
-        <DialogHeader>
-          <DialogTitle>{title}</DialogTitle>
-        </DialogHeader>
+        <DialogHeader><DialogTitle>{title}</DialogTitle></DialogHeader>
         <p className="-mt-2 text-sm text-zinc-600">{description}</p>
         <div className="mt-3 grid gap-4">
           <div className="grid gap-1.5">
             <Label>Monto</Label>
-            <Input
-              type="number"
-              value={amount}
-              onChange={(e) => setAmount(e.target.value)}
-              placeholder="0.00"
-              autoFocus
-              inputMode="decimal"
-            />
+            <Input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0.00" autoFocus inputMode="decimal" />
           </div>
           <div className="grid gap-1.5">
-            <Label>
-              Motivo
-              {requiereMotivo && (
-                <span className="ml-1 text-rose-600">*</span>
-              )}
-            </Label>
-            <Textarea
-              value={reason}
-              onChange={(e) => setReason(e.target.value)}
-              rows={2}
-              placeholder={
-                requiereMotivo
-                  ? "Ej: depósito en banco / pago proveedor"
-                  : "Opcional"
-              }
-            />
+            <Label>Motivo{requiereMotivo && <span className="ml-1 text-rose-600">*</span>}</Label>
+            <Textarea value={reason} onChange={(e) => setReason(e.target.value)} rows={2} placeholder={requiereMotivo ? "Ej: depósito en banco / pago proveedor" : "Opcional"} />
           </div>
         </div>
         <DialogFooter>
-          <Button variant="ghost" onClick={() => onOpenChange(false)}>
-            Cancelar
-          </Button>
-          <Button
-            disabled={!canSubmit}
-            onClick={() => onSubmit(cents, reason.trim() || null)}
-          >
-            {ctaLabel}
-          </Button>
+          <Button variant="ghost" onClick={() => onOpenChange(false)}>Cancelar</Button>
+          <Button disabled={!canSubmit} onClick={() => onSubmit(cents, reason.trim() || null)}>{ctaLabel}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
   );
 }
 
-// ── Modal de cierre con conciliación (simplificado) ────────────
-
-function CierreModal({
+function CorteModal({
   open,
   onOpenChange,
   cajaName,
-  opening,
   ventas,
   propinas,
   expected,
@@ -989,7 +624,6 @@ function CierreModal({
   open: boolean;
   onOpenChange: (o: boolean) => void;
   cajaName: string;
-  opening: number;
   ventas: number;
   propinas: number;
   expected: number;
@@ -999,14 +633,10 @@ function CierreModal({
   const [notes, setNotes] = useState("");
 
   useEffect(() => {
-    if (!open) {
-      setClosing("");
-      setNotes("");
-    }
+    if (!open) { setClosing(""); setNotes(""); }
   }, [open]);
 
-  const cents =
-    closing === "" ? null : Math.max(0, Math.round(Number(closing) * 100));
+  const cents = closing === "" ? null : Math.max(0, Math.round(Number(closing) * 100));
   const diff = cents === null ? 0 : cents - expected;
   const requiresNotes = cents !== null && diff !== 0;
 
@@ -1015,14 +645,11 @@ function CierreModal({
       <DialogContent>
         <DialogHeader>
           <DialogTitle>
-            Cerrar caja
-            <span className="ml-2 text-sm font-normal text-zinc-500">
-              · {cajaName}
-            </span>
+            Hacer corte
+            <span className="ml-2 text-sm font-normal text-zinc-500">· {cajaName}</span>
           </DialogTitle>
         </DialogHeader>
 
-        {/* Resumen del turno: solo lo esencial para cuadrar. */}
         <div className="rounded-xl bg-zinc-50 p-4 ring-1 ring-zinc-200/70">
           <p className="text-[0.65rem] font-semibold uppercase tracking-[0.14em] text-zinc-500">
             Lo que esperás encontrar
@@ -1031,51 +658,26 @@ function CierreModal({
             {formatCurrency(expected)}
           </p>
           <p className="mt-1 text-xs text-zinc-600">
-            Apertura {formatCurrency(opening)} + cobros en efectivo ({formatCurrency(ventas)})
+            Cobros en efectivo ({formatCurrency(ventas)})
             {propinas > 0 && ` + propinas (${formatCurrency(propinas)})`}
           </p>
         </div>
 
-        {/* Input cierre */}
         <div className="mt-4 grid gap-1.5">
           <Label className="text-sm font-medium">Efectivo contado en caja</Label>
           <div className="relative">
-            <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-base font-semibold text-zinc-400">
-              $
-            </span>
-            <Input
-              type="number"
-              value={closing}
-              onChange={(e) => setClosing(e.target.value)}
-              placeholder="0"
-              autoFocus
-              inputMode="decimal"
-              className="pl-7 text-base tabular-nums"
-            />
+            <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-base font-semibold text-zinc-400">$</span>
+            <Input type="number" value={closing} onChange={(e) => setClosing(e.target.value)} placeholder="0" autoFocus inputMode="decimal" className="pl-7 text-base tabular-nums" />
           </div>
         </div>
 
-        {/* Diferencia destacada */}
         {cents !== null && diff !== 0 && (
-          <div
-            className={cn(
-              "mt-4 flex items-center justify-between rounded-lg p-3 ring-1",
-              diff < 0
-                ? "bg-rose-50 ring-rose-200 text-rose-900"
-                : "bg-amber-50 ring-amber-200 text-amber-900",
-            )}
-          >
-            <span className="text-sm font-semibold">
-              {diff < 0 ? "Te falta" : "Te sobra"}
-            </span>
-            <span className="text-lg font-bold tabular-nums">
-              {diff > 0 ? "+" : "−"}
-              {formatCurrency(Math.abs(diff))}
-            </span>
+          <div className={cn("mt-4 flex items-center justify-between rounded-lg p-3 ring-1", diff < 0 ? "bg-rose-50 ring-rose-200 text-rose-900" : "bg-amber-50 ring-amber-200 text-amber-900")}>
+            <span className="text-sm font-semibold">{diff < 0 ? "Te falta" : "Te sobra"}</span>
+            <span className="text-lg font-bold tabular-nums">{diff > 0 ? "+" : "−"}{formatCurrency(Math.abs(diff))}</span>
           </div>
         )}
 
-        {/* OK cuadrado */}
         {cents !== null && diff === 0 && (
           <div className="mt-4 flex items-center justify-between rounded-lg bg-emerald-50 p-3 ring-1 ring-emerald-200 text-emerald-900">
             <span className="text-sm font-semibold">Cuadra perfecto</span>
@@ -1083,34 +685,21 @@ function CierreModal({
           </div>
         )}
 
-        {/* Notes obligatorio si diff != 0 */}
         {requiresNotes && (
           <div className="mt-3 grid gap-1.5">
-            <Label className="text-sm font-medium">
-              ¿Qué pasó?
-              <span className="ml-1 text-rose-600">*</span>
-            </Label>
-            <Textarea
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              rows={2}
-              placeholder="Vuelto mal dado, billete falso, propina mal cargada…"
-            />
+            <Label className="text-sm font-medium">¿Qué pasó?<span className="ml-1 text-rose-600">*</span></Label>
+            <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} placeholder="Vuelto mal dado, billete falso, propina mal cargada…" />
           </div>
         )}
 
         <DialogFooter>
-          <Button variant="ghost" onClick={() => onOpenChange(false)}>
-            Cancelar
-          </Button>
+          <Button variant="ghost" onClick={() => onOpenChange(false)}>Cancelar</Button>
           <Button
             disabled={cents === null || (requiresNotes && notes.trim() === "")}
-            onClick={() =>
-              cents !== null && onSubmit(cents, notes.trim() || null)
-            }
+            onClick={() => cents !== null && onSubmit(cents, notes.trim() || null)}
           >
             <Lock className="mr-2 size-4" />
-            Cerrar caja
+            Hacer corte
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -1118,3 +707,73 @@ function CierreModal({
   );
 }
 
+// ── Rendición por empleado ───────────────────────────────────────
+
+type RendicionRow = {
+  mozo_name: string;
+  method: PaymentMethod;
+  count: number;
+  total_cents: number;
+};
+
+function buildRendicion(payments: CajaPayment[]): RendicionRow[] {
+  const map = new Map<string, RendicionRow>();
+  for (const p of payments) {
+    const name = p.attributed_mozo_name ?? "Sin mozo";
+    const key = `${name}|${p.method}`;
+    const existing = map.get(key);
+    if (existing) {
+      existing.count += 1;
+      existing.total_cents += p.amount_cents;
+    } else {
+      map.set(key, { mozo_name: name, method: p.method, count: 1, total_cents: p.amount_cents });
+    }
+  }
+  return Array.from(map.values()).sort((a, b) =>
+    a.mozo_name === b.mozo_name ? a.method.localeCompare(b.method) : a.mozo_name.localeCompare(b.mozo_name),
+  );
+}
+
+function RendicionSection({ payments }: { payments: CajaPayment[] }) {
+  const rows = buildRendicion(payments);
+  const mozos = Array.from(new Set(rows.map((r) => r.mozo_name)));
+
+  return (
+    <div className="border-b border-zinc-100 p-5">
+      <p className="text-[0.65rem] font-semibold uppercase tracking-[0.14em] text-zinc-500">
+        Rendición por empleado
+      </p>
+      <div className="mt-3 overflow-hidden rounded-lg ring-1 ring-zinc-200/70">
+        <table className="w-full text-left text-sm">
+          <thead>
+            <tr className="border-b border-zinc-100 bg-zinc-50/60">
+              <th className="px-3 py-2 text-[0.65rem] font-semibold uppercase tracking-[0.14em] text-zinc-500">Mozo</th>
+              <th className="px-3 py-2 text-[0.65rem] font-semibold uppercase tracking-[0.14em] text-zinc-500">Método</th>
+              <th className="px-3 py-2 text-right text-[0.65rem] font-semibold uppercase tracking-[0.14em] text-zinc-500">Cant.</th>
+              <th className="px-3 py-2 text-right text-[0.65rem] font-semibold uppercase tracking-[0.14em] text-zinc-500">Total</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-zinc-100">
+            {mozos.map((mozo) => {
+              const mozoRows = rows.filter((r) => r.mozo_name === mozo);
+              const mozoTotal = mozoRows.reduce((acc, r) => acc + r.total_cents, 0);
+              return mozoRows.map((r, i) => (
+                <tr key={`${mozo}-${r.method}`} className={i === mozoRows.length - 1 && mozo !== mozos[mozos.length - 1] ? "border-b-2 border-zinc-200" : ""}>
+                  <td className="px-3 py-2 font-medium text-zinc-900">{i === 0 ? mozo : ""}</td>
+                  <td className="px-3 py-2 text-zinc-600">{METHOD_LABEL[r.method]}</td>
+                  <td className="px-3 py-2 text-right tabular-nums text-zinc-600">{r.count}</td>
+                  <td className="px-3 py-2 text-right font-medium tabular-nums text-zinc-900">
+                    {formatCurrency(r.total_cents)}
+                    {i === mozoRows.length - 1 && mozoRows.length > 1 && (
+                      <span className="ml-1 text-xs text-zinc-500">({formatCurrency(mozoTotal)})</span>
+                    )}
+                  </td>
+                </tr>
+              ));
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}

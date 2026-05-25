@@ -16,6 +16,14 @@ export type CartDailyMenuComponent = {
   description: string | null;
 };
 
+export type CartSelectedChoice = {
+  choice_group_id: string;
+  choice_group_label: string;
+  product_id: string;
+  product_name: string;
+  modifiers: CartModifier[];
+};
+
 /**
  * Un item del carrito es un `product` o un `daily_menu` (combo cerrado).
  * `kind` es el discriminador. Para ítems persistidos antes de introducir
@@ -35,6 +43,7 @@ export type CartItem = {
   product_id?: string;
   daily_menu_id?: string;
   components_snapshot?: CartDailyMenuComponent[];
+  selected_choices?: CartSelectedChoice[];
   product_name: string;
   unit_price_cents: number;
   quantity: number;

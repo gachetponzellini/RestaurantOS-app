@@ -160,13 +160,15 @@ async function main() {
   }
 
   // 8. Caja
-  const { data: turnos } = await supabase
-    .from("caja_turnos").select("id, status, opening_cash_cents, opened_at")
-    .eq("business_id", business.id);
+  const { data: cortes } = await supabase
+    .from("caja_cortes").select("id, closing_cash_cents, difference_cents, created_at")
+    .eq("business_id", business.id)
+    .order("created_at", { ascending: false })
+    .limit(10);
   console.log(`\n[Caja]`);
-  console.log(`  turnos totales: ${turnos?.length ?? 0}`);
-  for (const t of (turnos ?? [])) {
-    console.log(`  · ${t.status} apertura=$${Number(t.opening_cash_cents) / 100} (${t.opened_at})`);
+  console.log(`  cortes recientes: ${cortes?.length ?? 0}`);
+  for (const c of (cortes ?? [])) {
+    console.log(`  · cierre=$${Number(c.closing_cash_cents) / 100} diff=$${Number(c.difference_cents) / 100} (${c.created_at})`);
   }
 
   console.log();

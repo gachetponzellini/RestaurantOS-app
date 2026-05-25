@@ -26,6 +26,7 @@ const ROLE_LABELS: Record<BusinessMember["role"], string> = {
   admin: "Admin",
   encargado: "Encargado",
   mozo: "Mozo",
+  personal: "Personal",
 };
 
 const ROLE_STYLES: Record<BusinessMember["role"], string> = {
@@ -33,6 +34,7 @@ const ROLE_STYLES: Record<BusinessMember["role"], string> = {
     "bg-[color-mix(in_srgb,var(--brand)_15%,transparent)] text-[var(--brand)] border-transparent",
   encargado: "bg-zinc-100 text-zinc-700 border-transparent",
   mozo: "bg-amber-50 text-amber-700 border-transparent",
+  personal: "bg-violet-50 text-violet-700 border-transparent",
 };
 
 export function UserRow({
@@ -124,6 +126,11 @@ export function UserRow({
           )}
           {member.phone && (
             <p className="truncate text-xs text-zinc-500">{member.phone}</p>
+          )}
+          {member.pin && (
+            <p className="text-xs text-zinc-500">
+              PIN: <span className="font-mono">{member.pin}</span>
+            </p>
           )}
           <p className="text-xs text-zinc-500">
             Desde{" "}

@@ -49,6 +49,21 @@ export function prorrateEqualSplits(total_cents: number, count: number): number[
 }
 
 /**
+ * Agrupa items activos por seat_number. null = sin asignar.
+ */
+export function groupItemsBySeat(items: CuentaItem[]): Map<number | null, CuentaItem[]> {
+  const map = new Map<number | null, CuentaItem[]>();
+  for (const it of items) {
+    if (it.cancelled_at !== null) continue;
+    const key = it.seat_number ?? null;
+    const bucket = map.get(key) ?? [];
+    bucket.push(it);
+    map.set(key, bucket);
+  }
+  return map;
+}
+
+/**
  * Dividir por items: dado un mapping {split_index → orderItemIds}, calcula
  * el `expected_amount_cents` para cada split.
  *

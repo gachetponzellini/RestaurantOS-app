@@ -173,8 +173,8 @@ function TabChip({
 // ——— Create with password ———
 
 const CreateSchema = z.object({
-  email: z.string().email("Email inválido."),
-  password: z.string().min(8, "Mínimo 8 caracteres.").max(72),
+  email: z.string().max(200).optional(),
+  password: z.string().max(72).optional(),
   role: z.enum(BUSINESS_ROLES),
   full_name: z
     .string()
@@ -182,6 +182,7 @@ const CreateSchema = z.object({
     .min(1, "El nombre es obligatorio.")
     .max(80, "Nombre demasiado largo."),
   phone: z.string().trim().max(40, "Teléfono demasiado largo."),
+  pin: z.string().trim().max(4).optional(),
 });
 type CreateValues = z.infer<typeof CreateSchema>;
 
@@ -216,8 +217,11 @@ function CreateWithPasswordForm({
       role: "admin",
       full_name: "",
       phone: "",
+      pin: "",
     },
   });
+
+  const watchedRole = form.watch("role");
 
   const onSubmit = async (values: CreateValues) => {
     setSubmitting(true);
@@ -242,6 +246,7 @@ function CreateWithPasswordForm({
         role: "admin",
         full_name: "",
         phone: "",
+        pin: "",
       });
       router.refresh();
     } finally {
@@ -256,23 +261,25 @@ function CreateWithPasswordForm({
         className="grid gap-4 rounded-2xl bg-white p-4 ring-1 ring-zinc-200/70"
       >
         <div className="grid gap-4 sm:grid-cols-2">
-          <FormField
-            control={form.control}
-            name="email"
-            render={({ field }) => (
-              <FormItem>
-                <FormLabel>Email</FormLabel>
-                <FormControl>
-                  <Input
-                    type="email"
-                    placeholder="miembro@ejemplo.com"
-                    {...field}
-                  />
-                </FormControl>
-                <FormMessage />
-              </FormItem>
-            )}
-          />
+          {watchedRole !== "personal" && (
+            <FormField
+              control={form.control}
+              name="email"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Email</FormLabel>
+                  <FormControl>
+                    <Input
+                      type="email"
+                      placeholder="miembro@ejemplo.com"
+                      {...field}
+                    />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+          )}
           <FormField
             control={form.control}
             name="full_name"
@@ -314,58 +321,85 @@ function CreateWithPasswordForm({
               </FormItem>
             )}
           />
-        </div>
-
-        <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_160px]">
           <FormField
             control={form.control}
-            name="password"
+            name="pin"
             render={({ field }) => (
               <FormItem>
-                <FormLabel>Contraseña</FormLabel>
+                <FormLabel>
+                  PIN de fichada{" "}
+                  {watchedRole !== "personal" && (
+                    <span className="font-normal text-zinc-500">(opcional)</span>
+                  )}
+                </FormLabel>
                 <FormControl>
-                  <div className="relative">
-                    <Input
-                      type={showPass ? "text" : "password"}
-                      className="pr-20 font-mono"
-                      {...field}
-                    />
-                    <div className="absolute right-1 top-1/2 flex -translate-y-1/2 gap-1">
-                      <button
-                        type="button"
-                        aria-label="Generar aleatoria"
-                        onClick={() =>
-                          form.setValue("password", generatePassword(), {
-                            shouldDirty: true,
-                          })
-                        }
-                        className="rounded-md p-1.5 text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-900"
-                        title="Generar aleatoria"
-                      >
-                        <RefreshCw className="size-4" />
-                      </button>
-                      <button
-                        type="button"
-                        aria-label={showPass ? "Ocultar" : "Mostrar"}
-                        onClick={() => setShowPass((v) => !v)}
-                        className="rounded-md p-1.5 text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-900"
-                      >
-                        {showPass ? (
-                          <EyeOff className="size-4" />
-                        ) : (
-                          <Eye className="size-4" />
-                        )}
-                      </button>
-                    </div>
-                  </div>
+                  <Input
+                    type="text"
+                    inputMode="numeric"
+                    maxLength={4}
+                    placeholder="4 dígitos"
+                    {...field}
+                    value={field.value ?? ""}
+                  />
                 </FormControl>
                 <FormMessage />
-                <p className="text-xs text-zinc-500">
-                  La compartís vos. El miembro la puede cambiar después.
-                </p>
               </FormItem>
             )}
           />
+        </div>
+
+        <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_160px]">
+          {watchedRole !== "personal" && (
+            <FormField
+              control={form.control}
+              name="password"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Contraseña</FormLabel>
+                  <FormControl>
+                    <div className="relative">
+                      <Input
+                        type={showPass ? "text" : "password"}
+                        className="pr-20 font-mono"
+                        {...field}
+                      />
+                      <div className="absolute right-1 top-1/2 flex -translate-y-1/2 gap-1">
+                        <button
+                          type="button"
+                          aria-label="Generar aleatoria"
+                          onClick={() =>
+                            form.setValue("password", generatePassword(), {
+                              shouldDirty: true,
+                            })
+                          }
+                          className="rounded-md p-1.5 text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-900"
+                          title="Generar aleatoria"
+                        >
+                          <RefreshCw className="size-4" />
+                        </button>
+                        <button
+                          type="button"
+                          aria-label={showPass ? "Ocultar" : "Mostrar"}
+                          onClick={() => setShowPass((v) => !v)}
+                          className="rounded-md p-1.5 text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-900"
+                        >
+                          {showPass ? (
+                            <EyeOff className="size-4" />
+                          ) : (
+                            <Eye className="size-4" />
+                          )}
+                        </button>
+                      </div>
+                    </div>
+                  </FormControl>
+                  <FormMessage />
+                  <p className="text-xs text-zinc-500">
+                    La compartís vos. El miembro la puede cambiar después.
+                  </p>
+                </FormItem>
+              )}
+            />
+          )}
           <FormField
             control={form.control}
             name="role"
@@ -584,6 +618,7 @@ const LinkSchema = z.object({
     .min(1, "El nombre es obligatorio.")
     .max(80, "Nombre demasiado largo."),
   phone: z.string().trim().max(40, "Teléfono demasiado largo."),
+  pin: z.string().trim().max(4).optional(),
 });
 type LinkValues = z.infer<typeof LinkSchema>;
 
@@ -598,7 +633,7 @@ function LinkInviteForm({
   const [submitting, setSubmitting] = useState(false);
   const form = useForm<LinkValues>({
     resolver: zodResolver(LinkSchema),
-    defaultValues: { email: "", role: "admin", full_name: "", phone: "" },
+    defaultValues: { email: "", role: "admin", full_name: "", phone: "", pin: "" },
   });
 
   const onSubmit = async (values: LinkValues) => {
@@ -622,7 +657,7 @@ function LinkInviteForm({
       } else {
         toast.success(`${values.email} ya tiene acceso.`);
       }
-      form.reset({ email: "", role: "admin", full_name: "", phone: "" });
+      form.reset({ email: "", role: "admin", full_name: "", phone: "", pin: "" });
       router.refresh();
     } finally {
       setSubmitting(false);

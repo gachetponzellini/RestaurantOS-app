@@ -79,6 +79,7 @@ export const ProductInput = z.object({
   is_available: z.boolean(),
   is_active: z.boolean(),
   sort_order: z.number().int().min(0),
+  prep_time_minutes: z.number().int().min(1).max(999).nullable().optional(),
   modifier_groups: z.array(ModifierGroupInput),
 });
 export type ProductInput = z.infer<typeof ProductInput>;

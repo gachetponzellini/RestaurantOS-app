@@ -1,6 +1,6 @@
 import "server-only";
 
-import { ChatOpenAI } from "@langchain/openai";
+import { ChatAnthropic } from "@langchain/anthropic";
 import {
   AIMessage,
   HumanMessage,
@@ -150,9 +150,18 @@ Cuando mandes el link, usá esta estructura:
 // in a single turn, so we allow a bit more headroom.
 const MAX_TOOL_ITERATIONS = 8;
 
-// Override via CHATBOT_MODEL in .env.local. Defaults to gpt-4o which follows
-// multi-section prompts reliably; drop to gpt-4o-mini if cost becomes an issue.
-const CHATBOT_MODEL = process.env.CHATBOT_MODEL ?? "gpt-4o";
+// Override via CHATBOT_MODEL in .env.local. Defaults to Claude Opus 4.7 (the
+// most capable Claude model). For cost-sensitive deployments, set
+// CHATBOT_MODEL=claude-sonnet-4-6 in env — Sonnet 4.6 is the natural
+// gpt-4o-equivalent in price/speed for a tool-calling chatbot. Both support
+// adaptive thinking and prompt caching out of the box.
+const CHATBOT_MODEL = process.env.CHATBOT_MODEL ?? "claude-opus-4-7";
+
+// Cap on the assistant's per-response output. Anthropic requires this be
+// explicit; we keep it small because messages are short (WhatsApp-style).
+// If the bot ever needs to send long structured output (rare in this product),
+// bump this in env via CHATBOT_MAX_TOKENS.
+const CHATBOT_MAX_TOKENS = Number(process.env.CHATBOT_MAX_TOKENS ?? 4096);
 
 export async function runChatbot(
   input: RunChatbotInput,
@@ -1213,6 +1222,27 @@ function buildListReservationSalonesTool(ctx: BotCtx) {
   );
 }
 
+/**
+ * Normaliza un `floor_plan_id` que viene del LLM. Los modelos suelen
+ * rellenar campos opcionales con `null`, `""`, `"null"` o `"undefined"`
+ * en vez de omitirlos. Los mapeamos a null. Si el valor no parece un UUID,
+ * también devolvemos null y dejamos que la capa de datos resuelva (cae al
+ * primer floor_plan, comportamiento legacy). Reusamos `UUID_RE` (definido
+ * arriba para product_id / modifier_id).
+ */
+function normalizeFloorPlanId(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  const trimmed = raw.trim();
+  if (
+    trimmed === "" ||
+    trimmed.toLowerCase() === "null" ||
+    trimmed.toLowerCase() === "undefined"
+  ) {
+    return null;
+  }
+  return UUID_RE.test(trimmed) ? trimmed : null;
+}
+
 function buildCheckReservationAvailabilityTool(ctx: BotCtx) {
   return tool(
     async ({
@@ -1228,7 +1258,7 @@ function buildCheckReservationAvailabilityTool(ctx: BotCtx) {
         ctx.businessId,
         date,
         party_size,
-        floor_plan_id ?? null,
+        normalizeFloorPlanId(floor_plan_id),
       );
       return JSON.stringify(result);
     },
@@ -1248,12 +1278,15 @@ function buildCheckReservationAvailabilityTool(ctx: BotCtx) {
           .int()
           .min(1)
           .describe("Cantidad de comensales. Entero ≥ 1."),
+        // No usamos `.uuid()` acá: el LLM a veces manda `null`, `""` o el
+        // string "null" en campos opcionales y `.uuid()` los rechazaría
+        // (z.preprocess no se puede serializar a JSON Schema, que es lo que
+        // LangChain le manda a Claude). Validamos / normalizamos abajo.
         floor_plan_id: z
           .string()
-          .uuid()
           .optional()
           .describe(
-            "Id del salón elegido. Obligatorio si list_reservation_salones devolvió multi_salon=true; omitilo si no.",
+            "Id del salón elegido (UUID). Obligatorio si list_reservation_salones devolvió multi_salon=true; omitilo si no.",
           ),
       }),
     },
@@ -1287,7 +1320,7 @@ function buildGenerateReservationLinkTool(ctx: BotCtx) {
         customerName: customer_name ?? null,
         customerPhone: phone || null,
         notes: notes ?? null,
-        floorPlanId: floor_plan_id ?? null,
+        floorPlanId: normalizeFloorPlanId(floor_plan_id),
       });
       if (!result.ok) {
         return JSON.stringify({
@@ -1337,10 +1370,9 @@ function buildGenerateReservationLinkTool(ctx: BotCtx) {
           ),
         floor_plan_id: z
           .string()
-          .uuid()
           .optional()
           .describe(
-            "Id del salón elegido. Debe coincidir con el `floor_plan_id` usado en check_reservation_availability cuando hay más de un salón.",
+            "Id del salón elegido (UUID). Debe coincidir con el `floor_plan_id` usado en check_reservation_availability cuando hay más de un salón.",
           ),
       }),
     },
@@ -1461,14 +1493,37 @@ async function invokeLlm({
   const toolsByName: Record<string, StructuredToolInterface> =
     Object.fromEntries(tools.map((t) => [t.name, t]));
 
-  const baseLlm = new ChatOpenAI({
+  // Adaptive thinking lets Claude decide per-turn whether to "think" before
+  // responding — solo los turnos complejos pagan latencia. `temperature`
+  // no se acepta en Opus 4.7 (devuelve 400), así que no lo seteamos.
+  // `ANTHROPIC_API_KEY` se lee de env automáticamente por el wrapper.
+  // Si querés latencia mínima sin razonamiento, exportá `CHATBOT_MODEL` a
+  // claude-sonnet-4-6 (también soporta adaptive thinking) o claude-haiku-4-5.
+  const baseLlm = new ChatAnthropic({
     model: CHATBOT_MODEL,
-    temperature: 0.3,
+    maxTokens: CHATBOT_MAX_TOKENS,
+    thinking: { type: "disabled" },
   });
   // bindTools with an empty list confuses some providers; only bind when we have any.
   const llm = tools.length > 0 ? baseLlm.bindTools(tools) : baseLlm;
 
-  const messages: BaseMessage[] = [new SystemMessage(systemPrompt)];
+  // Prompt caching: marcamos el system prompt como `ephemeral`. Anthropic
+  // hace prefix-match en (tools → system → messages); cachear el último
+  // bloque del system también cachea las tool definitions que lo preceden.
+  // Lectura del cache cuesta ~0.1x, escritura ~1.25x, y vive 5 min por default.
+  // Ojo: el cache se invalida si cambian las tools habilitadas, el prompt
+  // resuelto (placeholders), o el modelo — ver wiki/decisiones/prompt-caching.
+  const messages: BaseMessage[] = [
+    new SystemMessage({
+      content: [
+        {
+          type: "text",
+          text: systemPrompt,
+          cache_control: { type: "ephemeral" },
+        },
+      ],
+    }),
+  ];
 
   // When the conversation history is empty, nudge the model so it doesn't fall
   // back to a generic "¿en qué te ayudo?" reply. The prompt has a "Primer
@@ -1544,7 +1599,11 @@ async function invokeLlm({
       "(Se alcanzó el límite de llamadas a herramientas. Respondé ahora con lo que sepas, sin llamar más herramientas.)",
     ),
   );
-  const finalLlm = new ChatOpenAI({ model: CHATBOT_MODEL, temperature: 0.3 });
+  const finalLlm = new ChatAnthropic({
+    model: CHATBOT_MODEL,
+    maxTokens: CHATBOT_MAX_TOKENS,
+    thinking: { type: "disabled" },
+  });
   const final = await finalLlm.invoke(messages);
   return { assistantMessage: extractText(final.content), toolTrace };
 }

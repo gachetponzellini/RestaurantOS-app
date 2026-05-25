@@ -7,6 +7,12 @@ export type AdminDailyMenuComponent = {
   label: string;
   description: string | null;
   sort_order: number;
+  kind: "text" | "product" | "choice";
+  product_id: string | null;
+  choice_group_id: string | null;
+  choice_group_label: string | null;
+  product_name: string | null;
+  product_image_url: string | null;
 };
 
 export type AdminDailyMenu = {
@@ -24,7 +30,7 @@ export type AdminDailyMenu = {
 };
 
 const SELECT =
-  "id, name, slug, description, price_cents, image_url, available_days, is_active, is_available, sort_order, daily_menu_components(id, label, description, sort_order)";
+  "id, name, slug, description, price_cents, image_url, available_days, is_active, is_available, sort_order, daily_menu_components(id, label, description, sort_order, kind, product_id, choice_group_id, choice_group_label, products(id, name, image_url))";
 
 function mapRow(
   row: {
@@ -44,6 +50,11 @@ function mapRow(
           label: string;
           description: string | null;
           sort_order: number;
+          kind?: string;
+          product_id?: string | null;
+          choice_group_id?: string | null;
+          choice_group_label?: string | null;
+          products?: { id: string; name: string; image_url: string | null } | null;
         }[]
       | null;
   },
@@ -67,6 +78,12 @@ function mapRow(
         label: c.label,
         description: c.description,
         sort_order: c.sort_order,
+        kind: (c.kind as "text" | "product" | "choice") ?? "text",
+        product_id: c.product_id ?? null,
+        choice_group_id: c.choice_group_id ?? null,
+        choice_group_label: c.choice_group_label ?? null,
+        product_name: c.products?.name ?? null,
+        product_image_url: c.products?.image_url ?? null,
       })),
   };
 }
@@ -80,7 +97,8 @@ export async function getAdminDailyMenus(
     .select(SELECT)
     .eq("business_id", businessId)
     .order("sort_order");
-  return (data ?? []).map(mapRow);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return ((data ?? []) as any[]).map(mapRow);
 }
 
 export async function getAdminDailyMenu(
@@ -92,5 +110,6 @@ export async function getAdminDailyMenu(
     .select(SELECT)
     .eq("id", id)
     .maybeSingle();
-  return data ? mapRow(data) : null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return data ? mapRow(data as any) : null;
 }

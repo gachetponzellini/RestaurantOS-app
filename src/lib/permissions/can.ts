@@ -25,7 +25,7 @@ export const DESCUENTO_BAJO_PCT = 10;
 export const DESCUENTO_MEDIO_PCT = 25;
 
 /** Diferencia absoluta máxima de caja (en centavos) que el encargado puede
- *  aceptar al cerrar turno sin escalar a admin. $5.000 ARS por defecto. */
+ *  aceptar en un corte sin escalar a admin. $5.000 ARS por defecto. */
 export const DIFERENCIA_CAJA_OK_CENTS = 500_000;
 
 // ── Operación de salón ──────────────────────────────────────────
@@ -67,22 +67,13 @@ export function canApplyDiscount(role: BusinessRole, percent: number): boolean {
   return false;
 }
 
-// ── Caja / turno ────────────────────────────────────────────────
+// ── Caja / cortes ───────────────────────────────────────────────
 
-export function canOpenCajaTurno(role: BusinessRole): boolean {
-  return role === "admin" || role === "encargado";
-}
-
-/**
- * Gestionar el catálogo de cajas físicas: crear, renombrar, deshabilitar.
- * Solo el admin del negocio. El encargado puede ABRIR turnos pero no
- * configurar qué cajas existen.
- */
 export function canManageCajas(role: BusinessRole): boolean {
   return role === "admin";
 }
 
-export function canCloseCajaTurno(role: BusinessRole): boolean {
+export function canHacerCorte(role: BusinessRole): boolean {
   return role === "admin" || role === "encargado";
 }
 
@@ -147,7 +138,7 @@ export function canTransferTable(
 
 /**
  * Asignar/cambiar/limpiar el `mozo_id` de una mesa fuera del flujo de
- * transferencia (ej: encargado pre-asigna mesas antes del turno). Mozo no
+ * transferencia (ej: encargado pre-asigna mesas antes del servicio). Mozo no
  * puede asignar mesas a otros — solo se auto-asigna por walk-in (CU-09 R2).
  */
 export function canAssignMozo(role: BusinessRole): boolean {

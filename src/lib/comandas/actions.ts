@@ -21,15 +21,29 @@ type GenericClient = SupabaseClient;
  * mozo, sin campos ya calculados (precio, station — se resuelven server).
  */
 export type EnviarComandaItem = {
+  kind?: "product";
   product_id: string;
   quantity: number;
   notes?: string | null;
   modifier_ids?: string[];
+  seat_number?: number | null;
+};
+
+export type EnviarComandaDailyMenuItem = {
+  kind: "daily_menu";
+  daily_menu_id: string;
+  quantity: number;
+  notes?: string | null;
+  selected_choices?: {
+    choice_group_id: string;
+    product_id: string;
+    modifier_ids?: string[];
+  }[];
 };
 
 export type EnviarComandaInput = {
   tableId: string;
-  items: EnviarComandaItem[];
+  items: (EnviarComandaItem | EnviarComandaDailyMenuItem)[];
   slug: string;
 };
 
@@ -85,7 +99,14 @@ export async function enviarComanda(
     return actionError("Mesa no encontrada.");
   }
 
-  const productIds = [...new Set(input.items.map((i) => i.product_id))];
+  const productItems = input.items.filter(
+    (i): i is EnviarComandaItem => i.kind !== "daily_menu",
+  );
+  const dailyMenuItems = input.items.filter(
+    (i): i is EnviarComandaDailyMenuItem => i.kind === "daily_menu",
+  );
+
+  const productIds = [...new Set(productItems.map((i) => i.product_id))];
   const { data: productRows } = await service
     .from("products")
     .select(
@@ -117,7 +138,7 @@ export async function enviarComanda(
   }
 
   const allModifierIds = [
-    ...new Set(input.items.flatMap((i) => i.modifier_ids ?? [])),
+    ...new Set(productItems.flatMap((i) => i.modifier_ids ?? [])),
   ];
   type ModifierRow = {
     id: string;
@@ -156,7 +177,7 @@ export async function enviarComanda(
     .from("modifier_groups")
     .select("id, product_id, name, min_selection, max_selection")
     .in("product_id", productIds);
-  for (const inputItem of input.items) {
+  for (const inputItem of productItems) {
     const productGroups = ((groups ?? []) as unknown as GroupRow[]).filter(
       (g) => g.product_id === inputItem.product_id,
     );
@@ -232,7 +253,7 @@ export async function enviarComanda(
   // gestiona directo. Decisión 2026-05-07.
   const itemsByStation = new Map<string, string[]>();
 
-  for (const inputItem of input.items) {
+  for (const inputItem of productItems) {
     const product = productById.get(inputItem.product_id)!;
     const stationId = resolveStation(
       { station_id: product.station_id, category: product.category },
@@ -244,6 +265,11 @@ export async function enviarComanda(
     const modsTotal = mods.reduce((a, m) => a + Number(m.price_delta_cents), 0);
     const subtotal =
       (Number(product.price_cents) + modsTotal) * inputItem.quantity;
+
+    const seatNum =
+      inputItem.seat_number != null && inputItem.seat_number >= 1
+        ? inputItem.seat_number
+        : null;
 
     const { data: itemRow, error: itemErr } = await service
       .from("order_items")
@@ -259,6 +285,7 @@ export async function enviarComanda(
         station_id: stationId,
         loaded_by: user.id,
         kitchen_status: "pending",
+        seat_number: seatNum,
       } as any)
       .select("id")
       .single();
@@ -288,6 +315,124 @@ export async function enviarComanda(
       const bucket = itemsByStation.get(stationId) ?? [];
       bucket.push((itemRow as { id: string }).id);
       itemsByStation.set(stationId, bucket);
+    }
+  }
+
+  // ── Daily menu items: crear padre + hijos ──
+  for (const menuItem of dailyMenuItems) {
+    const { data: menuRow } = await service
+      .from("daily_menus")
+      .select(
+        "id, name, price_cents, image_url, business_id, is_active, is_available, daily_menu_components(id, label, description, sort_order, kind, product_id, choice_group_id, choice_group_label)",
+      )
+      .eq("id", menuItem.daily_menu_id)
+      .maybeSingle();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const menu = menuRow as any;
+    if (!menu || menu.business_id !== business.id) {
+      return actionError("Menú del día no encontrado.");
+    }
+    if (!menu.is_active || !menu.is_available) {
+      return actionError(`"${menu.name}" no está disponible.`);
+    }
+
+    const menuPrice = Number(menu.price_cents);
+    const menuSubtotal = menuPrice * menuItem.quantity;
+    const components = (menu.daily_menu_components ?? [])
+      .slice()
+      .sort((a: any, b: any) => a.sort_order - b.sort_order);
+    const snapshot = {
+      name: menu.name,
+      image_url: menu.image_url,
+      components: components.map((c: any) => ({
+        label: c.label,
+        description: c.description,
+        kind: c.kind ?? "text",
+        product_id: c.product_id,
+      })),
+    };
+
+    const { data: parentRow, error: parentErr } = await service
+      .from("order_items")
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .insert({
+        order_id: orderId,
+        product_id: null,
+        daily_menu_id: menu.id,
+        daily_menu_snapshot: snapshot,
+        product_name: menu.name,
+        unit_price_cents: menuPrice,
+        quantity: menuItem.quantity,
+        notes: menuItem.notes ?? null,
+        subtotal_cents: menuSubtotal,
+        loaded_by: user.id,
+        kitchen_status: "pending",
+      } as any)
+      .select("id")
+      .single();
+    if (parentErr || !parentRow) {
+      console.error("enviarComanda · daily_menu parent insert", parentErr);
+      return actionError("No pudimos guardar el menú del día.");
+    }
+    const parentId = (parentRow as { id: string }).id;
+
+    const childProductIds: string[] = [];
+    for (const c of components) {
+      if (c.kind === "product" && c.product_id) childProductIds.push(c.product_id);
+    }
+    for (const sc of menuItem.selected_choices ?? []) {
+      childProductIds.push(sc.product_id);
+    }
+
+    if (childProductIds.length > 0) {
+      const missingIds = [...new Set(childProductIds)].filter(
+        (id) => !productById.has(id),
+      );
+      if (missingIds.length > 0) {
+        const { data: childProds } = await service
+          .from("products")
+          .select(
+            "id, name, price_cents, business_id, is_active, is_available, station_id, category:categories(station_id)",
+          )
+          .in("id", missingIds);
+        for (const p of (childProds ?? []) as unknown as ProductRow[]) {
+          productById.set(p.id, p);
+        }
+      }
+
+      for (const pid of [...new Set(childProductIds)]) {
+        const childProduct = productById.get(pid);
+        if (!childProduct) continue;
+        const childStation = resolveStation(
+          { station_id: childProduct.station_id, category: childProduct.category },
+          null,
+        );
+
+        const { data: childRow } = await service
+          .from("order_items")
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          .insert({
+            order_id: orderId,
+            product_id: pid,
+            product_name: childProduct.name,
+            unit_price_cents: 0,
+            quantity: menuItem.quantity,
+            subtotal_cents: 0,
+            parent_order_item_id: parentId,
+            is_combo_component: true,
+            station_id: childStation,
+            loaded_by: user.id,
+            kitchen_status: "pending",
+          } as any)
+          .select("id")
+          .single();
+
+        if (childRow && childStation) {
+          const bucket = itemsByStation.get(childStation) ?? [];
+          bucket.push((childRow as { id: string }).id);
+          itemsByStation.set(childStation, bucket);
+        }
+      }
     }
   }
 

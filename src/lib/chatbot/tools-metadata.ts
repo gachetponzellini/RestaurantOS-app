@@ -173,9 +173,15 @@ Devuelve los slots (horarios HH:MM) disponibles para reservar en una fecha (YYYY
 - \`date\`: formato \`YYYY-MM-DD\` en hora local del negocio.
 - \`party_size\`: entero ≥ 1. Si supera el máximo, devuelve \`error: "party_size_too_large"\` con \`max_party_size\` — pasale ese dato al cliente.
 - \`floor_plan_id\` (opcional): si \`list_reservation_salones\` devolvió \`multi_salon: true\`, **siempre** pasá el id del salón que eligió el cliente. Si \`multi_salon\` es false, omitilo.
-- Si devuelve \`slots: []\`, ofrecé otra fecha cercana o sugerí cambiar la cantidad de personas (o probar otro salón si hay varios).
 - **Siempre** llamala antes de \`generate_reservation_link\`. Nunca generes un link con un slot que no apareció en esta lista.
-- Mostrale al cliente los slots tal cual te los pasa la tool, sin reformatear los horarios.`,
+- Mostrale al cliente los slots tal cual te los pasa la tool, sin reformatear los horarios.
+
+**Cuando \`count: 0\` la tool devuelve un \`diagnostic\` — usalo para explicar al cliente por qué no hay**:
+- \`"no_schedule_configured"\` → el negocio no cargó horarios de reserva. Decí algo como *"Por ahora no estamos tomando reservas online, ¿te conviene venir directamente?"*. **No insistas** pidiendo otra fecha.
+- \`"day_closed"\` → ese día está cerrado. Sugerí otro día mirando el array \`open_days_of_week\` (0=dom, 1=lun, …, 6=sáb).
+- \`"no_tables_fit_party"\` → todas las mesas son chicas. Si \`max_seats_available\` es 0 → no hay mesas cargadas en el plano; decile al cliente que llame. Si es >0 → sugerí reservar para esa cantidad o dividir.
+- \`"lead_time_or_past"\` → todos los turnos del día ya pasaron o están dentro de \`lead_time_min\`. Sugerí el día siguiente.
+- \`"fully_booked"\` → hay turnos abiertos pero están todos llenos. Sugerí otra fecha o party_size distinto.`,
   },
   {
     name: "generate_reservation_link",

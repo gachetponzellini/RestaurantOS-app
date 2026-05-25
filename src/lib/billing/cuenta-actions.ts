@@ -12,6 +12,7 @@ import { getBusiness } from "@/lib/tenant";
 import {
   calculateTotals,
   expectedBySplitItems,
+  groupItemsBySeat,
   prorrateEqualSplits,
   sumActiveItems,
 } from "./totals";
@@ -55,7 +56,7 @@ async function loadActiveItems(
   const { data } = await service
     .from("order_items")
     .select(
-      "id, product_name, quantity, subtotal_cents, notes, station_id, cancelled_at, loaded_by",
+      "id, product_name, quantity, subtotal_cents, notes, station_id, cancelled_at, loaded_by, seat_number",
     )
     .eq("order_id", orderId);
   return (data ?? []) as CuentaItem[];
@@ -234,7 +235,7 @@ async function persistSplits(
   orderId: string,
   businessId: string,
   mode: SplitMode,
-  expecteds: Array<{ split_index: number; expected_amount_cents: number }>,
+  expecteds: Array<{ split_index: number; expected_amount_cents: number; label?: string | null }>,
   itemsByIndex: Map<number, string[]> | null,
 ): Promise<OrderSplit[]> {
   await deleteSplitsAndItems(service, orderId);
@@ -247,6 +248,7 @@ async function persistSplits(
     expected_amount_cents: e.expected_amount_cents,
     paid_amount_cents: 0,
     status: "pending" as const,
+    label: e.label ?? null,
   }));
 
   const { data: inserted, error } = await service
@@ -259,7 +261,7 @@ async function persistSplits(
 
   const splits = (inserted ?? []) as OrderSplit[];
 
-  if (mode === "por_items" && itemsByIndex) {
+  if ((mode === "por_items" || mode === "por_comensal") && itemsByIndex) {
     const splitIdByIndex = new Map(splits.map((s) => [s.split_index, s.id]));
     const itemsRows: Array<{ split_id: string; order_item_id: string }> = [];
     for (const [idx, ids] of itemsByIndex.entries()) {
@@ -400,6 +402,86 @@ export async function dividirPorItems(
       "por_items",
       expecteds,
       mappingMap,
+    );
+    revalidatePath(`/${businessSlug}/mozo`);
+    return actionOk({ splits });
+  } catch (e) {
+    return actionError(`No se pudieron crear los splits: ${(e as Error).message}`);
+  }
+}
+
+export async function dividirPorComensal(
+  orderId: string,
+  businessSlug: string,
+): Promise<ActionResult<{ splits: OrderSplit[] }>> {
+  const business = await getBusiness(businessSlug);
+  if (!business) return actionError("Negocio no encontrado.");
+
+  const ctxResult = await requireMozoActionContext(business.id);
+  if (!ctxResult.ok) return ctxResult;
+
+  const service = createSupabaseServiceClient() as unknown as GenericClient;
+  const order = await loadOrderForBusiness(service, orderId, business.id);
+  if (!order) return actionError("Orden no encontrada.");
+  if (order.lifecycle_status !== "open") {
+    return actionError("La orden ya está cerrada.");
+  }
+
+  const items = await loadActiveItems(service, orderId);
+  if (items.length === 0 || sumActiveItems(items) === 0) {
+    return actionError("No hay items para dividir.");
+  }
+
+  const bySeat = groupItemsBySeat(items);
+  if (bySeat.size < 2 && !bySeat.has(null)) {
+    return actionError("Se necesitan al menos 2 comensales para dividir.");
+  }
+
+  const mapping = new Map<number, string[]>();
+  const labels = new Map<number, string>();
+  let splitIndex = 1;
+
+  const seatNumbers = Array.from(bySeat.keys())
+    .filter((k): k is number => k !== null)
+    .sort((a, b) => a - b);
+
+  for (const seatNum of seatNumbers) {
+    const seatItems = bySeat.get(seatNum)!;
+    mapping.set(splitIndex, seatItems.map((it) => it.id));
+    labels.set(splitIndex, `Comensal ${seatNum}`);
+    splitIndex++;
+  }
+
+  const unassigned = bySeat.get(null);
+  if (unassigned && unassigned.length > 0) {
+    mapping.set(splitIndex, unassigned.map((it) => it.id));
+    labels.set(splitIndex, "Sin asignar");
+  }
+
+  if (mapping.size < 2) {
+    return actionError("Se necesitan al menos 2 sub-cuentas para dividir.");
+  }
+
+  const expecteds = expectedBySplitItems({
+    items,
+    mapping,
+    tip_cents: order.tip_cents,
+    discount_cents: order.discount_cents,
+  });
+
+  const expectedsWithLabels = expecteds.map((e) => ({
+    ...e,
+    label: labels.get(e.split_index) ?? null,
+  }));
+
+  try {
+    const splits = await persistSplits(
+      service,
+      orderId,
+      business.id,
+      "por_comensal",
+      expectedsWithLabels,
+      mapping,
     );
     revalidatePath(`/${businessSlug}/mozo`);
     return actionOk({ splits });

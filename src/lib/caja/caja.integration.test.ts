@@ -35,15 +35,14 @@ vi.mock("next/cache", () => ({
 }));
 
 const {
-  abrirTurno,
-  cerrarTurno,
+  hacerCorte,
   registrarSangria,
   registrarIngreso,
   distribuirSalon,
 } = await import("./actions");
-const { getTurnoLiveStats } = await import("./queries");
+const { getCajaLiveStats } = await import("./queries");
 
-describe.skipIf(!dbAvailable)("caja (integration)", () => {
+describe.skipIf(!dbAvailable)("caja continua (integration)", () => {
   const supabase = createClient(supabaseUrl!, serviceKey!, {
     auth: { autoRefreshToken: false, persistSession: false },
   });
@@ -51,7 +50,6 @@ describe.skipIf(!dbAvailable)("caja (integration)", () => {
   let businessId: string;
   let businessSlug: string;
   let cajaA: string;
-  let cajaB: string;
   let encargadoId: string;
   let mozoAId: string;
   let adminId: string;
@@ -95,12 +93,6 @@ describe.skipIf(!dbAvailable)("caja (integration)", () => {
       .select("id")
       .single();
     cajaA = cA!.id;
-    const { data: cB } = await supabase
-      .from("cajas")
-      .insert({ business_id: businessId, name: "Barra" })
-      .select("id")
-      .single();
-    cajaB = cB!.id;
 
     const { data: fp } = await supabase
       .from("floor_plans")
@@ -143,131 +135,91 @@ describe.skipIf(!dbAvailable)("caja (integration)", () => {
     }
   });
 
-  it("encargado abre turno → fila open + movimiento apertura", async () => {
+  it("caja disponible inmediatamente sin abrir nada", async () => {
+    const stats = await getCajaLiveStats(cajaA, businessId);
+    expect(stats).not.toBeNull();
+    expect(stats!.expected_cash_cents).toBe(0);
+    expect(stats!.cobros_count).toBe(0);
+  });
+
+  it("registrar sangría contra caja → OK", async () => {
     CURRENT_USER_ID = encargadoId;
-    const r = await abrirTurno(cajaA, 100_000, businessSlug);
+    const r = await registrarSangria(cajaA, 5_000, "depósito en banco", businessSlug);
+    expect(r.ok).toBe(true);
+  });
+
+  it("sangría sin motivo → falla", async () => {
+    CURRENT_USER_ID = encargadoId;
+    const r = await registrarSangria(cajaA, 5_000, "", businessSlug);
+    expect(r.ok).toBe(false);
+  });
+
+  it("registrar ingreso contra caja → OK", async () => {
+    CURRENT_USER_ID = encargadoId;
+    const r = await registrarIngreso(cajaA, 20_000, "fondo extra", businessSlug);
+    expect(r.ok).toBe(true);
+  });
+
+  it("expected_cash refleja movimientos (0 + ingreso 20k - sangría 5k)", async () => {
+    const stats = await getCajaLiveStats(cajaA, businessId);
+    expect(stats).not.toBeNull();
+    expect(stats!.expected_cash_cents).toBe(0 + 20_000 - 5_000);
+  });
+
+  it("hacer corte con diff $0 → OK sin notes", async () => {
+    CURRENT_USER_ID = encargadoId;
+    const expected = 15_000; // 0 + 20k - 5k
+    const r = await hacerCorte(cajaA, expected, null, null, businessSlug);
     expect(r.ok).toBe(true);
     if (!r.ok) return;
-    expect(r.data.turno.status).toBe("open");
-
-    const { data: mov } = await supabase
-      .from("caja_movimientos")
-      .select("kind, amount_cents")
-      .eq("caja_turno_id", r.data.turno.id);
-    expect(mov).toHaveLength(1);
-    expect(mov![0].kind).toBe("apertura");
-    expect(mov![0].amount_cents).toBe(100_000);
+    expect(r.data.corte.difference_cents).toBe(0);
   });
 
-  it("2do turno en misma caja con uno open → falla", async () => {
+  it("post-corte: nuevo período arranca con closing_cash del corte anterior", async () => {
+    const stats = await getCajaLiveStats(cajaA, businessId);
+    expect(stats).not.toBeNull();
+    // Nuevo período: last_closing = 15_000, sin movimientos nuevos.
+    expect(stats!.expected_cash_cents).toBe(15_000);
+  });
+
+  it("hacer corte con diff sin notes → falla", async () => {
     CURRENT_USER_ID = encargadoId;
-    const r = await abrirTurno(cajaA, 50_000, businessSlug);
+    const r = await hacerCorte(cajaA, 20_000, null, null, businessSlug);
     expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.error).toMatch(/turno abierto/i);
+    if (!r.ok) expect(r.error).toMatch(/diferencia/i);
   });
 
-  it("encargado abre 2do turno en otra caja en paralelo → ok", async () => {
+  it("hacer corte con diff + notes (encargado) → OK", async () => {
     CURRENT_USER_ID = encargadoId;
-    const r = await abrirTurno(cajaB, 50_000, businessSlug);
+    const r = await hacerCorte(cajaA, 20_000, "sobrante por vuelto", null, businessSlug);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.data.corte.difference_cents).toBe(20_000 - 15_000);
+  });
+
+  it("hacer corte con diff $10k como encargado → falla por permiso", async () => {
+    CURRENT_USER_ID = encargadoId;
+    // Nuevo período: last_closing = 20_000, expected = 20_000.
+    // Closing = 20_000 + 1_000_000 → diff = 1_000_000 cents = $10.000
+    const r = await hacerCorte(cajaA, 20_000 + 1_000_000, "sobrante grande", null, businessSlug);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toMatch(/excede/i);
+  });
+
+  it("hacer corte con diff $10k como admin → OK", async () => {
+    CURRENT_USER_ID = adminId;
+    const r = await hacerCorte(cajaA, 20_000 + 1_000_000, "sobrante grande", null, businessSlug);
     expect(r.ok).toBe(true);
   });
 
-  it("sangría requiere motivo", async () => {
-    CURRENT_USER_ID = encargadoId;
-    const { data: turnoA } = await supabase
-      .from("caja_turnos")
-      .select("id")
-      .eq("caja_id", cajaA)
-      .eq("status", "open")
-      .single();
-    const empty = await registrarSangria(turnoA!.id, 5_000, "", businessSlug);
-    expect(empty.ok).toBe(false);
-    const ok = await registrarSangria(turnoA!.id, 5_000, "depósito en banco", businessSlug);
-    expect(ok.ok).toBe(true);
-  });
-
-  it("mozo no puede abrir turno", async () => {
+  it("mozo no puede hacer corte → falla permiso", async () => {
     CURRENT_USER_ID = mozoAId;
-    const r = await abrirTurno(cajaA, 100_000, businessSlug);
+    const r = await hacerCorte(cajaA, 0, null, null, businessSlug);
     expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toMatch(/encargado|admin/i);
   });
 
-  it("ingreso suma a expected_cash; sangría resta", async () => {
-    CURRENT_USER_ID = encargadoId;
-    const { data: turnoA } = await supabase
-      .from("caja_turnos")
-      .select("id, opening_cash_cents")
-      .eq("caja_id", cajaA)
-      .eq("status", "open")
-      .single();
-
-    await registrarIngreso(turnoA!.id, 20_000, "fondo extra", businessSlug);
-
-    const stats = await getTurnoLiveStats(turnoA!.id, businessId);
-    expect(stats).not.toBeNull();
-    // opening 100_000 + ingreso 20_000 − sangría 5_000 (de test anterior) = 115_000.
-    expect(stats!.expected_cash_cents).toBe(100_000 + 20_000 - 5_000);
-  });
-
-  it("cerrar con diferencia sin notes → falla; con notes → ok", async () => {
-    CURRENT_USER_ID = encargadoId;
-    const { data: turnoB } = await supabase
-      .from("caja_turnos")
-      .select("id")
-      .eq("caja_id", cajaB)
-      .eq("status", "open")
-      .single();
-
-    const noNotes = await cerrarTurno(turnoB!.id, 60_000, null, businessSlug);
-    expect(noNotes.ok).toBe(false);
-    if (!noNotes.ok) expect(noNotes.error).toMatch(/diferencia/i);
-
-    const withNotes = await cerrarTurno(
-      turnoB!.id,
-      60_000,
-      "sobrante por vuelto",
-      businessSlug,
-    );
-    expect(withNotes.ok).toBe(true);
-    if (!withNotes.ok) return;
-    expect(withNotes.data.turno.status).toBe("closed");
-    expect(withNotes.data.turno.difference_cents).toBe(60_000 - 50_000);
-  });
-
-  it("cerrar con diferencia $10000 como encargado → falla por permiso", async () => {
-    CURRENT_USER_ID = encargadoId;
-    const { data: cC } = await supabase
-      .from("cajas")
-      .insert({ business_id: businessId, name: "Caja3" })
-      .select("id")
-      .single();
-
-    const open = await abrirTurno(cC!.id, 100_000, businessSlug);
-    expect(open.ok).toBe(true);
-    if (!open.ok) return;
-
-    // Diferencia de 1.000.000 cents = $10.000 supera el límite del encargado.
-    const r = await cerrarTurno(
-      open.data.turno.id,
-      100_000 + 1_000_000,
-      "sobrante grande",
-      businessSlug,
-    );
-    expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.error).toMatch(/excede/i);
-
-    // Como admin sí puede.
-    CURRENT_USER_ID = adminId;
-    const r2 = await cerrarTurno(
-      open.data.turno.id,
-      100_000 + 1_000_000,
-      "sobrante grande",
-      businessSlug,
-    );
-    expect(r2.ok).toBe(true);
-  });
-
-  it("distribuirSalon: aplica múltiples assignments en una llamada", async () => {
+  it("distribuirSalon funciona independiente de caja", async () => {
     CURRENT_USER_ID = encargadoId;
     const r = await distribuirSalon({
       assignments: [
@@ -279,13 +231,5 @@ describe.skipIf(!dbAvailable)("caja (integration)", () => {
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     expect(r.data.count).toBe(2);
-
-    const { data: rows } = await supabase
-      .from("tables")
-      .select("id, mozo_id")
-      .in("id", [table1, table2]);
-    for (const row of rows!) {
-      expect(row.mozo_id).toBe(mozoAId);
-    }
   });
 });

@@ -13,11 +13,20 @@ const OrderProductItem = z.object({
   modifier_ids: z.array(z.string().uuid()).default([]),
 });
 
+const OrderSelectedChoice = z.object({
+  choice_group_id: z.string().uuid(),
+  choice_group_label: z.string(),
+  product_id: z.string().uuid(),
+  product_name: z.string(),
+  modifier_ids: z.array(z.string().uuid()).default([]),
+});
+
 const OrderDailyMenuItem = z.object({
   kind: z.literal("daily_menu"),
   daily_menu_id: z.string().uuid(),
   quantity: z.number().int().min(1).max(99),
   notes: z.string().max(200).optional(),
+  selected_choices: z.array(OrderSelectedChoice).default([]),
 });
 
 export const OrderItemInput = z.union([OrderProductItem, OrderDailyMenuItem]);

@@ -27,8 +27,6 @@ import { cn } from "@/lib/utils";
 type Props = {
   slug: string;
   cajas: Caja[];
-  /** IDs de cajas con turno abierto — bloquean deshabilitar. */
-  cajaIdsConTurnoOpen: string[];
 };
 
 /**
@@ -37,21 +35,19 @@ type Props = {
  * Acciones disponibles:
  *  - Crear nueva caja (botón "+ Nueva caja" en el header).
  *  - Renombrar (icono lápiz).
- *  - Deshabilitar (icono ojo tachado) — soft delete. Si tiene turno
- *    open, no se puede; primero hay que cerrarlo.
+ *  - Deshabilitar (icono ojo tachado) — soft delete.
  *  - Re-habilitar una pausada (botón "Habilitar").
  *
- * El día a día (abrir/cerrar turno, sangrías, etc.) vive en
+ * El día a día (sangrías, cortes, etc.) vive en
  * `/admin/local?tab=caja`. Acá solo se administra el catálogo.
  */
-export function CajasClient({ slug, cajas, cajaIdsConTurnoOpen }: Props) {
+export function CajasClient({ slug, cajas }: Props) {
   const router = useRouter();
   const [, startTransition] = useTransition();
 
   const [crearOpen, setCrearOpen] = useState(false);
   const [editing, setEditing] = useState<Caja | null>(null);
 
-  const turnoOpenSet = new Set(cajaIdsConTurnoOpen);
   const activas = cajas.filter((c) => c.is_active);
   const inactivas = cajas.filter((c) => !c.is_active);
 
@@ -134,7 +130,6 @@ export function CajasClient({ slug, cajas, cajaIdsConTurnoOpen }: Props) {
               <CajaRow
                 key={c.id}
                 caja={c}
-                tieneTurnoOpen={turnoOpenSet.has(c.id)}
                 stripe={idx % 2 === 1}
                 onRenombrar={() => setEditing(c)}
                 onDeshabilitar={() => handleToggleActive(c, false)}
@@ -151,8 +146,7 @@ export function CajasClient({ slug, cajas, cajaIdsConTurnoOpen }: Props) {
             Pausadas · {inactivas.length}
           </p>
           <p className="text-xs text-zinc-500">
-            No aparecen para abrir turno. El histórico de turnos viejos sigue
-            accesible.
+            No aparecen para cobrar. El histórico de cortes sigue accesible.
           </p>
           <ul className="space-y-1.5">
             {inactivas.map((c) => (
@@ -221,13 +215,11 @@ export function CajasClient({ slug, cajas, cajaIdsConTurnoOpen }: Props) {
 
 function CajaRow({
   caja,
-  tieneTurnoOpen,
   stripe,
   onRenombrar,
   onDeshabilitar,
 }: {
   caja: Caja;
-  tieneTurnoOpen: boolean;
   stripe: boolean;
   onRenombrar: () => void;
   onDeshabilitar: () => void;
@@ -240,28 +232,17 @@ function CajaRow({
       )}
     >
       <div className="flex min-w-0 items-center gap-3">
-        <div
-          className={cn(
-            "flex size-9 shrink-0 items-center justify-center rounded-full",
-            tieneTurnoOpen
-              ? "bg-emerald-50 text-emerald-700"
-              : "bg-zinc-100 text-zinc-500",
-          )}
-        >
+        <div className="flex size-9 shrink-0 items-center justify-center rounded-full bg-emerald-50 text-emerald-700">
           <Wallet className="size-4" />
         </div>
         <div className="min-w-0">
           <p className="truncate text-sm font-semibold text-zinc-900">
             {caja.name}
           </p>
-          {tieneTurnoOpen ? (
-            <p className="inline-flex items-center gap-1.5 text-xs text-emerald-700">
-              <span className="inline-block size-1.5 rounded-full bg-emerald-500" />
-              Operando ahora
-            </p>
-          ) : (
-            <p className="text-xs text-zinc-500">Sin turno abierto</p>
-          )}
+          <p className="inline-flex items-center gap-1.5 text-xs text-emerald-700">
+            <span className="inline-block size-1.5 rounded-full bg-emerald-500" />
+            Activa
+          </p>
         </div>
       </div>
       <div className="flex items-center gap-1">
@@ -277,14 +258,9 @@ function CajaRow({
         <button
           type="button"
           onClick={onDeshabilitar}
-          disabled={tieneTurnoOpen}
-          className="inline-flex size-8 items-center justify-center rounded-full text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-900 disabled:cursor-not-allowed disabled:opacity-40"
+          className="inline-flex size-8 items-center justify-center rounded-full text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-900"
           aria-label="Deshabilitar"
-          title={
-            tieneTurnoOpen
-              ? "No se puede: tiene un turno abierto"
-              : "Deshabilitar"
-          }
+          title="Deshabilitar"
         >
           <EyeOff className="size-3.5" />
         </button>
@@ -318,7 +294,7 @@ function CrearCajaModal({
         toast.error(r.error);
         return;
       }
-      toast.success(`Caja “${r.data.name}” creada`);
+      toast.success(`Caja "${r.data.name}" creada`);
       setName("");
       onCreated();
     });

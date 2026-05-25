@@ -47,6 +47,18 @@ export type MenuDailyMenuComponent = {
   id: string;
   label: string;
   description: string | null;
+  kind: "text" | "product" | "choice";
+  product_id: string | null;
+  product_name: string | null;
+  product_image_url: string | null;
+  choice_group_id: string | null;
+  choice_group_label: string | null;
+};
+
+export type MenuDailyMenuChoiceGroup = {
+  choice_group_id: string;
+  label: string;
+  options: MenuDailyMenuComponent[];
 };
 
 export type MenuDailyMenu = {
@@ -56,6 +68,8 @@ export type MenuDailyMenu = {
   price_cents: number;
   image_url: string | null;
   components: MenuDailyMenuComponent[];
+  choice_groups: MenuDailyMenuChoiceGroup[];
+  has_choices: boolean;
 };
 
 export type BusinessHour = {
@@ -107,7 +121,7 @@ export const getMenu = cache(
       supabase
         .from("daily_menus")
         .select(
-          "id, name, description, price_cents, image_url, available_days, daily_menu_components(id, label, description, sort_order)",
+          "id, name, description, price_cents, image_url, available_days, daily_menu_components(id, label, description, sort_order, kind, product_id, choice_group_id, choice_group_label, products(id, name, image_url))",
         )
         .eq("business_id", businessId)
         .eq("is_active", true)
@@ -157,21 +171,50 @@ export const getMenu = cache(
     products: productsList.filter((p) => p.category_id === c.id),
   }));
 
-  const todaysMenus: MenuDailyMenu[] = (dailyMenus ?? []).map((m) => ({
-    id: m.id,
-    name: m.name,
-    description: m.description,
-    price_cents: Number(m.price_cents),
-    image_url: m.image_url,
-    components: (m.daily_menu_components ?? [])
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const todaysMenus: MenuDailyMenu[] = (dailyMenus ?? []).map((m: any) => {
+    const components: MenuDailyMenuComponent[] = (m.daily_menu_components ?? [])
       .slice()
-      .sort((a, b) => a.sort_order - b.sort_order)
-      .map((c) => ({
+      .sort((a: { sort_order: number }, b: { sort_order: number }) => a.sort_order - b.sort_order)
+      .map((c: any) => ({
         id: c.id,
         label: c.label,
         description: c.description,
-      })),
-  }));
+        kind: c.kind ?? "text",
+        product_id: c.product_id ?? null,
+        product_name: c.products?.name ?? null,
+        product_image_url: c.products?.image_url ?? null,
+        choice_group_id: c.choice_group_id ?? null,
+        choice_group_label: c.choice_group_label ?? null,
+      }));
+
+    const groupMap = new Map<string, MenuDailyMenuChoiceGroup>();
+    for (const c of components) {
+      if (c.kind === "choice" && c.choice_group_id) {
+        let group = groupMap.get(c.choice_group_id);
+        if (!group) {
+          group = {
+            choice_group_id: c.choice_group_id,
+            label: c.choice_group_label ?? "Elegí una opción",
+            options: [],
+          };
+          groupMap.set(c.choice_group_id, group);
+        }
+        group.options.push(c);
+      }
+    }
+
+    return {
+      id: m.id,
+      name: m.name,
+      description: m.description,
+      price_cents: Number(m.price_cents),
+      image_url: m.image_url,
+      components,
+      choice_groups: [...groupMap.values()],
+      has_choices: groupMap.size > 0,
+    };
+  });
 
   return {
     categories: cats,

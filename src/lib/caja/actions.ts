@@ -9,16 +9,15 @@ import { requireMozoActionContext } from "@/lib/mozo/auth";
 import {
   canAcceptCajaDifference,
   canAssignMozo,
-  canCloseCajaTurno,
+  canHacerCorte,
   canMakeSangria,
   canManageCajas,
-  canOpenCajaTurno,
 } from "@/lib/permissions/can";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 import { getBusiness } from "@/lib/tenant";
 
-import { getTurnoLiveStats } from "./queries";
-import type { CajaTurno } from "./types";
+import { getCajaLiveStats } from "./queries";
+import type { CajaCorte, PaymentMethod } from "./types";
 
 type GenericClient = SupabaseClient;
 
@@ -40,30 +39,8 @@ async function loadCajaForBusiness(
   return { id: row.id, is_active: row.is_active };
 }
 
-async function loadTurnoForBusiness(
-  service: GenericClient,
-  turnoId: string,
-  businessId: string,
-): Promise<CajaTurno | null> {
-  const { data } = await service
-    .from("caja_turnos")
-    .select(
-      "id, caja_id, business_id, encargado_id, opening_cash_cents, expected_cash_cents, closing_cash_cents, difference_cents, closing_notes, status, opened_at, closed_at",
-    )
-    .eq("id", turnoId)
-    .maybeSingle();
-  if (!data) return null;
-  const row = data as CajaTurno;
-  if (row.business_id !== businessId) return null;
-  return row;
-}
-
 // ── CRUD de cajas físicas ──────────────────────────────────────
 
-/**
- * Crea una caja física del local. Permiso: admin / encargado (mismo gate
- * que abrir turno — quien puede operar puede dar de alta el recurso).
- */
 export async function crearCaja(
   name: string,
   businessSlug: string,
@@ -108,9 +85,6 @@ export async function crearCaja(
   });
 }
 
-/**
- * Renombrar una caja existente. Admin only. Único por business (FK 23505).
- */
 export async function renombrarCaja(
   cajaId: string,
   newName: string,
@@ -157,11 +131,6 @@ export async function renombrarCaja(
   });
 }
 
-/**
- * Soft-delete: marca `is_active=false`. La caja deja de aparecer para abrir
- * turno pero los turnos históricos siguen accesibles read-only (R6/A6 de
- * CU-06). Si tiene un turno open, falla — primero hay que cerrarlo.
- */
 export async function setCajaActive(
   cajaId: string,
   isActive: boolean,
@@ -183,20 +152,6 @@ export async function setCajaActive(
   const caja = await loadCajaForBusiness(service, cajaId, business.id);
   if (!caja) return actionError("Caja no encontrada.");
 
-  if (!isActive) {
-    const { data: openTurno } = await service
-      .from("caja_turnos")
-      .select("id")
-      .eq("caja_id", cajaId)
-      .eq("status", "open")
-      .maybeSingle();
-    if (openTurno) {
-      return actionError(
-        "No se puede deshabilitar: tiene un turno abierto. Cerralo primero.",
-      );
-    }
-  }
-
   const { error } = await service
     .from("cajas")
     .update({ is_active: isActive })
@@ -208,152 +163,15 @@ export async function setCajaActive(
   return actionOk(undefined);
 }
 
-// ── Apertura ───────────────────────────────────────────────────
+// ── Corte ─────────────────────────────────────────────────────
 
-/**
- * Apertura simple para el flujo conversacional "Abrir caja". Pensado para
- * el 95% de locales con UNA sola caja física: no obliga al usuario a saber
- * que "caja" (config) y "turno" (sesión) son cosas distintas. Si no hay
- * cajas configuradas, crea silenciosamente una llamada "Caja Principal" y
- * le abre turno. Si hay varias activas, usa la primera por sort_order.
- *
- * Para multi-caja real, `abrirTurno(cajaId, ...)` sigue disponible.
- */
-export async function abrirCajaConDefault(
-  opening_cash_cents: number,
-  businessSlug: string,
-): Promise<ActionResult<{ turno: CajaTurno }>> {
-  const business = await getBusiness(businessSlug);
-  if (!business) return actionError("Negocio no encontrado.");
-
-  const ctxResult = await requireMozoActionContext(business.id);
-  if (!ctxResult.ok) return ctxResult;
-  if (!canOpenCajaTurno(ctxResult.data.role)) {
-    return actionError("Solo encargado o admin pueden abrir la caja.");
-  }
-  if (opening_cash_cents < 0) {
-    return actionError("El monto inicial no puede ser negativo.");
-  }
-
-  const service = createSupabaseServiceClient() as unknown as GenericClient;
-
-  // Buscar primera caja activa
-  const { data: existing } = await service
-    .from("cajas")
-    .select("id, name")
-    .eq("business_id", business.id)
-    .eq("is_active", true)
-    .order("sort_order")
-    .limit(1)
-    .maybeSingle();
-
-  let cajaId: string;
-  if (existing) {
-    cajaId = (existing as { id: string }).id;
-  } else {
-    // Auto-crear "Caja Principal" — primera vez del local.
-    const { data: created, error: createErr } = await service
-      .from("cajas")
-      .insert({
-        business_id: business.id,
-        name: "Caja Principal",
-        is_active: true,
-        sort_order: 0,
-      })
-      .select("id")
-      .single();
-    if (createErr || !created) {
-      if (createErr?.code === "23505") {
-        // Carrera: alguien la creó entre el SELECT y el INSERT. Releemos.
-        const { data: retry } = await service
-          .from("cajas")
-          .select("id")
-          .eq("business_id", business.id)
-          .eq("name", "Caja Principal")
-          .maybeSingle();
-        if (!retry) return actionError("No se pudo crear la caja.");
-        cajaId = (retry as { id: string }).id;
-      } else {
-        return actionError(`No se pudo crear la caja: ${createErr?.message ?? "desconocido"}`);
-      }
-    } else {
-      cajaId = (created as { id: string }).id;
-    }
-  }
-
-  return abrirTurno(cajaId, opening_cash_cents, businessSlug);
-}
-
-export async function abrirTurno(
+export async function hacerCorte(
   cajaId: string,
-  opening_cash_cents: number,
-  businessSlug: string,
-): Promise<ActionResult<{ turno: CajaTurno }>> {
-  const business = await getBusiness(businessSlug);
-  if (!business) return actionError("Negocio no encontrado.");
-
-  const ctxResult = await requireMozoActionContext(business.id);
-  if (!ctxResult.ok) return ctxResult;
-  const ctx = ctxResult.data;
-
-  if (!canOpenCajaTurno(ctx.role)) {
-    return actionError("Solo encargado o admin pueden abrir turno de caja.");
-  }
-  if (opening_cash_cents < 0) {
-    return actionError("El monto inicial no puede ser negativo.");
-  }
-
-  const service = createSupabaseServiceClient() as unknown as GenericClient;
-
-  const caja = await loadCajaForBusiness(service, cajaId, business.id);
-  if (!caja) return actionError("Caja no encontrada.");
-  if (!caja.is_active) return actionError("Caja inactiva. Pedile al admin que la habilite.");
-
-  const { data: inserted, error } = await service
-    .from("caja_turnos")
-    .insert({
-      caja_id: cajaId,
-      business_id: business.id,
-      encargado_id: ctx.userId,
-      opening_cash_cents,
-      status: "open",
-    })
-    .select(
-      "id, caja_id, business_id, encargado_id, opening_cash_cents, expected_cash_cents, closing_cash_cents, difference_cents, closing_notes, status, opened_at, closed_at",
-    )
-    .single();
-
-  if (error) {
-    if (error.code === "23505") {
-      // Partial unique caja_turnos_one_open_per_caja.
-      return actionError("Ya hay un turno abierto en esta caja.");
-    }
-    return actionError(`No se pudo abrir el turno: ${error.message}`);
-  }
-
-  const turno = inserted as CajaTurno;
-
-  await service.from("caja_movimientos").insert({
-    caja_turno_id: turno.id,
-    business_id: business.id,
-    kind: "apertura",
-    amount_cents: opening_cash_cents,
-    reason: null,
-    created_by: ctx.userId,
-  });
-
-  revalidatePath(`/${businessSlug}/admin/local`);
-  return actionOk({ turno });
-}
-
-// ── Cierre ─────────────────────────────────────────────────────
-
-export async function cerrarTurno(
-  turnoId: string,
   closing_cash_cents: number,
   closing_notes: string | null,
+  denomination_count: Record<string, number> | null,
   businessSlug: string,
-): Promise<ActionResult<{ turno: CajaTurno }>> {
+): Promise<ActionResult<{ corte: CajaCorte }>> {
   const business = await getBusiness(businessSlug);
   if (!business) return actionError("Negocio no encontrado.");
 
@@ -361,8 +179,8 @@ export async function cerrarTurno(
   if (!ctxResult.ok) return ctxResult;
   const ctx = ctxResult.data;
 
-  if (!canCloseCajaTurno(ctx.role)) {
-    return actionError("Solo encargado o admin pueden cerrar turno.");
+  if (!canHacerCorte(ctx.role)) {
+    return actionError("Solo encargado o admin pueden hacer un corte de caja.");
   }
   if (closing_cash_cents < 0) {
     return actionError("El monto de cierre no puede ser negativo.");
@@ -370,12 +188,12 @@ export async function cerrarTurno(
 
   const service = createSupabaseServiceClient() as unknown as GenericClient;
 
-  const turno = await loadTurnoForBusiness(service, turnoId, business.id);
-  if (!turno) return actionError("Turno no encontrado.");
-  if (turno.status !== "open") return actionError("El turno ya está cerrado.");
+  const caja = await loadCajaForBusiness(service, cajaId, business.id);
+  if (!caja) return actionError("Caja no encontrada.");
+  if (!caja.is_active) return actionError("Caja inactiva.");
 
-  const stats = await getTurnoLiveStats(turnoId, business.id);
-  if (!stats) return actionError("No se pudieron calcular los stats del turno.");
+  const stats = await getCajaLiveStats(cajaId, business.id);
+  if (!stats) return actionError("No se pudieron calcular los stats de la caja.");
   const expected_cash_cents = stats.expected_cash_cents;
   const difference_cents = closing_cash_cents - expected_cash_cents;
 
@@ -387,46 +205,36 @@ export async function cerrarTurno(
     }
     if (!canAcceptCajaDifference(ctx.role, difference_cents)) {
       return actionError(
-        "La diferencia excede tu autorización. Pedile al admin que cierre el turno.",
+        "La diferencia excede tu autorización. Pedile al admin que haga el corte.",
       );
     }
   }
 
-  const { data: updated, error } = await service
-    .from("caja_turnos")
-    .update({
-      status: "closed",
-      closed_at: new Date().toISOString(),
+  const { data: inserted, error } = await service
+    .from("caja_cortes")
+    .insert({
+      caja_id: cajaId,
+      business_id: business.id,
+      encargado_id: ctx.userId,
       expected_cash_cents,
       closing_cash_cents,
       difference_cents,
       closing_notes: closing_notes?.trim() || null,
+      denomination_count: denomination_count ?? null,
     })
-    .eq("id", turnoId)
-    .select(
-      "id, caja_id, business_id, encargado_id, opening_cash_cents, expected_cash_cents, closing_cash_cents, difference_cents, closing_notes, status, opened_at, closed_at",
-    )
+    .select("*")
     .single();
 
-  if (error) return actionError(`No se pudo cerrar el turno: ${error.message}`);
-
-  await service.from("caja_movimientos").insert({
-    caja_turno_id: turnoId,
-    business_id: business.id,
-    kind: "cierre",
-    amount_cents: closing_cash_cents,
-    reason: closing_notes?.trim() || null,
-    created_by: ctx.userId,
-  });
+  if (error) return actionError(`No se pudo registrar el corte: ${error.message}`);
 
   revalidatePath(`/${businessSlug}/admin/local`);
-  return actionOk({ turno: updated as CajaTurno });
+  return actionOk({ corte: inserted as CajaCorte });
 }
 
 // ── Movimientos manuales ───────────────────────────────────────
 
 export async function registrarSangria(
-  turnoId: string,
+  cajaId: string,
   amount_cents: number,
   reason: string,
   businessSlug: string,
@@ -448,14 +256,12 @@ export async function registrarSangria(
 
   const service = createSupabaseServiceClient() as unknown as GenericClient;
 
-  const turno = await loadTurnoForBusiness(service, turnoId, business.id);
-  if (!turno) return actionError("Turno no encontrado.");
-  if (turno.status !== "open") {
-    return actionError("No se puede operar sobre un turno cerrado.");
-  }
+  const caja = await loadCajaForBusiness(service, cajaId, business.id);
+  if (!caja) return actionError("Caja no encontrada.");
+  if (!caja.is_active) return actionError("Caja inactiva.");
 
   const { error } = await service.from("caja_movimientos").insert({
-    caja_turno_id: turnoId,
+    caja_id: cajaId,
     business_id: business.id,
     kind: "sangria",
     amount_cents,
@@ -469,7 +275,7 @@ export async function registrarSangria(
 }
 
 export async function registrarIngreso(
-  turnoId: string,
+  cajaId: string,
   amount_cents: number,
   reason: string | null,
   businessSlug: string,
@@ -488,14 +294,12 @@ export async function registrarIngreso(
 
   const service = createSupabaseServiceClient() as unknown as GenericClient;
 
-  const turno = await loadTurnoForBusiness(service, turnoId, business.id);
-  if (!turno) return actionError("Turno no encontrado.");
-  if (turno.status !== "open") {
-    return actionError("No se puede operar sobre un turno cerrado.");
-  }
+  const caja = await loadCajaForBusiness(service, cajaId, business.id);
+  if (!caja) return actionError("Caja no encontrada.");
+  if (!caja.is_active) return actionError("Caja inactiva.");
 
   const { error } = await service.from("caja_movimientos").insert({
-    caja_turno_id: turnoId,
+    caja_id: cajaId,
     business_id: business.id,
     kind: "ingreso",
     amount_cents,
@@ -508,7 +312,57 @@ export async function registrarIngreso(
   return actionOk(undefined);
 }
 
-// ── Distribución masiva del salón (Paso 2 del wizard) ──────────
+// ── Configuración de métodos de pago ──────────────────────────────
+
+const VALID_METHODS: PaymentMethod[] = [
+  "cash", "card_manual", "mp_link", "mp_qr", "transfer", "other",
+];
+
+export async function upsertPaymentMethodConfig(
+  businessSlug: string,
+  method: PaymentMethod,
+  input: { adjustment_percent: number; label: string | null; is_active: boolean },
+): Promise<ActionResult<void>> {
+  const business = await getBusiness(businessSlug);
+  if (!business) return actionError("Negocio no encontrado.");
+
+  const ctxResult = await requireMozoActionContext(business.id);
+  if (!ctxResult.ok) return ctxResult;
+  const ctx = ctxResult.data;
+
+  if (!canManageCajas(ctx.role)) {
+    return actionError("Solo admin puede configurar métodos de pago.");
+  }
+  if (!VALID_METHODS.includes(method)) {
+    return actionError("Método de pago inválido.");
+  }
+  if (input.adjustment_percent < -100 || input.adjustment_percent > 100) {
+    return actionError("El ajuste debe estar entre -100% y 100%.");
+  }
+
+  const service = createSupabaseServiceClient() as unknown as GenericClient;
+  const { error } = await service
+    .from("payment_method_configs")
+    .upsert(
+      {
+        business_id: business.id,
+        method,
+        adjustment_percent: input.adjustment_percent,
+        label: input.label?.trim() || null,
+        is_active: input.is_active,
+      },
+      { onConflict: "business_id,method" },
+    );
+
+  if (error) return actionError(`No se pudo guardar: ${error.message}`);
+
+  revalidatePath(`/${businessSlug}/admin/configuracion`);
+  revalidatePath(`/${businessSlug}/mozo`);
+  revalidatePath(`/${businessSlug}/admin/local`);
+  return actionOk(undefined);
+}
+
+// ── Distribución masiva del salón ────────────────────────────────
 
 export async function distribuirSalon(
   input: {

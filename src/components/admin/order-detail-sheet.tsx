@@ -37,6 +37,8 @@ type Detail = {
     notes: string | null;
     daily_menu_id: string | null;
     daily_menu_snapshot: { components?: { label: string }[] } | null;
+    is_combo_component: boolean;
+    parent_order_item_id: string | null;
     modifiers: { modifier_name: string }[];
   }[];
   history: { status: OrderStatus; notes: string | null; created_at: string }[];
@@ -126,7 +128,7 @@ export function OrderDetailSheet({
         .select(
           `delivery_address, delivery_notes, subtotal_cents, delivery_fee_cents,
            order_items(id, product_name, quantity, subtotal_cents, notes,
-             daily_menu_id, daily_menu_snapshot,
+             daily_menu_id, daily_menu_snapshot, is_combo_component, parent_order_item_id,
              order_item_modifiers(modifier_name)),
            order_status_history(status, notes, created_at)`,
         )
@@ -141,7 +143,8 @@ export function OrderDetailSheet({
         delivery_notes: data.delivery_notes,
         subtotal_cents: Number(data.subtotal_cents),
         delivery_fee_cents: Number(data.delivery_fee_cents),
-        items: (data.order_items ?? []).map((i) => ({
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        items: (data.order_items ?? []).map((i: any) => ({
           id: i.id,
           product_name: i.product_name,
           quantity: i.quantity,
@@ -149,7 +152,9 @@ export function OrderDetailSheet({
           notes: i.notes,
           daily_menu_id: i.daily_menu_id,
           daily_menu_snapshot: i.daily_menu_snapshot as Detail["items"][number]["daily_menu_snapshot"],
-          modifiers: (i.order_item_modifiers ?? []).map((m) => ({
+          is_combo_component: !!i.is_combo_component,
+          parent_order_item_id: i.parent_order_item_id ?? null,
+          modifiers: (i.order_item_modifiers ?? []).map((m: any) => ({
             modifier_name: m.modifier_name,
           })),
         })),
@@ -302,7 +307,10 @@ export function OrderDetailSheet({
           <section className="border-border/60 border-t px-5 py-4">
             <p className="text-muted-foreground text-[0.65rem] font-semibold uppercase tracking-wider">
               {detail
-                ? `${detail.items.length} ${detail.items.length === 1 ? "ítem" : "ítems"}`
+                ? (() => {
+                    const parentCount = detail.items.filter((i) => !i.is_combo_component).length;
+                    return `${parentCount} ${parentCount === 1 ? "ítem" : "ítems"}`;
+                  })()
                 : "Ítems"}
             </p>
             {loading && !detail && (
@@ -310,39 +318,71 @@ export function OrderDetailSheet({
             )}
             {detail && (
               <ul className="mt-3 flex flex-col gap-3">
-                {detail.items.map((item) => (
-                  <li key={item.id} className="flex flex-col gap-0.5">
-                    <div className="flex items-baseline justify-between gap-2">
-                      <span className="text-foreground text-sm font-semibold">
-                        <span className="text-muted-foreground tabular-nums">
-                          {item.quantity}×
-                        </span>{" "}
-                        {item.product_name}
-                      </span>
-                      <span className="text-foreground text-sm font-semibold tabular-nums">
-                        {formatCurrency(item.subtotal_cents)}
-                      </span>
-                    </div>
-                    {item.daily_menu_id &&
-                      item.daily_menu_snapshot?.components && (
-                        <ul className="text-muted-foreground ml-6 text-xs">
-                          {item.daily_menu_snapshot.components.map((c, idx) => (
-                            <li key={idx}>· {c.label}</li>
-                          ))}
-                        </ul>
-                      )}
-                    {item.modifiers.length > 0 && (
-                      <p className="text-muted-foreground ml-6 text-xs">
-                        {item.modifiers.map((m) => m.modifier_name).join(" · ")}
-                      </p>
-                    )}
-                    {item.notes && (
-                      <p className="text-amber-700 ml-6 text-xs italic">
-                        &quot;{item.notes}&quot;
-                      </p>
-                    )}
-                  </li>
-                ))}
+                {detail.items
+                  .filter((item) => !item.is_combo_component)
+                  .map((item) => {
+                    const children = detail.items.filter(
+                      (c) => c.parent_order_item_id === item.id,
+                    );
+                    return (
+                      <li key={item.id} className="flex flex-col gap-0.5">
+                        <div className="flex items-baseline justify-between gap-2">
+                          <span className="text-foreground text-sm font-semibold">
+                            <span className="text-muted-foreground tabular-nums">
+                              {item.quantity}×
+                            </span>{" "}
+                            {item.product_name}
+                          </span>
+                          <span className="text-foreground text-sm font-semibold tabular-nums">
+                            {formatCurrency(item.subtotal_cents)}
+                          </span>
+                        </div>
+                        {item.daily_menu_id &&
+                          item.daily_menu_snapshot?.components && (
+                            <ul className="text-muted-foreground ml-6 text-xs">
+                              {item.daily_menu_snapshot.components.map(
+                                (c, idx) => (
+                                  <li key={idx}>· {c.label}</li>
+                                ),
+                              )}
+                            </ul>
+                          )}
+                        {children.length > 0 && (
+                          <ul className="ml-6 mt-1 flex flex-col gap-1">
+                            {children.map((child) => (
+                              <li
+                                key={child.id}
+                                className="text-muted-foreground flex items-baseline justify-between text-xs"
+                              >
+                                <span>
+                                  ↳ {child.quantity}× {child.product_name}
+                                </span>
+                                {child.modifiers.length > 0 && (
+                                  <span className="ml-2 text-[11px]">
+                                    {child.modifiers
+                                      .map((m) => m.modifier_name)
+                                      .join(" · ")}
+                                  </span>
+                                )}
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                        {item.modifiers.length > 0 && (
+                          <p className="text-muted-foreground ml-6 text-xs">
+                            {item.modifiers
+                              .map((m) => m.modifier_name)
+                              .join(" · ")}
+                          </p>
+                        )}
+                        {item.notes && (
+                          <p className="text-amber-700 ml-6 text-xs italic">
+                            &quot;{item.notes}&quot;
+                          </p>
+                        )}
+                      </li>
+                    );
+                  })}
               </ul>
             )}
 

@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useForm, useFieldArray, useFormContext } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { Plus, Trash2 } from "lucide-react";
+import { Plus, Trash2, GripVertical } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -20,6 +20,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { ImageUploader } from "@/components/admin/catalog/image-uploader";
+import { ProductPicker } from "@/components/admin/daily-menus/product-picker";
 import type { AdminDailyMenu } from "@/lib/admin/daily-menu-query";
 import {
   createDailyMenu,
@@ -50,6 +51,18 @@ export function DailyMenuForm({
   const router = useRouter();
   const [submitting, setSubmitting] = useState(false);
 
+  const [productNames] = useState(() => {
+    const map = new Map<string, string>();
+    if (menu) {
+      for (const c of menu.components) {
+        if (c.product_id && c.product_name) {
+          map.set(c.product_id, c.product_name);
+        }
+      }
+    }
+    return map;
+  });
+
   const form = useForm<DailyMenuInput>({
     resolver: zodResolver(DailyMenuInput),
     defaultValues: menu
@@ -67,6 +80,10 @@ export function DailyMenuForm({
             id: c.id,
             label: c.label,
             description: c.description ?? undefined,
+            kind: c.kind ?? "text",
+            product_id: c.product_id,
+            choice_group_id: c.choice_group_id,
+            choice_group_label: c.choice_group_label,
           })),
         }
       : {
@@ -77,7 +94,7 @@ export function DailyMenuForm({
           is_active: true,
           is_available: true,
           sort_order: 0,
-          components: [{ label: "" }],
+          components: [{ label: "", kind: "text" as const }],
         },
   });
 
@@ -279,7 +296,7 @@ export function DailyMenuForm({
           />
         </div>
 
-        <ComponentsEditor />
+        <ComponentsEditor businessId={businessId} productNames={productNames} />
 
         <div className="flex gap-2">
           <Button type="submit" disabled={submitting}>
@@ -298,12 +315,45 @@ export function DailyMenuForm({
   );
 }
 
-function ComponentsEditor() {
-  const { control } = useFormContext<DailyMenuInput>();
+const KIND_OPTIONS = [
+  { value: "text", label: "Texto" },
+  { value: "product", label: "Producto fijo" },
+  { value: "choice", label: "Elegir una de:" },
+] as const;
+
+function ComponentsEditor({
+  businessId,
+  productNames,
+}: {
+  businessId: string;
+  productNames: Map<string, string>;
+}) {
+  const { control, watch, setValue } = useFormContext<DailyMenuInput>();
   const { fields, append, remove } = useFieldArray({
     control,
     name: "components",
   });
+  const components = watch("components");
+
+  const choiceGroups = new Map<string, number[]>();
+  components.forEach((c, idx) => {
+    if (c.kind === "choice" && c.choice_group_id) {
+      const arr = choiceGroups.get(c.choice_group_id) ?? [];
+      arr.push(idx);
+      choiceGroups.set(c.choice_group_id, arr);
+    }
+  });
+
+  const addChoiceOption = (groupId: string, groupLabel: string) => {
+    append({
+      label: "",
+      kind: "choice",
+      choice_group_id: groupId,
+      choice_group_label: groupLabel,
+    });
+  };
+
+  const rendered = new Set<string>();
 
   return (
     <section className="space-y-3">
@@ -311,73 +361,291 @@ function ComponentsEditor() {
         <div>
           <h3 className="font-semibold">Componentes del menú</h3>
           <p className="text-muted-foreground mt-0.5 text-xs">
-            Lo que incluye el combo. Ej: “Entrada: Empanadas (2 un.)”, “Principal:
-            Milanesa con puré”, “Postre”, “Bebida”. Orden = orden de la lista.
+            Lo que incluye el combo. Cada componente puede ser texto, un
+            producto fijo, o un grupo de opciones donde el cliente elige.
           </p>
         </div>
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          onClick={() => append({ label: "" })}
-        >
-          <Plus className="size-3.5" /> Componente
-        </Button>
+        <div className="flex gap-1.5">
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={() => append({ label: "", kind: "text" })}
+          >
+            <Plus className="size-3.5" /> Componente
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={() => {
+              const groupId = crypto.randomUUID();
+              append({
+                label: "",
+                kind: "choice",
+                choice_group_id: groupId,
+                choice_group_label: "",
+              });
+            }}
+          >
+            <Plus className="size-3.5" /> Grupo de opciones
+          </Button>
+        </div>
       </div>
 
       <div className="space-y-3">
-        {fields.map((field, idx) => (
-          <div
-            key={field.id}
-            className="bg-card space-y-2 rounded-xl border p-3"
-          >
-            <div className="flex items-start gap-2">
-              <FormField
+        {fields.map((field, idx) => {
+          const kind = components[idx]?.kind ?? "text";
+          const groupId = components[idx]?.choice_group_id;
+
+          if (kind === "choice" && groupId) {
+            if (rendered.has(groupId)) return null;
+            rendered.add(groupId);
+            const groupIndices = choiceGroups.get(groupId) ?? [idx];
+            const groupLabel = components[groupIndices[0]]?.choice_group_label ?? "";
+
+            return (
+              <ChoiceGroupCard
+                key={groupId}
+                businessId={businessId}
+                groupId={groupId}
+                groupLabel={groupLabel}
+                indices={groupIndices}
                 control={control}
-                name={`components.${idx}.label`}
-                render={({ field }) => (
-                  <FormItem className="flex-1">
-                    <FormControl>
-                      <Input
-                        placeholder="Milanesa con puré"
-                        {...field}
-                      />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
+                productNames={productNames}
+                onLabelChange={(label) => {
+                  for (const i of groupIndices) {
+                    setValue(`components.${i}.choice_group_label`, label);
+                  }
+                }}
+                onAddOption={() => addChoiceOption(groupId, groupLabel)}
+                onRemoveOption={(i) => remove(i)}
               />
-              <Button
-                type="button"
-                size="icon-sm"
-                variant="ghost"
-                onClick={() => remove(idx)}
-                aria-label="Eliminar componente"
-              >
-                <Trash2 className="size-3.5" />
-              </Button>
-            </div>
-            <FormField
+            );
+          }
+
+          return (
+            <SingleComponentCard
+              key={field.id}
+              idx={idx}
+              kind={kind}
+              businessId={businessId}
               control={control}
-              name={`components.${idx}.description`}
-              render={({ field }) => (
-                <FormItem>
-                  <Label className="text-muted-foreground text-[0.65rem] font-medium uppercase tracking-wider">
-                    Detalle (opcional)
-                  </Label>
-                  <FormControl>
-                    <Input
-                      placeholder="200g, con crema de papas"
-                      {...field}
-                      value={field.value ?? ""}
-                    />
-                  </FormControl>
-                </FormItem>
-              )}
+              productNames={productNames}
+              onKindChange={(newKind) => {
+                setValue(`components.${idx}.kind`, newKind);
+                if (newKind === "text") {
+                  setValue(`components.${idx}.product_id`, null);
+                  setValue(`components.${idx}.choice_group_id`, null);
+                  setValue(`components.${idx}.choice_group_label`, null);
+                }
+              }}
+              onRemove={() => remove(idx)}
             />
-          </div>
-        ))}
+          );
+        })}
       </div>
     </section>
+  );
+}
+
+function SingleComponentCard({
+  idx,
+  kind,
+  businessId,
+  control,
+  productNames,
+  onKindChange,
+  onRemove,
+}: {
+  idx: number;
+  kind: string;
+  businessId: string;
+  control: ReturnType<typeof useFormContext<DailyMenuInput>>["control"];
+  productNames: Map<string, string>;
+  onKindChange: (kind: "text" | "product") => void;
+  onRemove: () => void;
+}) {
+  const { watch, setValue } = useFormContext<DailyMenuInput>();
+  const productId = watch(`components.${idx}.product_id`);
+
+  return (
+    <div className="bg-card space-y-2 rounded-xl border p-3">
+      <div className="flex items-start gap-2">
+        <select
+          value={kind === "choice" ? "text" : kind}
+          onChange={(e) => onKindChange(e.target.value as "text" | "product")}
+          className="border-input bg-background h-9 rounded-md border px-2 text-sm"
+        >
+          <option value="text">Texto</option>
+          <option value="product">Producto fijo</option>
+        </select>
+        <FormField
+          control={control}
+          name={`components.${idx}.label`}
+          render={({ field }) => (
+            <FormItem className="flex-1">
+              <FormControl>
+                <Input
+                  placeholder={
+                    kind === "product"
+                      ? "Ej: Principal"
+                      : "Milanesa con puré"
+                  }
+                  {...field}
+                />
+              </FormControl>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
+        <Button
+          type="button"
+          size="icon-sm"
+          variant="ghost"
+          onClick={onRemove}
+          aria-label="Eliminar componente"
+        >
+          <Trash2 className="size-3.5" />
+        </Button>
+      </div>
+
+      {kind === "product" && (
+        <ProductPicker
+          businessId={businessId}
+          value={
+            productId
+              ? {
+                  id: productId,
+                  name: productNames.get(productId) ?? productId,
+                  image_url: null,
+                }
+              : null
+          }
+          onChange={(p) => {
+            setValue(`components.${idx}.product_id`, p?.id ?? null);
+            if (p) productNames.set(p.id, p.name);
+          }}
+        />
+      )}
+
+      {kind === "text" && (
+        <FormField
+          control={control}
+          name={`components.${idx}.description`}
+          render={({ field }) => (
+            <FormItem>
+              <Label className="text-muted-foreground text-[0.65rem] font-medium uppercase tracking-wider">
+                Detalle (opcional)
+              </Label>
+              <FormControl>
+                <Input
+                  placeholder="200g, con crema de papas"
+                  {...field}
+                  value={field.value ?? ""}
+                />
+              </FormControl>
+            </FormItem>
+          )}
+        />
+      )}
+    </div>
+  );
+}
+
+function ChoiceGroupCard({
+  businessId,
+  groupId,
+  groupLabel,
+  indices,
+  control,
+  productNames,
+  onLabelChange,
+  onAddOption,
+  onRemoveOption,
+}: {
+  businessId: string;
+  groupId: string;
+  groupLabel: string;
+  indices: number[];
+  control: ReturnType<typeof useFormContext<DailyMenuInput>>["control"];
+  productNames: Map<string, string>;
+  onLabelChange: (label: string) => void;
+  onAddOption: () => void;
+  onRemoveOption: (idx: number) => void;
+}) {
+  const { watch, setValue } = useFormContext<DailyMenuInput>();
+
+  return (
+    <div className="bg-card space-y-3 rounded-xl border-2 border-dashed border-amber-300 p-3">
+      <div className="flex items-center gap-2">
+        <span className="bg-amber-100 text-amber-800 rounded px-2 py-0.5 text-[0.65rem] font-bold uppercase tracking-wider">
+          Elegir una
+        </span>
+        <Input
+          placeholder="Ej: Bebida"
+          value={groupLabel}
+          onChange={(e) => onLabelChange(e.target.value)}
+          className="flex-1"
+        />
+      </div>
+
+      <div className="space-y-2 pl-3">
+        {indices.map((idx) => {
+          const productId = watch(`components.${idx}.product_id`);
+          return (
+            <div key={idx} className="flex items-center gap-2">
+              <GripVertical className="text-muted-foreground size-3.5 shrink-0" />
+              <div className="flex-1">
+                <ProductPicker
+                  businessId={businessId}
+                  value={
+                    productId
+                      ? {
+                          id: productId,
+                          name:
+                            productNames.get(productId) ?? productId,
+                          image_url: null,
+                        }
+                      : null
+                  }
+                  onChange={(p) => {
+                    setValue(
+                      `components.${idx}.product_id`,
+                      p?.id ?? null,
+                    );
+                    if (p) {
+                      setValue(`components.${idx}.label`, p.name);
+                      productNames.set(p.id, p.name);
+                    }
+                  }}
+                />
+              </div>
+              {indices.length > 1 && (
+                <Button
+                  type="button"
+                  size="icon-sm"
+                  variant="ghost"
+                  onClick={() => onRemoveOption(idx)}
+                  aria-label="Quitar opción"
+                >
+                  <Trash2 className="size-3.5" />
+                </Button>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      <Button
+        type="button"
+        size="sm"
+        variant="outline"
+        onClick={onAddOption}
+        className="ml-3"
+      >
+        <Plus className="size-3.5" /> Opción
+      </Button>
+    </div>
   );
 }

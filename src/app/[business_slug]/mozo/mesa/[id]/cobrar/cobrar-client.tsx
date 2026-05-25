@@ -28,6 +28,7 @@ import type {
   OrderSplit,
   PaymentMethod,
 } from "@/lib/billing/types";
+import type { PaymentMethodConfig } from "@/lib/caja/types";
 import { formatCurrency } from "@/lib/currency";
 import { cn } from "@/lib/utils";
 
@@ -88,7 +89,7 @@ export function CobrarClient({
     : init.splits;
 
   const [activeSplitId, setActiveSplitId] = useState<string | null>(null);
-  const [cajaTurnoId, setCajaTurnoId] = useState<string>(init.cajas[0].id);
+  const [cajaId, setCajaId] = useState<string>(init.cajas[0].id);
   const activeSplit = splits.find((s) => s.id === activeSplitId) ?? null;
 
   // Stats globales para el header.
@@ -160,15 +161,15 @@ export function CobrarClient({
           </div>
         </section>
 
-        {/* Selector de caja (si hay >1 con turno open) */}
+        {/* Selector de caja (si hay >1 activa) */}
         {init.cajas.length > 1 && (
           <section className="rounded-2xl bg-white p-4 ring-1 ring-zinc-200/70">
             <Label className="text-[0.6rem] font-semibold uppercase tracking-[0.18em] text-zinc-500">
               Caja para registrar el cobro
             </Label>
             <Select
-              value={cajaTurnoId}
-              onValueChange={(v) => v && setCajaTurnoId(v)}
+              value={cajaId}
+              onValueChange={(v) => v && setCajaId(v)}
             >
               <SelectTrigger className="mt-1.5">
                 <SelectValue />
@@ -176,7 +177,7 @@ export function CobrarClient({
               <SelectContent>
                 {init.cajas.map((c) => (
                   <SelectItem key={c.id} value={c.id}>
-                    {c.caja_name} · {c.encargado_name ?? "—"}
+                    {c.name}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -242,9 +243,10 @@ export function CobrarClient({
         <CobrarSplitSheet
           split={activeSplit}
           orderId={cuenta.order.id}
-          cajaTurnoId={cajaTurnoId}
+          cajaId={cajaId}
           slug={slug}
           isImplicit={init.hasImplicitSplit}
+          methodConfigs={init.methodConfigs}
           onClose={() => setActiveSplitId(null)}
           onPaid={() => {
             setActiveSplitId(null);
@@ -408,34 +410,51 @@ const METHODS: Array<{
     icon: QrCode,
   },
   {
+    value: "transfer",
+    label: "Transferencia",
+    description: "CBU/CVU o alias. Anotá la referencia.",
+    icon: Wallet,
+  },
+  {
     value: "other",
     label: "Otro",
-    description: "Cheque, transferencia, cortesía, etc.",
+    description: "Cheque, cortesía, etc.",
     icon: MoreHorizontal,
   },
 ];
 
+function calculateAdjustment(baseCents: number, percent: number): { adjustmentCents: number; finalCents: number } {
+  const adjustmentCents = Math.round(baseCents * percent / 100);
+  return { adjustmentCents, finalCents: baseCents + adjustmentCents };
+}
+
 function CobrarSplitSheet({
   split,
   orderId,
-  cajaTurnoId,
+  cajaId,
   slug,
   isImplicit,
+  methodConfigs,
   onClose,
   onPaid,
 }: {
   split: OrderSplit;
   orderId: string;
-  cajaTurnoId: string;
+  cajaId: string;
   slug: string;
   isImplicit: boolean;
+  methodConfigs: PaymentMethodConfig[];
   onClose: () => void;
   onPaid: () => void;
 }) {
   const [, startTransition] = useTransition();
   const remaining = split.expected_amount_cents - split.paid_amount_cents;
   const [method, setMethod] = useState<PaymentMethod | null>(null);
+  const configForMethod = methodConfigs.find((c) => c.method === method);
+  const adjustmentPercent = configForMethod?.adjustment_percent ?? 0;
+  const { adjustmentCents, finalCents } = calculateAdjustment(remaining, adjustmentPercent);
   const [amount, setAmount] = useState(remaining);
+  const [hasSetAmount, setHasSetAmount] = useState(false);
   const [tip, setTip] = useState(0);
   const [lastFour, setLastFour] = useState("");
   const [cardBrand, setCardBrand] = useState<
@@ -444,6 +463,12 @@ function CobrarSplitSheet({
   const [notes, setNotes] = useState("");
   const [mpInitPoint, setMpInitPoint] = useState<string | null>(null);
   const [mpPaymentId, setMpPaymentId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (method && !hasSetAmount) {
+      setAmount(finalCents);
+    }
+  }, [method, finalCents, hasSetAmount]);
 
   // Polling MP cada 4s.
   useEffect(() => {
@@ -482,7 +507,7 @@ function CobrarSplitSheet({
           method,
           amount_cents: amount,
           tip_cents: tip,
-          caja_turno_id: cajaTurnoId,
+          caja_id: cajaId,
           slug,
         });
         if (!r.ok) {
@@ -501,14 +526,16 @@ function CobrarSplitSheet({
         method,
         amount_cents: amount,
         tip_cents: tip,
-        caja_turno_id: cajaTurnoId,
+        caja_id: cajaId,
         last_four:
           method === "card_manual" && lastFour.length === 4
             ? lastFour
             : undefined,
         card_brand: method === "card_manual" ? cardBrand : undefined,
         notes:
-          method === "other" || method === "card_manual" ? notes : undefined,
+          method === "other" || method === "card_manual" || method === "transfer" ? notes : undefined,
+        adjustment_percent: adjustmentPercent,
+        adjustment_cents: adjustmentCents,
         slug,
       });
       if (!r.ok) {
@@ -607,11 +634,14 @@ function CobrarSplitSheet({
             <div className="space-y-2">
               {METHODS.map((m) => {
                 const Icon = m.icon;
+                const mc = methodConfigs.find((c) => c.method === m.value);
+                const adj = mc?.adjustment_percent ?? 0;
+                const { finalCents: adjFinal } = calculateAdjustment(remaining, adj);
                 return (
                   <button
                     key={m.value}
                     type="button"
-                    onClick={() => setMethod(m.value)}
+                    onClick={() => { setMethod(m.value); setHasSetAmount(false); }}
                     className="flex w-full items-center gap-3 rounded-xl bg-white p-3 text-left ring-1 ring-zinc-200/70 transition hover:bg-zinc-50 hover:ring-zinc-300"
                   >
                     <div className="flex size-10 flex-shrink-0 items-center justify-center rounded-full bg-zinc-100 text-zinc-700">
@@ -619,11 +649,18 @@ function CobrarSplitSheet({
                     </div>
                     <div className="min-w-0 flex-1">
                       <p className="text-sm font-semibold text-zinc-900">
-                        {m.label}
+                        {mc?.label ?? m.label}
+                        {adj !== 0 && (
+                          <span className={cn("ml-1 text-xs font-medium", adj < 0 ? "text-emerald-600" : "text-rose-600")}>
+                            {adj > 0 ? "+" : ""}{adj}%
+                          </span>
+                        )}
                       </p>
                       <p className="text-xs text-zinc-500">{m.description}</p>
                     </div>
-                    <ArrowRight className="size-4 text-zinc-400" />
+                    <span className="text-sm font-semibold text-zinc-900 tabular-nums">
+                      {formatCurrency(adjFinal)}
+                    </span>
                   </button>
                 );
               })}
@@ -667,22 +704,27 @@ function CobrarSplitSheet({
                 <Input
                   type="number"
                   value={amount / 100}
-                  onChange={(e) =>
-                    setAmount(
-                      Math.max(0, Math.round(Number(e.target.value) * 100)),
-                    )
-                  }
+                  onChange={(e) => {
+                    setAmount(Math.max(0, Math.round(Number(e.target.value) * 100)));
+                    setHasSetAmount(true);
+                  }}
                   inputMode="decimal"
                 />
-                {method === "cash" && amount > remaining && (
+                {adjustmentPercent !== 0 && (
+                  <p className={cn("text-xs font-medium", adjustmentPercent < 0 ? "text-emerald-700" : "text-rose-600")}>
+                    {adjustmentPercent < 0 ? "Descuento" : "Recargo"} {adjustmentPercent > 0 ? "+" : ""}{adjustmentPercent}%: {formatCurrency(adjustmentCents)}
+                    <span className="ml-1 text-zinc-500">(base {formatCurrency(remaining)})</span>
+                  </p>
+                )}
+                {method === "cash" && amount > finalCents && (
                   <p className="text-xs font-semibold text-emerald-700">
-                    Vuelto: {formatCurrency(amount - remaining)}
+                    Vuelto: {formatCurrency(amount - finalCents)}
                   </p>
                 )}
               </div>
 
-              {/* Propina (cash, card_manual) */}
-              {(method === "cash" || method === "card_manual") && (
+              {/* Propina (cash, card_manual, transfer) */}
+              {(method === "cash" || method === "card_manual" || method === "transfer") && (
                 <div className="grid gap-1.5">
                   <Label>Propina (opcional)</Label>
                   <Input
@@ -741,11 +783,11 @@ function CobrarSplitSheet({
               )}
 
               {/* Notas */}
-              {(method === "other" || method === "card_manual") && (
+              {(method === "other" || method === "card_manual" || method === "transfer") && (
                 <div className="grid gap-1.5">
                   <Label>
                     Notas
-                    {method === "other" && (
+                    {(method === "other" || method === "transfer") && (
                       <span className="ml-1 text-rose-600">*</span>
                     )}
                   </Label>
@@ -754,9 +796,11 @@ function CobrarSplitSheet({
                     onChange={(e) => setNotes(e.target.value)}
                     rows={2}
                     placeholder={
-                      method === "other"
-                        ? "Cheque #1234, transferencia desde…"
-                        : "Opcional"
+                      method === "transfer"
+                        ? "Alias o referencia de la transferencia…"
+                        : method === "other"
+                          ? "Cheque #1234, cortesía…"
+                          : "Opcional"
                     }
                   />
                 </div>
@@ -775,7 +819,7 @@ function CobrarSplitSheet({
               className="flex-1"
               disabled={
                 amount <= 0 ||
-                (method === "other" && notes.trim() === "") ||
+                ((method === "other" || method === "transfer") && notes.trim() === "") ||
                 (method === "card_manual" &&
                   lastFour !== "" &&
                   lastFour.length !== 4)
@@ -865,7 +909,3 @@ function AnularCobroSection({
   );
 }
 
-// Wallet importado pero solo usado si lo dejamos para refs futuras; lint
-// stripping puro: ignoramos su uso desde acá. Lo dejamos importado para que
-// quien copie patrones lo tenga a mano si suma "Caja" como sub-cuenta.
-void Wallet;

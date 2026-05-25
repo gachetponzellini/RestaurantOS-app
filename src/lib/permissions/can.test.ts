@@ -7,11 +7,11 @@ import {
   canAcceptCajaDifference,
   canApplyDiscount,
   canCancelItem,
-  canCloseCajaTurno,
+  canHacerCorte,
   canMakeSangria,
+  canManageCajas,
   canMarkRotura,
   canModifyPostEnvio,
-  canOpenCajaTurno,
 } from "./can";
 
 describe("permissions / canModifyPostEnvio", () => {
@@ -73,19 +73,19 @@ describe("permissions / canApplyDiscount", () => {
   });
 });
 
-describe("permissions / canOpenCajaTurno", () => {
-  it("admin y encargado pueden, mozo no", () => {
-    expect(canOpenCajaTurno("admin")).toBe(true);
-    expect(canOpenCajaTurno("encargado")).toBe(true);
-    expect(canOpenCajaTurno("mozo")).toBe(false);
+describe("permissions / canManageCajas", () => {
+  it("solo admin puede", () => {
+    expect(canManageCajas("admin")).toBe(true);
+    expect(canManageCajas("encargado")).toBe(false);
+    expect(canManageCajas("mozo")).toBe(false);
   });
 });
 
-describe("permissions / canCloseCajaTurno", () => {
+describe("permissions / canHacerCorte", () => {
   it("admin y encargado pueden, mozo no", () => {
-    expect(canCloseCajaTurno("admin")).toBe(true);
-    expect(canCloseCajaTurno("encargado")).toBe(true);
-    expect(canCloseCajaTurno("mozo")).toBe(false);
+    expect(canHacerCorte("admin")).toBe(true);
+    expect(canHacerCorte("encargado")).toBe(true);
+    expect(canHacerCorte("mozo")).toBe(false);
   });
 });
 

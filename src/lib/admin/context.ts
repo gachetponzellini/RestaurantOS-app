@@ -6,9 +6,7 @@ import type { User } from "@supabase/supabase-js";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 
-// Roles operativos del MVP. Decisión 2026-05-07: `staff` y `cocina` salieron.
-// Ver `wiki/decisiones/roles-mvp.md`.
-export type BusinessRole = "admin" | "encargado" | "mozo";
+export type BusinessRole = "admin" | "encargado" | "mozo" | "personal";
 
 export type AdminContext = {
   user: User;

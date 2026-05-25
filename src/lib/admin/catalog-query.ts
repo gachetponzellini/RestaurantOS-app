@@ -32,6 +32,7 @@ export type AdminProduct = {
   is_active: boolean;
   sort_order: number;
   station_id: string | null;
+  prep_time_minutes: number | null;
   modifier_groups: AdminModifierGroup[];
 };
 
@@ -88,7 +89,7 @@ export async function getAdminCatalog(businessId: string) {
     supabase
       .from("products")
       .select(
-        "id, category_id, name, slug, description, price_cents, image_url, is_available, is_active, sort_order, station_id, modifier_groups(id, name, min_selection, max_selection, is_required, sort_order, modifiers(id, name, price_delta_cents, is_available, sort_order))",
+        "id, category_id, name, slug, description, price_cents, image_url, is_available, is_active, sort_order, station_id, prep_time_minutes, modifier_groups(id, name, min_selection, max_selection, is_required, sort_order, modifiers(id, name, price_delta_cents, is_available, sort_order))",
       )
       .eq("business_id", businessId)
       .order("sort_order"),
@@ -106,6 +107,7 @@ export async function getAdminCatalog(businessId: string) {
     is_active: p.is_active,
     sort_order: p.sort_order,
     station_id: p.station_id,
+    prep_time_minutes: p.prep_time_minutes ?? null,
     modifier_groups: (p.modifier_groups ?? [])
       .slice()
       .sort((a, b) => a.sort_order - b.sort_order)
@@ -142,7 +144,7 @@ export async function getAdminProduct(id: string): Promise<AdminProduct | null> 
   const { data } = await supabase
     .from("products")
     .select(
-      "id, category_id, name, slug, description, price_cents, image_url, is_available, is_active, sort_order, station_id, modifier_groups(id, name, min_selection, max_selection, is_required, sort_order, modifiers(id, name, price_delta_cents, is_available, sort_order))",
+      "id, category_id, name, slug, description, price_cents, image_url, is_available, is_active, sort_order, station_id, prep_time_minutes, modifier_groups(id, name, min_selection, max_selection, is_required, sort_order, modifiers(id, name, price_delta_cents, is_available, sort_order))",
     )
     .eq("id", id)
     .maybeSingle();
@@ -159,6 +161,7 @@ export async function getAdminProduct(id: string): Promise<AdminProduct | null> 
     is_active: data.is_active,
     sort_order: data.sort_order,
     station_id: data.station_id,
+    prep_time_minutes: data.prep_time_minutes ?? null,
     modifier_groups: (data.modifier_groups ?? [])
       .slice()
       .sort((a, b) => a.sort_order - b.sort_order)

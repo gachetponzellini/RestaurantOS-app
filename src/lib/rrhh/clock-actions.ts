@@ -1,0 +1,138 @@
+"use server";
+
+import type { SupabaseClient } from "@supabase/supabase-js";
+
+import { actionError, actionOk, type ActionResult } from "@/lib/actions";
+import { createSupabaseServiceClient } from "@/lib/supabase/service";
+
+// Post-migration types not yet regenerated; cast to bypass strict table checks.
+// Remove after running `pnpm db:types` against a DB with 0045_rrhh applied.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type AnyClient = SupabaseClient<any, any, any>;
+const db = () => createSupabaseServiceClient() as unknown as AnyClient;
+
+export type ClockResult = {
+  type: "in" | "out";
+  employeeName: string;
+  time: string;
+  durationMinutes?: number;
+};
+
+export async function clockPunch(
+  businessSlug: string,
+  pin: string,
+): Promise<ActionResult<ClockResult>> {
+  if (!/^\d{4}$/.test(pin)) {
+    return actionError("PIN inválido.");
+  }
+
+  const service = db();
+
+  const { data: business } = await service
+    .from("businesses")
+    .select("id")
+    .eq("slug", businessSlug)
+    .maybeSingle();
+  if (!business) return actionError("Negocio no encontrado.");
+
+  const { data: member } = await service
+    .from("business_users")
+    .select("user_id, full_name, disabled_at")
+    .eq("business_id", business.id)
+    .eq("pin", pin)
+    .is("disabled_at", null)
+    .maybeSingle();
+
+  if (!member) return actionError("PIN no reconocido.");
+
+  const { data: openEntry } = await service
+    .from("clock_entries")
+    .select("id, clock_in")
+    .eq("business_id", business.id)
+    .eq("user_id", member.user_id)
+    .is("clock_out", null)
+    .maybeSingle();
+
+  if (!openEntry) {
+    const { data: entry, error } = await service
+      .from("clock_entries")
+      .insert({ business_id: business.id, user_id: member.user_id })
+      .select("clock_in")
+      .single();
+    if (error) return actionError("Error al registrar entrada.");
+    return actionOk({
+      type: "in" as const,
+      employeeName: member.full_name ?? "Empleado",
+      time: entry.clock_in,
+    });
+  }
+
+  const now = new Date().toISOString();
+  const { error } = await service
+    .from("clock_entries")
+    .update({ clock_out: now })
+    .eq("id", openEntry.id);
+  if (error) return actionError("Error al registrar salida.");
+
+  const clockInDate = new Date(openEntry.clock_in);
+  const durationMinutes = Math.floor(
+    (Date.now() - clockInDate.getTime()) / 60000,
+  );
+
+  return actionOk({
+    type: "out" as const,
+    employeeName: member.full_name ?? "Empleado",
+    time: now,
+    durationMinutes,
+  });
+}
+
+export type PresentEmployee = {
+  userId: string;
+  name: string;
+  role: string;
+  clockIn: string;
+};
+
+export async function getCurrentPresent(
+  businessSlug: string,
+): Promise<PresentEmployee[]> {
+  const service = db();
+
+  const { data: business } = await service
+    .from("businesses")
+    .select("id")
+    .eq("slug", businessSlug)
+    .maybeSingle();
+  if (!business) return [];
+
+  const { data: entries } = await service
+    .from("clock_entries")
+    .select("user_id, clock_in")
+    .eq("business_id", business.id)
+    .is("clock_out", null)
+    .order("clock_in", { ascending: true });
+
+  if (!entries || entries.length === 0) return [];
+
+  const userIds = entries.map((e) => e.user_id);
+  const { data: members } = await service
+    .from("business_users")
+    .select("user_id, full_name, role")
+    .eq("business_id", business.id)
+    .in("user_id", userIds);
+
+  const memberMap = new Map(
+    (members ?? []).map((m) => [m.user_id, m]),
+  );
+
+  return entries.map((e) => {
+    const m = memberMap.get(e.user_id);
+    return {
+      userId: e.user_id,
+      name: m?.full_name ?? "—",
+      role: m?.role ?? "personal",
+      clockIn: e.clock_in,
+    };
+  });
+}

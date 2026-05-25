@@ -78,6 +78,7 @@ export type Database = {
           disabled_at: string | null
           full_name: string | null
           phone: string | null
+          pin: string | null
           role: string
           user_id: string
         }
@@ -87,6 +88,7 @@ export type Database = {
           disabled_at?: string | null
           full_name?: string | null
           phone?: string | null
+          pin?: string | null
           role: string
           user_id: string
         }
@@ -96,6 +98,7 @@ export type Database = {
           disabled_at?: string | null
           full_name?: string | null
           phone?: string | null
+          pin?: string | null
           role?: string
           user_id?: string
         }
@@ -194,11 +197,72 @@ export type Database = {
         }
         Relationships: []
       }
+      caja_cortes: {
+        Row: {
+          business_id: string
+          caja_id: string
+          closing_cash_cents: number
+          closing_notes: string | null
+          created_at: string
+          denomination_count: Json | null
+          difference_cents: number
+          encargado_id: string
+          expected_cash_cents: number
+          id: string
+        }
+        Insert: {
+          business_id: string
+          caja_id: string
+          closing_cash_cents: number
+          closing_notes?: string | null
+          created_at?: string
+          denomination_count?: Json | null
+          difference_cents: number
+          encargado_id: string
+          expected_cash_cents: number
+          id?: string
+        }
+        Update: {
+          business_id?: string
+          caja_id?: string
+          closing_cash_cents?: number
+          closing_notes?: string | null
+          created_at?: string
+          denomination_count?: Json | null
+          difference_cents?: number
+          encargado_id?: string
+          expected_cash_cents?: number
+          id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "caja_cortes_business_id_fkey"
+            columns: ["business_id"]
+            isOneToOne: false
+            referencedRelation: "businesses"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "caja_cortes_caja_id_fkey"
+            columns: ["caja_id"]
+            isOneToOne: false
+            referencedRelation: "cajas"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "caja_cortes_encargado_id_fkey"
+            columns: ["encargado_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       caja_movimientos: {
         Row: {
           amount_cents: number
           business_id: string
-          caja_turno_id: string
+          caja_id: string
           created_at: string
           created_by: string | null
           id: string
@@ -208,7 +272,7 @@ export type Database = {
         Insert: {
           amount_cents: number
           business_id: string
-          caja_turno_id: string
+          caja_id: string
           created_at?: string
           created_by?: string | null
           id?: string
@@ -218,7 +282,7 @@ export type Database = {
         Update: {
           amount_cents?: number
           business_id?: string
-          caja_turno_id?: string
+          caja_id?: string
           created_at?: string
           created_by?: string | null
           id?: string
@@ -234,85 +298,15 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
-            foreignKeyName: "caja_movimientos_caja_turno_id_fkey"
-            columns: ["caja_turno_id"]
-            isOneToOne: false
-            referencedRelation: "caja_turnos"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "caja_movimientos_created_by_fkey"
-            columns: ["created_by"]
-            isOneToOne: false
-            referencedRelation: "users"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      caja_turnos: {
-        Row: {
-          business_id: string
-          caja_id: string
-          closed_at: string | null
-          closing_cash_cents: number | null
-          closing_notes: string | null
-          created_at: string
-          difference_cents: number | null
-          encargado_id: string
-          expected_cash_cents: number | null
-          id: string
-          opened_at: string
-          opening_cash_cents: number
-          status: string
-        }
-        Insert: {
-          business_id: string
-          caja_id: string
-          closed_at?: string | null
-          closing_cash_cents?: number | null
-          closing_notes?: string | null
-          created_at?: string
-          difference_cents?: number | null
-          encargado_id: string
-          expected_cash_cents?: number | null
-          id?: string
-          opened_at?: string
-          opening_cash_cents: number
-          status?: string
-        }
-        Update: {
-          business_id?: string
-          caja_id?: string
-          closed_at?: string | null
-          closing_cash_cents?: number | null
-          closing_notes?: string | null
-          created_at?: string
-          difference_cents?: number | null
-          encargado_id?: string
-          expected_cash_cents?: number | null
-          id?: string
-          opened_at?: string
-          opening_cash_cents?: number
-          status?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "caja_turnos_business_id_fkey"
-            columns: ["business_id"]
-            isOneToOne: false
-            referencedRelation: "businesses"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "caja_turnos_caja_id_fkey"
+            foreignKeyName: "caja_movimientos_caja_id_fkey"
             columns: ["caja_id"]
             isOneToOne: false
             referencedRelation: "cajas"
             referencedColumns: ["id"]
           },
           {
-            foreignKeyName: "caja_turnos_encargado_id_fkey"
-            columns: ["encargado_id"]
+            foreignKeyName: "caja_movimientos_created_by_fkey"
+            columns: ["created_by"]
             isOneToOne: false
             referencedRelation: "users"
             referencedColumns: ["id"]
@@ -630,6 +624,8 @@ export type Database = {
           contact_id: string
           created_at: string
           id: string
+          reservation_intent: Json | null
+          reservation_token: string | null
           updated_at: string
         }
         Insert: {
@@ -640,6 +636,8 @@ export type Database = {
           contact_id: string
           created_at?: string
           id?: string
+          reservation_intent?: Json | null
+          reservation_token?: string | null
           updated_at?: string
         }
         Update: {
@@ -650,6 +648,8 @@ export type Database = {
           contact_id?: string
           created_at?: string
           id?: string
+          reservation_intent?: Json | null
+          reservation_token?: string | null
           updated_at?: string
         }
         Relationships: [
@@ -700,6 +700,47 @@ export type Database = {
             columns: ["conversation_id"]
             isOneToOne: false
             referencedRelation: "chatbot_conversations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      clock_entries: {
+        Row: {
+          business_id: string
+          clock_in: string
+          clock_out: string | null
+          created_at: string
+          duration_minutes: number | null
+          id: string
+          notes: string | null
+          user_id: string
+        }
+        Insert: {
+          business_id: string
+          clock_in?: string
+          clock_out?: string | null
+          created_at?: string
+          duration_minutes?: number | null
+          id?: string
+          notes?: string | null
+          user_id: string
+        }
+        Update: {
+          business_id?: string
+          clock_in?: string
+          clock_out?: string | null
+          created_at?: string
+          duration_minutes?: number | null
+          id?: string
+          notes?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "clock_entries_business_id_fkey"
+            columns: ["business_id"]
+            isOneToOne: false
+            referencedRelation: "businesses"
             referencedColumns: ["id"]
           },
         ]
@@ -1534,7 +1575,7 @@ export type Database = {
           amount_cents: number
           attributed_mozo_id: string | null
           business_id: string
-          caja_turno_id: string
+          caja_id: string
           card_brand: string | null
           created_at: string
           id: string
@@ -1555,7 +1596,7 @@ export type Database = {
           amount_cents: number
           attributed_mozo_id?: string | null
           business_id: string
-          caja_turno_id: string
+          caja_id: string
           card_brand?: string | null
           created_at?: string
           id?: string
@@ -1576,7 +1617,7 @@ export type Database = {
           amount_cents?: number
           attributed_mozo_id?: string | null
           business_id?: string
-          caja_turno_id?: string
+          caja_id?: string
           card_brand?: string | null
           created_at?: string
           id?: string
@@ -1609,10 +1650,10 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
-            foreignKeyName: "payments_caja_turno_fk"
-            columns: ["caja_turno_id"]
+            foreignKeyName: "payments_caja_id_fkey"
+            columns: ["caja_id"]
             isOneToOne: false
-            referencedRelation: "caja_turnos"
+            referencedRelation: "cajas"
             referencedColumns: ["id"]
           },
           {
@@ -1649,6 +1690,7 @@ export type Database = {
           is_active: boolean
           is_available: boolean
           name: string
+          prep_time_minutes: number | null
           price_cents: number
           slug: string
           sort_order: number
@@ -1664,6 +1706,7 @@ export type Database = {
           is_active?: boolean
           is_available?: boolean
           name: string
+          prep_time_minutes?: number | null
           price_cents: number
           slug: string
           sort_order?: number
@@ -1679,6 +1722,7 @@ export type Database = {
           is_active?: boolean
           is_available?: boolean
           name?: string
+          prep_time_minutes?: number | null
           price_cents?: number
           slug?: string
           sort_order?: number
@@ -1821,6 +1865,7 @@ export type Database = {
       reservations: {
         Row: {
           business_id: string
+          client_confirmed_at: string | null
           created_at: string
           customer_name: string
           customer_phone: string
@@ -1837,6 +1882,7 @@ export type Database = {
         }
         Insert: {
           business_id: string
+          client_confirmed_at?: string | null
           created_at?: string
           customer_name: string
           customer_phone: string
@@ -1853,6 +1899,7 @@ export type Database = {
         }
         Update: {
           business_id?: string
+          client_confirmed_at?: string | null
           created_at?: string
           customer_name?: string
           customer_phone?: string

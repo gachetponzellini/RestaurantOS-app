@@ -2,7 +2,7 @@ import { notFound, redirect } from "next/navigation";
 
 import { PageHeader, PageShell } from "@/components/admin/shell/page-shell";
 import { canManageBusiness, ensureAdminAccess } from "@/lib/admin/context";
-import { getActiveTurnos, getAllCajasForBusiness } from "@/lib/caja/queries";
+import { getAllCajasForBusiness } from "@/lib/caja/queries";
 import { getBusiness } from "@/lib/tenant";
 
 import { CajasClient } from "./cajas-client";
@@ -19,32 +19,21 @@ export default async function CajasPage({
   if (!business) notFound();
 
   const ctx = await ensureAdminAccess(business.id, business_slug);
-  // Solo admin: el encargado puede ABRIR turnos pero no configurar cajas.
+  // Solo admin: el encargado opera desde /admin/local, no configura cajas.
   if (!canManageBusiness(ctx)) {
     redirect(`/${business_slug}/admin/local?tab=caja`);
   }
 
-  const [cajas, activeTurnos] = await Promise.all([
-    getAllCajasForBusiness(business.id),
-    getActiveTurnos(business.id),
-  ]);
-
-  // Set de cajaIds con turno open, para mostrar la pill "Operando ahora"
-  // y bloquear deshabilitar.
-  const cajaIdsConTurnoOpen = activeTurnos.map((t) => t.caja_id);
+  const cajas = await getAllCajasForBusiness(business.id);
 
   return (
     <PageShell width="default">
       <PageHeader
         eyebrow="Configuración"
         title="Cajas"
-        description="Las cajas físicas del local donde se cobra. Una caja activa puede tener un turno abierto a la vez."
+        description="Las cajas físicas del local donde se cobra. Cada caja está siempre activa — no requiere abrir ni cerrar."
       />
-      <CajasClient
-        slug={business_slug}
-        cajas={cajas}
-        cajaIdsConTurnoOpen={cajaIdsConTurnoOpen}
-      />
+      <CajasClient slug={business_slug} cajas={cajas} />
     </PageShell>
   );
 }

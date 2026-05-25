@@ -75,6 +75,7 @@ export function ProductForm({
           is_available: product.is_available,
           is_active: product.is_active,
           sort_order: product.sort_order,
+          prep_time_minutes: product.prep_time_minutes,
           modifier_groups: product.modifier_groups.map((g) => ({
             id: g.id,
             name: g.name,
@@ -99,6 +100,7 @@ export function ProductForm({
           is_available: true,
           is_active: true,
           sort_order: 0,
+          prep_time_minutes: null,
           modifier_groups: [],
         },
   });
@@ -337,6 +339,33 @@ export function ProductForm({
               </FormItem>
             );
           }}
+        />
+
+        <FormField
+          control={form.control}
+          name="prep_time_minutes"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>Tiempo de preparación (minutos)</FormLabel>
+              <FormControl>
+                <Input
+                  type="number"
+                  min={1}
+                  max={999}
+                  placeholder="—"
+                  value={field.value ?? ""}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    field.onChange(v === "" ? null : parseInt(v) || null);
+                  }}
+                />
+              </FormControl>
+              <p className="text-muted-foreground text-xs">
+                Opcional. Tiempo estimado de preparación para cálculo de ETA en cocina.
+              </p>
+              <FormMessage />
+            </FormItem>
+          )}
         />
 
         <div className="flex gap-4">

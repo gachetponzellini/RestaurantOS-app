@@ -1,11 +1,40 @@
 import { z } from "zod";
 
-export const DailyMenuComponentInput = z.object({
-  // id presente cuando se está editando un componente que ya existe.
-  id: z.string().uuid().optional(),
-  label: z.string().min(1, "Requerido.").max(120),
-  description: z.string().max(280).optional().nullable(),
-});
+export const DailyMenuComponentInput = z
+  .object({
+    id: z.string().uuid().optional(),
+    label: z.string().min(1, "Requerido.").max(120),
+    description: z.string().max(280).optional().nullable(),
+    kind: z.enum(["text", "product", "choice"]),
+    product_id: z.string().uuid().optional().nullable(),
+    choice_group_id: z.string().uuid().optional().nullable(),
+    choice_group_label: z.string().max(80).optional().nullable(),
+  })
+  .superRefine((data, ctx) => {
+    if (data.kind === "product" && !data.product_id) {
+      ctx.addIssue({
+        code: "custom",
+        message: "Seleccioná un producto.",
+        path: ["product_id"],
+      });
+    }
+    if (data.kind === "choice") {
+      if (!data.product_id) {
+        ctx.addIssue({
+          code: "custom",
+          message: "Seleccioná un producto.",
+          path: ["product_id"],
+        });
+      }
+      if (!data.choice_group_id) {
+        ctx.addIssue({
+          code: "custom",
+          message: "Falta el grupo de opciones.",
+          path: ["choice_group_id"],
+        });
+      }
+    }
+  });
 export type DailyMenuComponentInput = z.infer<typeof DailyMenuComponentInput>;
 
 export const DailyMenuInput = z.object({

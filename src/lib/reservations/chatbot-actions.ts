@@ -175,11 +175,118 @@ export async function checkAvailabilityForChatbot(
     timezone: business.timezone,
   });
 
+  // Si hay slots, devolvemos rápido. Si no, computamos un diagnóstico para
+  // que el bot pueda explicarle al cliente *por qué* no hay (config faltante,
+  // mesas chicas, fuera del horizonte, etc.) en vez de un "no hay nada"
+  // pelado.
+  if (slots.length > 0) {
+    return {
+      date,
+      party_size: partySize,
+      slots: slots.map((s) => s.slot),
+      count: slots.length,
+    };
+  }
+
+  // ── Diagnóstico de availability vacía ──────────────────────────────
+  const [y, m, d] = date.split("-").map(Number);
+  const dow = String(new Date(Date.UTC(y, m - 1, d)).getUTCDay()) as
+    | "0" | "1" | "2" | "3" | "4" | "5" | "6";
+  const daySchedule = settings.schedule[dow];
+
+  // 1. ¿El negocio tiene algún día con horarios cargados?
+  const anyDayOpen = Object.values(settings.schedule).some(
+    (s) => s?.open && s.slots.length > 0,
+  );
+  if (!anyDayOpen) {
+    return {
+      date,
+      party_size: partySize,
+      slots: [],
+      count: 0,
+      diagnostic: "no_schedule_configured" as const,
+      hint:
+        "El negocio todavía no cargó horarios de reserva en /admin/reservas/configuracion. Pedile al cliente que pruebe llamando o pasando por el local.",
+    };
+  }
+
+  // 2. ¿El día solicitado tiene horarios?
+  if (!daySchedule || !daySchedule.open || daySchedule.slots.length === 0) {
+    const openDays = (Object.entries(settings.schedule) as [
+      string,
+      { open: boolean; slots: string[] },
+    ][])
+      .filter(([, s]) => s?.open && s.slots.length > 0)
+      .map(([k]) => Number(k));
+    return {
+      date,
+      party_size: partySize,
+      slots: [],
+      count: 0,
+      diagnostic: "day_closed" as const,
+      open_days_of_week: openDays, // 0=dom, 1=lun, …, 6=sáb
+      hint:
+        "Ese día el local no acepta reservas. Sugerile al cliente otra fecha (mirá `open_days_of_week`).",
+    };
+  }
+
+  // 3. ¿Hay alguna mesa que entre el party_size?
+  const eligibleTables = tables.filter(
+    (t) => t.status === "active" && t.seats >= partySize,
+  );
+  if (eligibleTables.length === 0) {
+    const maxSeats = tables.reduce(
+      (m, t) => (t.status === "active" && t.seats > m ? t.seats : m),
+      0,
+    );
+    return {
+      date,
+      party_size: partySize,
+      slots: [],
+      count: 0,
+      diagnostic: "no_tables_fit_party" as const,
+      max_seats_available: maxSeats,
+      hint:
+        maxSeats === 0
+          ? "El negocio no tiene mesas activas cargadas en el floor plan. Avisale al cliente que llame al local."
+          : `La mesa más grande del local tiene ${maxSeats} cubiertos; sugerile al cliente reservar para esa cantidad o dividir en varias mesas.`,
+    };
+  }
+
+  // 4. Hay día abierto + mesas que entran, pero igual no hay slots:
+  //    o todo está ocupado, o estamos fuera de lead time / horizonte.
+  //    Distinguimos comparando contra los slots del día sin filtrar nada.
+  const dayHasFutureSlots = daySchedule.slots.some((slot) => {
+    const [hh, mm] = slot.split(":").map(Number);
+    const slotStart = fromZonedTime(`${date}T${slot}:00`, business.timezone);
+    const leadCutoff = new Date(Date.now() + settings.lead_time_min * 60_000);
+    return !Number.isNaN(slotStart.getTime()) &&
+      slotStart >= leadCutoff &&
+      !Number.isNaN(hh) &&
+      !Number.isNaN(mm);
+  });
+  if (!dayHasFutureSlots) {
+    return {
+      date,
+      party_size: partySize,
+      slots: [],
+      count: 0,
+      diagnostic: "lead_time_or_past" as const,
+      lead_time_min: settings.lead_time_min,
+      hint:
+        "Todos los turnos del día solicitado ya pasaron o están dentro de la ventana de anticipación mínima. Sugerile al cliente probar otro día.",
+    };
+  }
+
+  // 5. Default: todas las mesas elegibles están ocupadas en esos slots.
   return {
     date,
     party_size: partySize,
-    slots: slots.map((s) => s.slot),
-    count: slots.length,
+    slots: [],
+    count: 0,
+    diagnostic: "fully_booked" as const,
+    hint:
+      "Ese día hay turnos abiertos pero todas las mesas que entran están reservadas. Sugerí otra fecha o party_size distinto.",
   };
 }
 

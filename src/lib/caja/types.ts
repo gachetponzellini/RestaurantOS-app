@@ -1,11 +1,3 @@
-// ============================================
-// Tipos del dominio Caja (CU-06).
-//
-// Las filas pelotas pelotas vienen de Supabase tipadas via Database — esto
-// son los DTO que cruzan a UI sin metadata sensible. `business_id` se omite
-// del tipo público porque la cross-tenant defense vive en cada query/action.
-// ============================================
-
 export type Caja = {
   id: string;
   business_id: string;
@@ -14,28 +6,24 @@ export type Caja = {
   sort_order: number;
 };
 
-export type CajaTurnoStatus = "open" | "closed";
-
-export type CajaTurno = {
+export type CajaCorte = {
   id: string;
   caja_id: string;
   business_id: string;
   encargado_id: string;
-  opening_cash_cents: number;
-  expected_cash_cents: number | null;
-  closing_cash_cents: number | null;
-  difference_cents: number | null;
+  expected_cash_cents: number;
+  closing_cash_cents: number;
+  difference_cents: number;
   closing_notes: string | null;
-  status: CajaTurnoStatus;
-  opened_at: string;
-  closed_at: string | null;
+  denomination_count: Record<string, number> | null;
+  created_at: string;
 };
 
-export type CajaMovimientoKind = "apertura" | "cierre" | "sangria" | "ingreso";
+export type CajaMovimientoKind = "sangria" | "ingreso";
 
 export type CajaMovimiento = {
   id: string;
-  caja_turno_id: string;
+  caja_id: string;
   business_id: string;
   kind: CajaMovimientoKind;
   amount_cents: number;
@@ -44,26 +32,35 @@ export type CajaMovimiento = {
   created_at: string;
 };
 
-// Métodos de cobro definidos en CU-04. Importable desde lib/billing también.
 export type PaymentMethod =
   | "cash"
   | "card_manual"
   | "mp_link"
   | "mp_qr"
+  | "transfer"
   | "other";
 
-export type TurnoLiveStats = {
-  turno_id: string;
-  // Total cobrado en payments paid del turno (incluye amount_cents, no propinas).
+export type CajaLiveStats = {
+  caja_id: string;
   total_ventas_cents: number;
   total_propinas_cents: number;
   ventas_por_metodo: Record<PaymentMethod, number>;
   cobros_count: number;
-  // expected_cash = opening + cash payments + ingresos − sangrías.
   expected_cash_cents: number;
+  periodo_desde: string;
 };
 
-export type ActiveTurnoView = CajaTurno & {
-  caja_name: string;
-  encargado_name: string | null;
+export type CajaConEstado = Caja & {
+  ultimo_corte: CajaCorte | null;
+  periodo_desde: string;
+};
+
+export type PaymentMethodConfig = {
+  id: string;
+  business_id: string;
+  method: PaymentMethod;
+  adjustment_percent: number;
+  label: string | null;
+  is_active: boolean;
+  sort_order: number;
 };
