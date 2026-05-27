@@ -15,6 +15,7 @@ import {
   canTransferTable,
   canTransitionMesa,
 } from "@/lib/permissions/can";
+import { createNotification } from "@/lib/notifications/create";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 import { getBusiness } from "@/lib/tenant";
 
@@ -402,6 +403,24 @@ export async function anularMesa(
     reason,
   });
 
+  // Notify the assigned mozo (if any) that their table was cancelled.
+  const cancelPayload = { tableLabel: table.label, reason };
+  if (table.mozo_id) {
+    await createNotification({
+      businessId: business.id,
+      userId: table.mozo_id,
+      type: "mesa.cancelled",
+      payload: cancelPayload,
+    });
+  }
+  // Broadcast to encargado so the manager always sees cancellations.
+  await createNotification({
+    businessId: business.id,
+    targetRole: "encargado",
+    type: "mesa.cancelled",
+    payload: cancelPayload,
+  });
+
   revalidatePath(`/${businessSlug}/mozo`);
   return actionOk(undefined);
 }
@@ -496,7 +515,8 @@ export async function transferTable(
 
   const fromMozoId = table.mozo_id;
   const isOrigen = fromMozoId !== null && fromMozoId === ctx.userId;
-  if (!canTransferTable(ctx.role, isOrigen)) {
+  const isSelfClaim = toMozoId === ctx.userId && !isOrigen;
+  if (!canTransferTable(ctx.role, isOrigen, isSelfClaim)) {
     return actionError("No podés transferir una mesa que no tenés asignada.");
   }
 
@@ -544,26 +564,46 @@ export async function transferTable(
     if (m.full_name) nameById.set(m.user_id, m.full_name);
   }
 
+  const transferPayload = {
+    tableId,
+    tableLabel: table.label,
+    fromMozoId,
+    fromName: fromMozoId ? (nameById.get(fromMozoId) ?? null) : null,
+    toMozoId,
+    toName: nameById.get(toMozoId) ?? null,
+    transferredBy: ctx.userId,
+    transferredByName: nameById.get(ctx.userId) ?? null,
+    reason: reason?.trim() || null,
+  };
+
   const { error: notifErr } = await service.from("notifications").insert({
     business_id: business.id,
     user_id: null,
     target_role: "encargado",
     type: "mesa.transferred",
-    payload: {
-      tableId,
-      tableLabel: table.label,
-      fromMozoId,
-      fromName: fromMozoId ? (nameById.get(fromMozoId) ?? null) : null,
-      toMozoId,
-      toName: nameById.get(toMozoId) ?? null,
-      transferredBy: ctx.userId,
-      transferredByName: nameById.get(ctx.userId) ?? null,
-      reason: reason?.trim() || null,
-    },
+    payload: transferPayload,
   });
   if (notifErr) {
     console.error("transferTable notification", notifErr);
     // No bloqueamos: la transferencia ya se hizo. El audit log queda como source of truth.
+  }
+
+  // Notify the destination mozo directly so they see the new table.
+  await createNotification({
+    businessId: business.id,
+    userId: toMozoId,
+    type: "mesa.transferred",
+    payload: transferPayload,
+  });
+
+  // Notify the original mozo that their table was taken.
+  if (fromMozoId && fromMozoId !== ctx.userId) {
+    await createNotification({
+      businessId: business.id,
+      userId: fromMozoId,
+      type: "mesa.transferred",
+      payload: transferPayload,
+    });
   }
 
   revalidatePath(`/${businessSlug}/mozo`);

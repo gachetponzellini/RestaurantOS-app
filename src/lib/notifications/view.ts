@@ -7,6 +7,7 @@ import {
   AlertTriangle,
   ArrowLeftRight,
   Ban,
+  CheckCircle2,
   ShoppingBag,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
@@ -91,6 +92,17 @@ export function viewForNotification(n: Notification): NotiView {
       icon: ShoppingBag,
       title: `${tipo} nuevo · #${num}`,
       body: `De ${customer}. Falta confirmar.`,
+    };
+  }
+  if (n.type === "comanda.entregada") {
+    const tableLabel = (p.tableLabel as string | undefined) ?? "?";
+    const stationName = (p.stationName as string | undefined) ?? "Cocina";
+    const itemCount = (p.itemCount as number | undefined) ?? 0;
+    return {
+      tone: "success",
+      icon: CheckCircle2,
+      title: `Comanda lista · Mesa ${tableLabel}`,
+      body: `${stationName} — ${itemCount} plato(s) para servir`,
     };
   }
 

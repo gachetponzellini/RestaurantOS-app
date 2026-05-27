@@ -1,7 +1,8 @@
 import { notFound, redirect } from "next/navigation";
 
-import { CreditCard } from "lucide-react";
+import { CreditCard, Receipt } from "lucide-react";
 
+import { AfipConfigForm } from "@/components/admin/settings/afip-config-form";
 import { BusinessSettingsForm } from "@/components/admin/settings/business-settings-form";
 import { GenerateImagesCard } from "@/components/admin/settings/generate-images-card";
 import { PaymentMethodsConfig } from "@/components/admin/settings/payment-methods-config";
@@ -138,6 +139,24 @@ export default async function ConfiguracionPage({
           description="Configurá recargos o descuentos por método de pago. Se aplican automáticamente al cobrar."
         >
           <PaymentMethodsConfig slug={business_slug} configs={methodConfigs} />
+        </SettingsSection>
+      </div>
+
+      <div className="mt-8">
+        <SettingsSection
+          icon={<Receipt className="size-5" />}
+          title="Facturación AFIP"
+          description="Configurá la emisión de comprobantes electrónicos AFIP. Necesitás CUIT y punto de venta."
+        >
+          <AfipConfigForm
+            slug={business_slug}
+            initial={{
+              cuit: (business as Record<string, unknown>).afip_cuit as string ?? "",
+              puntoVenta: (business as Record<string, unknown>).afip_punto_venta as number ?? 0,
+              provider: ((business as Record<string, unknown>).afip_provider as "tusfacturas" | "afipsdk" | "direct") ?? "tusfacturas",
+              defaultTipo: ((business as Record<string, unknown>).afip_default_tipo as "factura_a" | "factura_b" | "nota_credito_a" | "nota_credito_b") ?? "factura_b",
+            }}
+          />
         </SettingsSection>
       </div>
 

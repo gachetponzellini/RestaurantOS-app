@@ -19,9 +19,11 @@ import {
   Package,
   Settings,
   ShoppingBag,
+  Receipt,
   // Tag,
   Users,
   Wallet,
+  Warehouse,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -82,6 +84,12 @@ function buildNav(slug: string, showBusinessTools: boolean): NavItem[] {
         p.startsWith(`${adminBase}/menu-del-dia`),
     },
     {
+      href: `${adminBase}/stock`,
+      label: "Stock",
+      icon: <Warehouse className="size-5" strokeWidth={1.75} />,
+      match: (p) => p.startsWith(`${adminBase}/stock`),
+    },
+    {
       href: `${adminBase}/salones`,
       label: "Salones",
       icon: <LayoutGrid className="size-5" strokeWidth={1.75} />,
@@ -128,6 +136,12 @@ function buildNav(slug: string, showBusinessTools: boolean): NavItem[] {
         match: (p) => p.startsWith(`${adminBase}/cajas`),
       },
       {
+        href: `${adminBase}/facturacion`,
+        label: "Facturación",
+        icon: <Receipt className="size-5" strokeWidth={1.75} />,
+        match: (p) => p.startsWith(`${adminBase}/facturacion`),
+      },
+      {
         href: `${adminBase}/rrhh`,
         label: "RRHH",
         icon: <Clock className="size-5" strokeWidth={1.75} />,
@@ -164,6 +178,7 @@ export function AdminSidebar({
   isPlatformAdmin = false,
   canManageBusiness = false,
   initialPendingCount = 0,
+  lowStockCount = 0,
   isActive: _isActive = true,
 }: {
   slug: string;
@@ -175,6 +190,7 @@ export function AdminSidebar({
   isPlatformAdmin?: boolean;
   canManageBusiness?: boolean;
   initialPendingCount?: number;
+  lowStockCount?: number;
   isActive?: boolean;
 }) {
   void _isActive;
@@ -317,7 +333,13 @@ export function AdminSidebar({
               icon={item.icon}
               active={item.match(pathname)}
               expanded={expanded}
-              badge={item.label === "Local en vivo" && pendingCount > 0 ? pendingCount : undefined}
+              badge={
+                item.label === "Local en vivo" && pendingCount > 0
+                  ? pendingCount
+                  : item.label === "Stock" && lowStockCount > 0
+                    ? lowStockCount
+                    : undefined
+              }
             />
           ))}
 

@@ -71,10 +71,7 @@ export function OrderSummaryCard({
     startTransition(async () => {
       const r = await marcarComandaEntregada(comandaId, slug);
       if (!r.ok) toast.error(r.error);
-      else {
-        toast.success("Comanda entregada");
-        router.refresh();
-      }
+      else router.refresh();
     });
   };
 

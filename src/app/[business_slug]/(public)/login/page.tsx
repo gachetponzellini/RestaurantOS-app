@@ -109,19 +109,7 @@ export default async function CustomerLoginPage({
               lineHeight: 1.5,
             }}
           >
-            Al continuar aceptás los{" "}
-            <span
-              style={{ color: "var(--ink-2)", textDecoration: "underline" }}
-            >
-              Términos
-            </span>{" "}
-            y la{" "}
-            <span
-              style={{ color: "var(--ink-2)", textDecoration: "underline" }}
-            >
-              Privacidad
-            </span>
-            .
+            Al continuar aceptás los Términos y la Privacidad.
           </div>
         </div>
       </div>

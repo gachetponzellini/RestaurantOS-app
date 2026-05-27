@@ -1,27 +1,7 @@
 "use client";
 
 import type { ClockEntry } from "@/lib/rrhh/clock-queries";
-
-function formatDate(iso: string): string {
-  return new Date(iso).toLocaleDateString("es-AR", {
-    day: "2-digit",
-    month: "2-digit",
-  });
-}
-
-function formatTime(iso: string): string {
-  return new Date(iso).toLocaleTimeString("es-AR", {
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
-
-function formatDuration(minutes: number | null): string {
-  if (minutes == null) return "—";
-  const h = Math.floor(minutes / 60);
-  const m = minutes % 60;
-  return h > 0 ? `${h}h ${m}m` : `${m}m`;
-}
+import { formatDate, formatTime, formatDuration } from "@/lib/rrhh/format-utils";
 
 export function HistoryTable({ entries }: { entries: ClockEntry[] }) {
   if (entries.length === 0) {
@@ -55,7 +35,7 @@ export function HistoryTable({ entries }: { entries: ClockEntry[] }) {
               <td className="px-4 py-3 tabular-nums text-zinc-600">
                 {e.clockOut ? formatTime(e.clockOut) : "—"}
               </td>
-              <td className="px-4 py-3 tabular-nums text-zinc-900 font-medium">
+              <td className="px-4 py-3 tabular-nums font-medium text-zinc-900">
                 {formatDuration(e.durationMinutes)}
               </td>
             </tr>

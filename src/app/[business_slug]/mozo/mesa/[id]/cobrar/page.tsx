@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
+import { getInvoiceForOrder } from "@/lib/afip/queries";
 import { iniciarCobro } from "@/lib/billing/cobro-actions";
 import { getCuentaForTable } from "@/lib/billing/cuenta-query";
 import { ensureMozoAccess } from "@/lib/mozo/auth";
@@ -64,13 +65,12 @@ export default async function CobrarPage({
     );
   }
 
-  // Resolver label de la mesa.
+  // Resolver label de la mesa + invoice existente (si ya facturaron).
   const service = createSupabaseServiceClient();
-  const { data: tableRow } = await service
-    .from("tables")
-    .select("label")
-    .eq("id", tableId)
-    .single();
+  const [{ data: tableRow }, existingInvoice] = await Promise.all([
+    service.from("tables").select("label").eq("id", tableId).single(),
+    getInvoiceForOrder(business.id, cuenta.order.id),
+  ]);
 
   return (
     <CobrarClient
@@ -80,6 +80,7 @@ export default async function CobrarPage({
       role={ctx.role}
       cuenta={cuenta}
       init={init.data}
+      existingInvoice={existingInvoice}
     />
   );
 }

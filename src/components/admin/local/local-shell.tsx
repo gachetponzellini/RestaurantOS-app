@@ -15,6 +15,7 @@ import type { FloorPlanWithTables } from "@/lib/admin/floor-plan/queries";
 import type { Caja, CajaConEstado } from "@/lib/caja/types";
 import type { MozoMember } from "@/lib/mozo/queries";
 import type { PresentEmployee } from "@/lib/rrhh/clock-actions";
+import type { TodaySummary } from "@/lib/rrhh/clock-queries";
 import { cn } from "@/lib/utils";
 
 type Tab = "pedidos" | "comandas" | "salon" | "caja" | "fichaje";
@@ -38,6 +39,7 @@ function TabsInner({
   role,
   cajas,
   initialPresent,
+  todaySummary,
 }: {
   slug: string;
   businessId: string;
@@ -53,6 +55,7 @@ function TabsInner({
   role: BusinessRole;
   cajas: CajaConEstado[];
   initialPresent: PresentEmployee[];
+  todaySummary?: TodaySummary;
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -212,6 +215,7 @@ function TabsInner({
           <FichajeTab
             slug={slug}
             initialPresent={initialPresent}
+            todaySummary={todaySummary}
           />
         )}
       </div>
@@ -274,6 +278,7 @@ export function LocalShell(props: {
   role: BusinessRole;
   cajas: CajaConEstado[];
   initialPresent: PresentEmployee[];
+  todaySummary?: TodaySummary;
 }) {
   return (
     <Suspense fallback={null}>

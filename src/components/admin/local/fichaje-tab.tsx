@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Clock, Fingerprint, LogOut, X } from "lucide-react";
+import { Clock, Fingerprint, LogOut, UserX, X } from "lucide-react";
 
 import {
   clockPunch,
@@ -9,10 +9,12 @@ import {
   type ClockResult,
   type PresentEmployee,
 } from "@/lib/rrhh/clock-actions";
-import { ROLE_META } from "@/lib/admin/roles";
-import type { BusinessRoleInput } from "@/lib/admin/roles";
-import { cn } from "@/lib/utils";
+import type { TodaySummary } from "@/lib/rrhh/clock-queries";
+import { formatTime, formatDuration } from "@/lib/rrhh/format-utils";
+import { PresentEmployeeCard } from "@/components/shared/present-employee-card";
+import { RoleBadge } from "@/components/shared/role-badge";
 import { Numpad } from "@/components/fichar/numpad";
+import { cn } from "@/lib/utils";
 
 type FeedbackState =
   | { status: "idle" }
@@ -20,39 +22,22 @@ type FeedbackState =
   | { status: "success"; result: ClockResult }
   | { status: "error"; message: string };
 
-function formatTime(iso: string): string {
-  return new Date(iso).toLocaleTimeString("es-AR", {
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
-
-function formatDuration(minutes: number): string {
-  const h = Math.floor(minutes / 60);
-  const m = minutes % 60;
-  return h > 0 ? `${h}h ${m}min` : `${m}min`;
-}
-
-function elapsedSince(iso: string): string {
-  const mins = Math.floor((Date.now() - new Date(iso).getTime()) / 60000);
-  const h = Math.floor(mins / 60);
-  const m = mins % 60;
-  return h > 0 ? `${h}h ${m}m` : `${m}m`;
-}
-
 export function FichajeTab({
   slug,
   initialPresent,
+  todaySummary,
 }: {
   slug: string;
   initialPresent: PresentEmployee[];
+  todaySummary?: TodaySummary;
 }) {
   const [present, setPresent] = useState(initialPresent);
+  const [finished] = useState(todaySummary?.finished ?? []);
+  const [absent] = useState(todaySummary?.absent ?? []);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [pin, setPin] = useState("");
   const [feedback, setFeedback] = useState<FeedbackState>({ status: "idle" });
 
-  // Refresh present list periodically
   useEffect(() => {
     const interval = setInterval(async () => {
       const updated = await getCurrentPresent(slug);
@@ -117,54 +102,96 @@ export function FichajeTab({
   const isOut = feedback.status === "success" && feedback.result.type === "out";
 
   return (
-    <div className="flex h-full flex-col gap-6">
-      {/* Header with action button */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-lg font-semibold text-zinc-900">
-            Asistencia del día
-          </h2>
-          <p className="text-sm text-zinc-500">
-            {present.length} {present.length === 1 ? "persona" : "personas"} trabajando ahora
-          </p>
+    <div className="flex h-full gap-6">
+      {/* Left: Presentes + action */}
+      <div className="flex flex-1 flex-col gap-5">
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-lg font-semibold text-zinc-900">
+              Asistencia del día
+            </h2>
+            <p className="text-sm text-zinc-500">
+              {present.length}{" "}
+              {present.length === 1 ? "persona" : "personas"} trabajando
+              ahora
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setDialogOpen(true)}
+            className="inline-flex items-center gap-2 rounded-xl bg-zinc-900 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-zinc-800"
+          >
+            <Fingerprint className="size-4" />
+            Marcar asistencia
+          </button>
         </div>
-        <button
-          type="button"
-          onClick={() => setDialogOpen(true)}
-          className="inline-flex items-center gap-2 rounded-xl bg-zinc-900 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-zinc-800"
-        >
-          <Fingerprint className="size-4" />
-          Marcar asistencia
-        </button>
+
+        {present.length === 0 ? (
+          <div className="flex flex-1 flex-col items-center justify-center gap-2 text-zinc-400">
+            <Clock className="size-10 opacity-40" />
+            <p className="text-sm">No hay nadie fichado todavía.</p>
+          </div>
+        ) : (
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            {present.map((e) => (
+              <PresentEmployeeCard
+                key={e.userId + e.clockIn}
+                name={e.name}
+                role={e.role}
+                clockIn={e.clockIn}
+              />
+            ))}
+          </div>
+        )}
       </div>
 
-      {/* Present employees grid */}
-      {present.length === 0 ? (
-        <div className="flex flex-1 flex-col items-center justify-center gap-2 text-zinc-400">
-          <Clock className="size-10 opacity-40" />
-          <p className="text-sm">No hay nadie fichado todavía.</p>
-        </div>
-      ) : (
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-          {present.map((e) => (
-            <div
-              key={e.userId + e.clockIn}
-              className="flex items-center gap-3 rounded-2xl bg-white p-4 ring-1 ring-zinc-200/60"
-            >
-              <span className="size-2.5 shrink-0 animate-pulse rounded-full bg-emerald-400" />
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-semibold text-zinc-900">
-                  {e.name}
-                </p>
-                <p className="text-xs text-zinc-500">
-                  {ROLE_META[e.role as BusinessRoleInput]?.label ?? e.role}
-                  {" · "}
-                  {formatTime(e.clockIn)} · {elapsedSince(e.clockIn)}
-                </p>
+      {/* Right sidebar: finished + absent */}
+      {(finished.length > 0 || absent.length > 0) && (
+        <aside className="hidden w-72 shrink-0 space-y-5 overflow-y-auto rounded-2xl bg-white p-5 ring-1 ring-zinc-200/60 lg:block">
+          {finished.length > 0 && (
+            <section className="space-y-2">
+              <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-zinc-500">
+                <LogOut className="size-3.5" />
+                Ya salieron ({finished.length})
               </div>
-            </div>
-          ))}
-        </div>
+              <ul className="space-y-1.5">
+                {finished.map((e) => (
+                  <li
+                    key={e.id}
+                    className="flex items-center justify-between rounded-lg px-2 py-1.5 text-sm hover:bg-zinc-50"
+                  >
+                    <span className="truncate font-medium text-zinc-700">
+                      {e.name}
+                    </span>
+                    <span className="shrink-0 text-xs tabular-nums text-zinc-500">
+                      {formatDuration(e.durationMinutes)}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+
+          {absent.length > 0 && (
+            <section className="space-y-2">
+              <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-zinc-500">
+                <UserX className="size-3.5" />
+                Sin fichar ({absent.length})
+              </div>
+              <ul className="space-y-1.5">
+                {absent.map((a) => (
+                  <li
+                    key={a.userId}
+                    className="flex items-center justify-between rounded-lg px-2 py-1.5 text-sm"
+                  >
+                    <span className="truncate text-zinc-500">{a.name}</span>
+                    <RoleBadge role={a.role} size="xs" />
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+        </aside>
       )}
 
       {/* Numpad dialog */}
@@ -191,7 +218,6 @@ export function FichajeTab({
                 </span>
               </div>
 
-              {/* PIN dots */}
               <div className="flex gap-3">
                 {Array.from({ length: 4 }).map((_, i) => (
                   <div
@@ -208,7 +234,6 @@ export function FichajeTab({
                 ))}
               </div>
 
-              {/* Feedback */}
               <div className="h-16 w-full">
                 {feedback.status === "loading" && (
                   <div className="flex items-center justify-center gap-2 text-zinc-400">
@@ -239,7 +264,8 @@ export function FichajeTab({
                       Salida registrada, {feedback.result.employeeName}
                     </p>
                     <p className="text-xs text-blue-400/70">
-                      Turno: {formatDuration(feedback.result.durationMinutes ?? 0)}
+                      Turno:{" "}
+                      {formatDuration(feedback.result.durationMinutes ?? 0)}
                     </p>
                   </div>
                 )}

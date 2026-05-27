@@ -9,7 +9,6 @@ import {
   CircleDollarSign,
   Mail,
   MapPin,
-  MessageSquare,
   Phone,
   Receipt,
   ShoppingBag,
@@ -124,18 +123,6 @@ export function CustomerDetailView({
           </div>
         </div>
 
-        {/* Send promo button — disabled in Fase 1, ready for WABA in Fase 3 */}
-        <span
-          title="Próximamente — requiere conectar WhatsApp Business"
-          className="inline-flex shrink-0 cursor-not-allowed items-center gap-2 rounded-full bg-zinc-100 px-4 py-2 text-xs font-semibold text-zinc-400 ring-1 ring-zinc-200"
-          aria-disabled
-        >
-          <MessageSquare className="size-3.5" />
-          Enviar promo
-          <span className="rounded-full bg-zinc-200 px-1.5 py-0.5 text-[0.55rem] uppercase tracking-wider text-zinc-600">
-            Próximamente
-          </span>
-        </span>
       </header>
 
       {/* ── Stat tiles ─────────────────────────────────────────────────── */}

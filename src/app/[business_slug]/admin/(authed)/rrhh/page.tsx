@@ -8,7 +8,6 @@ import {
 import { RrhhShell, type RrhhTab } from "@/components/admin/rrhh/rrhh-shell";
 import { AsistenciaTab } from "@/components/admin/rrhh/asistencia-tab";
 import { EquipoTab } from "@/components/admin/rrhh/equipo-tab";
-import { MesEnCursoTab } from "@/components/admin/rrhh/mes-tab";
 import {
   canManageBusiness,
   ensureAdminAccess,
@@ -17,7 +16,6 @@ import { listBusinessMembers } from "@/lib/admin/members-query";
 import {
   getClockHistory,
   getMonthlyOverview,
-  getTodaySummary,
 } from "@/lib/rrhh/clock-queries";
 import { getBusiness } from "@/lib/tenant";
 
@@ -28,10 +26,15 @@ export default async function RrhhPage({
   searchParams,
 }: {
   params: Promise<{ business_slug: string }>;
-  searchParams: Promise<{ tab?: string; disabled?: string }>;
+  searchParams: Promise<{
+    tab?: string;
+    disabled?: string;
+    month?: string;
+    day?: string;
+  }>;
 }) {
   const { business_slug } = await params;
-  const { tab, disabled } = await searchParams;
+  const { tab, disabled, month, day } = await searchParams;
   const business = await getBusiness(business_slug);
   if (!business) notFound();
 
@@ -40,14 +43,22 @@ export default async function RrhhPage({
     redirect(`/${business_slug}/admin`);
   }
 
-  const activeTab: RrhhTab =
-    tab === "equipo" || tab === "asistencia" ? tab : "mes";
+  const activeTab: RrhhTab = tab === "equipo" ? "equipo" : "asistencia";
 
-  const [today, history, members, monthly] = await Promise.all([
-    getTodaySummary(business.id),
-    getClockHistory(business.id, { limit: 50 }),
-    listBusinessMembers(business.id, { includeDisabled: disabled === "1" }),
-    getMonthlyOverview(business.id, getMonthStart()),
+  const monthStart = parseMonth(month);
+  const currentMonth = `${monthStart.getFullYear()}-${String(monthStart.getMonth() + 1).padStart(2, "0")}`;
+
+  const [monthly, members, dayEntries] = await Promise.all([
+    getMonthlyOverview(business.id, monthStart),
+    activeTab === "equipo"
+      ? listBusinessMembers(business.id, { includeDisabled: disabled === "1" })
+      : Promise.resolve([]),
+    day
+      ? getClockHistory(business.id, {
+          from: `${day}T00:00:00`,
+          to: `${day}T23:59:59`,
+        })
+      : Promise.resolve(undefined),
   ]);
 
   return (
@@ -55,14 +66,17 @@ export default async function RrhhPage({
       <PageHeader
         eyebrow="Gestión"
         title="RRHH"
-        description="Fichadas, equipo y horas trabajadas."
+        description="Asistencia, horas trabajadas y equipo."
       />
 
       <Suspense>
         <RrhhShell activeTab={activeTab}>
-          {activeTab === "mes" && <MesEnCursoTab overview={monthly} />}
           {activeTab === "asistencia" && (
-            <AsistenciaTab today={today} history={history} />
+            <AsistenciaTab
+              overview={monthly}
+              currentMonth={currentMonth}
+              dayEntries={dayEntries}
+            />
           )}
           {activeTab === "equipo" && (
             <EquipoTab
@@ -71,6 +85,7 @@ export default async function RrhhPage({
               members={members}
               currentUserId={ctx.user.id}
               includeDisabled={disabled === "1"}
+              employeeClockData={monthly.perEmployee}
             />
           )}
         </RrhhShell>
@@ -79,7 +94,11 @@ export default async function RrhhPage({
   );
 }
 
-function getMonthStart(): Date {
+function parseMonth(month?: string): Date {
+  if (month && /^\d{4}-\d{2}$/.test(month)) {
+    const [y, m] = month.split("-").map(Number);
+    return new Date(y, m - 1, 1, 0, 0, 0, 0);
+  }
   const now = new Date();
   return new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
 }

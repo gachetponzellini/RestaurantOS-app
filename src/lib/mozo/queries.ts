@@ -58,6 +58,134 @@ export async function getMozosByBusiness(
     });
 }
 
+// ── Propinas hoy ──────────────────────────────────────────────────────
+
+/**
+ * Suma tip_cents de payments atribuidos a este mozo creados hoy (UTC).
+ * Usa `attributed_mozo_id` (campo de atribución de propina, seteado en
+ * cobro-actions) en vez de orders.mozo_id para respetar transferencias.
+ */
+export async function getTodayTips(
+  businessId: string,
+  mozoId: string,
+): Promise<number> {
+  const service = createSupabaseServiceClient() as unknown as GenericClient;
+
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+
+  const { data, error } = await service
+    .from("payments")
+    .select("tip_cents")
+    .eq("business_id", businessId)
+    .eq("attributed_mozo_id", mozoId)
+    .eq("payment_status", "paid")
+    .gte("created_at", todayStart.toISOString());
+
+  if (error) {
+    console.error("getTodayTips", error);
+    return 0;
+  }
+
+  return (data ?? []).reduce(
+    (sum, row) => sum + (Number(row.tip_cents) || 0),
+    0,
+  );
+}
+
+// ── Horas trabajadas (semana / mes) ──────────────────────────────────
+
+export type MozoAttendance = {
+  weeklyMinutes: number;
+  weeklyDays: number;
+  monthlyMinutes: number;
+  monthlyDays: number;
+  overtimeMinutes: number;
+};
+
+/**
+ * Calcula asistencia del mozo: horas esta semana, horas este mes, y
+ * horas extra (>8h/día). Usa la tabla clock_entries.
+ */
+export async function getMozoAttendance(
+  businessId: string,
+  userId: string,
+): Promise<MozoAttendance> {
+  const service = createSupabaseServiceClient() as unknown as GenericClient;
+
+  // Monday of current week (ISO week starts Monday)
+  const now = new Date();
+  const dayOfWeek = now.getDay(); // 0=Sun, 1=Mon, ...
+  const mondayOffset = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+  const weekStart = new Date(now);
+  weekStart.setDate(now.getDate() + mondayOffset);
+  weekStart.setHours(0, 0, 0, 0);
+
+  // First of current month
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
+
+  // Fetch all entries this month (superset of this week)
+  const { data, error } = await service
+    .from("clock_entries")
+    .select("clock_in, clock_out, duration_minutes")
+    .eq("business_id", businessId)
+    .eq("user_id", userId)
+    .gte("clock_in", monthStart.toISOString())
+    .order("clock_in", { ascending: true });
+
+  if (error) {
+    console.error("getMozoAttendance", error);
+    return {
+      weeklyMinutes: 0,
+      weeklyDays: 0,
+      monthlyMinutes: 0,
+      monthlyDays: 0,
+      overtimeMinutes: 0,
+    };
+  }
+
+  const entries = data ?? [];
+  let weeklyMinutes = 0;
+  const weeklyDaysSet = new Set<string>();
+  let monthlyMinutes = 0;
+  const monthlyDaysSet = new Set<string>();
+  let overtimeMinutes = 0;
+
+  // Group minutes by day for overtime calc
+  const minutesByDay = new Map<string, number>();
+
+  for (const e of entries) {
+    const minutes = (e as { duration_minutes: number | null }).duration_minutes ?? 0;
+    const day = (e as { clock_in: string }).clock_in.slice(0, 10);
+
+    monthlyMinutes += minutes;
+    monthlyDaysSet.add(day);
+
+    minutesByDay.set(day, (minutesByDay.get(day) ?? 0) + minutes);
+
+    const clockInDate = new Date((e as { clock_in: string }).clock_in);
+    if (clockInDate >= weekStart) {
+      weeklyMinutes += minutes;
+      weeklyDaysSet.add(day);
+    }
+  }
+
+  // Overtime: sum of minutes beyond 480 (8h) per day
+  for (const [, dayMinutes] of minutesByDay) {
+    if (dayMinutes > 480) {
+      overtimeMinutes += dayMinutes - 480;
+    }
+  }
+
+  return {
+    weeklyMinutes,
+    weeklyDays: weeklyDaysSet.size,
+    monthlyMinutes,
+    monthlyDays: monthlyDaysSet.size,
+    overtimeMinutes,
+  };
+}
+
 export type ActiveTable = {
   id: string;
   label: string;

@@ -221,6 +221,33 @@ export async function closeConversation(
   return { ok: true };
 }
 
+export async function closeOpenChatbotConversation(
+  businessId: string,
+  customerPhone: string,
+): Promise<void> {
+  const digits = customerPhone.replace(/\D/g, "");
+  if (!digits) return;
+
+  const service = createSupabaseServiceClient();
+
+  const { data: contacts } = await service
+    .from("chatbot_contacts")
+    .select("id, identifier")
+    .eq("business_id", businessId);
+
+  const contactIds = (contacts ?? [])
+    .filter((c) => c.identifier.replace(/\D/g, "") === digits)
+    .map((c) => c.id);
+  if (contactIds.length === 0) return;
+
+  await service
+    .from("chatbot_conversations")
+    .update({ closed_at: new Date().toISOString() })
+    .eq("business_id", businessId)
+    .in("contact_id", contactIds)
+    .is("closed_at", null);
+}
+
 // ---------------- internals ----------------
 
 type Service = ReturnType<typeof createSupabaseServiceClient>;
@@ -1530,11 +1557,19 @@ async function invokeLlm({
   // mensaje" section but short user inputs like "buenas" tend to override it
   // unless we flag the turn explicitly.
   if (history.length === 0) {
-    messages.push(
-      new SystemMessage(
-        "[turn:first] Este es el PRIMER mensaje del cliente en esta conversación. Tu respuesta tiene que seguir obligatoriamente la estructura de 2 partes definida en la sección 'Primer mensaje de la conversación': (1) saludo mencionando al negocio, (2) invitación a pedir. NO menciones horarios ni si el local está abierto en este saludo. No respondas con un mensaje genérico tipo '¿en qué te ayudo?'.",
-      ),
-    );
+    messages[0] = new SystemMessage({
+      content: [
+        {
+          type: "text",
+          text: systemPrompt,
+          cache_control: { type: "ephemeral" },
+        },
+        {
+          type: "text",
+          text: "\n\n[turn:first] Este es el PRIMER mensaje del cliente en esta conversación. Tu respuesta tiene que seguir obligatoriamente la estructura de 2 partes definida en la sección 'Primer mensaje de la conversación': (1) saludo mencionando al negocio, (2) invitación a pedir. NO menciones horarios ni si el local está abierto en este saludo. No respondas con un mensaje genérico tipo '¿en qué te ayudo?'.",
+        },
+      ],
+    });
   }
 
   for (const m of history) {

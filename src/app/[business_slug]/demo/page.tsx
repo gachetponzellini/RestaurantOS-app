@@ -20,6 +20,7 @@ import {
   Users,
   UtensilsCrossed,
   Utensils,
+  Warehouse,
 } from "lucide-react";
 
 import { getSampleCustomerForChatbotDemo } from "@/lib/admin/customers-query";
@@ -181,6 +182,12 @@ export default async function DemoHubPage({
           title: "Reservas",
           description: "Agenda visual con tu plano de salón real.",
           icon: CalendarDays,
+        },
+        {
+          href: `/${business_slug}/admin/stock`,
+          title: "Stock",
+          description: "Controlá las unidades de bebidas y vinos en tiempo real.",
+          icon: Warehouse,
         },
       ],
     },

@@ -6,7 +6,6 @@ import {
   ArmchairIcon,
   ArrowLeftRight,
   Ban,
-  Banknote,
   CalendarCheck,
   Check,
   ClipboardList,
@@ -21,15 +20,14 @@ import {
 import { toast } from "sonner";
 
 import type { BusinessRole } from "@/lib/admin/context";
-import { AsignarMozosOverlay } from "@/components/mozo/asignar-mozos-overlay";
 import { MobileTabBar, type MozoTab } from "@/components/mozo/mobile-tab-bar";
 import { OrderSummaryCard } from "@/components/mozo/order-summary-card";
 import { TableDrawer } from "@/components/mozo/table-drawer";
 import { TransferTableModal } from "@/components/mozo/transfer-table-modal";
 import { WalkInModal } from "@/components/mozo/walk-in-modal";
 import { signOut } from "@/lib/auth/sign-out";
-import { anularMesa, volverAPedir } from "@/lib/mozo/actions";
-import type { MozoMember } from "@/lib/mozo/queries";
+import { anularMesa, transferTable, volverAPedir } from "@/lib/mozo/actions";
+import type { MozoMember, MozoAttendance } from "@/lib/mozo/queries";
 import { type OperationalStatus } from "@/lib/mozo/state-machine";
 import { useTablesRealtime } from "@/lib/mozo/use-tables-realtime";
 import { NotificationsToastHost } from "@/components/notifications/notifications-toast-host";
@@ -42,7 +40,7 @@ import {
   formatNotificationTime,
   viewForNotification,
 } from "@/lib/notifications/view";
-import { canAssignMozo, canTransitionMesa } from "@/lib/permissions/can";
+import { canTransitionMesa } from "@/lib/permissions/can";
 import type { FloorPlanWithTables } from "@/lib/admin/floor-plan/queries";
 import type { FloorTable } from "@/lib/reservations/types";
 
@@ -97,6 +95,8 @@ type Props = {
   role: BusinessRole;
   initialNotifications: Notification[];
   initialUnreadCount: number;
+  todayTipsCents: number;
+  attendance: MozoAttendance;
 };
 
 // ─── Config visual ───────────────────────────────────────────────────────────
@@ -168,6 +168,8 @@ export function MozoClient({
   role,
   initialNotifications,
   initialUnreadCount,
+  todayTipsCents,
+  attendance,
 }: Props) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -185,7 +187,11 @@ export function MozoClient({
     label: string;
   } | null>(null);
   const [anularReason, setAnularReason] = useState("");
-  const [distribuirOpen, setDistribuirOpen] = useState(false);
+  const [claimPrompt, setClaimPrompt] = useState<{
+    tableId: string;
+    label: string;
+    fromName: string | null;
+  } | null>(null);
 
   // ── Multi-salón ──
   const planStorageKey = `mozo_active_plan_${businessId}`;
@@ -399,17 +405,27 @@ export function MozoClient({
   const selectedStatus = (selectedSync?.operational_status ??
     "libre") as OperationalStatus;
 
-  const canShowWalkInButton = !!selectedSync && selectedStatus === "libre";
+  // Mesa libre sin mozo ajeno → "Sentar walk-in".
+  // Si la mesa libre tiene mozo asignado y no sos vos → mostrar "Transferir" en vez de "Sentar".
+  const isOtherMozosTable =
+    !!selectedSync?.mozo_id &&
+    selectedSync.mozo_id !== currentUserId &&
+    role === "mozo";
+  const canShowWalkInButton =
+    !!selectedSync && selectedStatus === "libre" && !isOtherMozosTable;
   const canShowTransferButton =
     !!selectedSync &&
-    selectedStatus !== "libre" &&
-    (role !== "mozo" || selectedSync.mozo_id === currentUserId);
+    (selectedStatus !== "libre" || isOtherMozosTable) &&
+    (role !== "mozo" || selectedSync.mozo_id === currentUserId || isOtherMozosTable);
   const canShowAnularButton =
     !!selectedSync &&
     selectedStatus === "ocupada" &&
+    !isOtherMozosTable &&
     canTransitionMesa(role, selectedStatus, "libre");
+  // Si la mesa es de otro mozo, no se puede pedir/cobrar — primero transferir.
   const canShowPedirButton =
     !!selectedSync &&
+    !isOtherMozosTable &&
     (selectedStatus === "ocupada" || selectedStatus === "pidio_cuenta");
   // "Pedir cuenta" / "Cobrar mesa" requiere order activa. Si la mesa está
   // ocupada por walk-in pero todavía no se cargó pedido, no hay nada que
@@ -417,6 +433,7 @@ export function MozoClient({
   // `activeOrders` para esa mesa.
   const canShowCuentaButton =
     !!selectedSync &&
+    !isOtherMozosTable &&
     !!orderByTable[selectedSync.id] &&
     (selectedStatus === "ocupada" || selectedStatus === "pidio_cuenta");
   // ¿La mesa ya tiene items cargados? Decide si "Cargar pedido" o "Pedir
@@ -470,16 +487,6 @@ export function MozoClient({
               ) : (
                 <div />
               )}
-              {canAssignMozo(role) && (
-                <button
-                  type="button"
-                  onClick={() => setDistribuirOpen(true)}
-                  className="flex-shrink-0 inline-flex items-center gap-1.5 rounded-full bg-zinc-900 px-3.5 py-1.5 text-xs font-semibold text-white transition hover:brightness-110"
-                >
-                  <Users className="size-3.5" />
-                  Distribuir mozos
-                </button>
-              )}
             </div>
             <SalonSection
               tables={activePlanTables}
@@ -515,6 +522,8 @@ export function MozoClient({
             role={role}
             initials={myInitials}
             myActiveCount={myActiveCount}
+            todayTipsCents={todayTipsCents}
+            attendance={attendance}
           />
         )}
       </main>
@@ -700,11 +709,24 @@ export function MozoClient({
                     <button
                       key="transferir"
                       disabled={loading}
-                      onClick={() => setTransferTableId(selectedSync.id)}
+                      onClick={() => {
+                        if (isOtherMozosTable) {
+                          const fromName = selectedSync.mozo_id
+                            ? mozoNameById.get(selectedSync.mozo_id) ?? null
+                            : null;
+                          setClaimPrompt({
+                            tableId: selectedSync.id,
+                            label: selectedSync.label,
+                            fromName,
+                          });
+                        } else {
+                          setTransferTableId(selectedSync.id);
+                        }
+                      }}
                       className="flex h-10 w-full items-center justify-center gap-1.5 rounded-xl bg-sky-50 px-3 text-sm font-semibold text-sky-800 ring-1 ring-sky-200 transition hover:bg-sky-100 active:scale-[0.97] disabled:opacity-60"
                     >
                       <ArrowLeftRight className="h-3.5 w-3.5" />
-                      Transferir
+                      {isOtherMozosTable ? "Tomar mesa" : "Transferir"}
                     </button>,
                   );
                 }
@@ -886,15 +908,69 @@ export function MozoClient({
         </div>
       )}
 
-      {/* Modo "pintura" para distribuir mozos */}
-      <AsignarMozosOverlay
-        open={distribuirOpen}
-        onClose={() => setDistribuirOpen(false)}
-        slug={businessSlug}
-        floorPlans={floorPlans}
-        mozos={mozos}
-        tables={localTables}
-      />
+      {/* Claim table prompt — modal chico para tomar mesa ajena */}
+      {claimPrompt && (
+        <div
+          className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 sm:items-center"
+          onClick={() => setClaimPrompt(null)}
+        >
+          <div
+            className="w-full max-w-sm rounded-t-3xl bg-white p-5 pb-[max(env(safe-area-inset-bottom),1.25rem)] shadow-2xl sm:rounded-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-zinc-300 sm:hidden" />
+            <div className="flex items-center gap-3">
+              <span className="flex h-10 w-10 items-center justify-center rounded-full bg-sky-100 text-sky-700">
+                <ArrowLeftRight className="h-5 w-5" />
+              </span>
+              <div>
+                <h3 className="font-heading text-lg font-bold leading-tight">
+                  Tomar mesa {claimPrompt.label}
+                </h3>
+                {claimPrompt.fromName && (
+                  <p className="text-sm text-zinc-500">
+                    Asignada a {claimPrompt.fromName}
+                  </p>
+                )}
+              </div>
+            </div>
+            <p className="mt-3 text-sm text-zinc-600">
+              La mesa pasa a ser tuya. Se notifica al mozo actual y al encargado.
+            </p>
+            <div className="mt-5 grid grid-cols-2 gap-2">
+              <button
+                className="h-12 rounded-2xl bg-zinc-100 text-base font-semibold text-zinc-700 transition active:scale-[0.98]"
+                onClick={() => setClaimPrompt(null)}
+              >
+                Cancelar
+              </button>
+              <button
+                className="h-12 rounded-2xl bg-sky-600 text-base font-semibold text-white transition active:scale-[0.98] disabled:opacity-50"
+                disabled={loading}
+                onClick={async () => {
+                  setLoading(true);
+                  const res = await transferTable(
+                    claimPrompt.tableId,
+                    currentUserId,
+                    businessSlug,
+                  );
+                  setLoading(false);
+                  if (!res.ok) {
+                    toast.error(res.error);
+                    return;
+                  }
+                  toast.success(`Mesa ${claimPrompt.label} es tuya.`);
+                  setClaimPrompt(null);
+                  router.refresh();
+                }}
+              >
+                {loading ? "Tomando..." : "Tomar"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }
@@ -1137,14 +1213,14 @@ function SalonSection({
                   />
                   {mozoInitial && (
                     <span
-                      className={`flex h-6 w-6 items-center justify-center rounded-full text-[10px] font-bold ${
+                      className={`flex h-6 items-center justify-center rounded-full text-[10px] font-bold ${
                         isMine
-                          ? "bg-zinc-900 text-white"
-                          : "bg-zinc-200 text-zinc-700"
+                          ? "w-6 bg-emerald-600 text-white"
+                          : "w-6 bg-zinc-200 text-zinc-700"
                       }`}
                       title={mozoName}
                     >
-                      {mozoInitial}
+                      {isMine ? "Yo" : mozoInitial}
                     </span>
                   )}
                 </div>
@@ -1534,18 +1610,30 @@ function AvisosSection({
   );
 }
 
+function formatHoursMinutes(totalMinutes: number): string {
+  const h = Math.floor(totalMinutes / 60);
+  const m = totalMinutes % 60;
+  if (h === 0) return `${m}min`;
+  if (m === 0) return `${h}h`;
+  return `${h}h ${m}min`;
+}
+
 function YoSection({
   slug,
   name,
   role,
   initials,
   myActiveCount,
+  todayTipsCents,
+  attendance,
 }: {
   slug: string;
   name: string;
   role: BusinessRole;
   initials: string;
   myActiveCount: number;
+  todayTipsCents: number;
+  attendance: MozoAttendance;
 }) {
   const [signingOut, startSignOut] = useTransition();
   const handleSignOut = () => {
@@ -1604,59 +1692,48 @@ function YoSection({
         </div>
       </section>
 
-      {/* Propinas (placeholder funcional) */}
+      {/* Propinas hoy */}
       <section className="rounded-3xl bg-white p-5 ring-1 ring-zinc-200">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Wallet className="h-5 w-5 text-emerald-600" />
-            <h2 className="font-heading text-base font-bold">Propinas hoy</h2>
-          </div>
-          <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold uppercase text-amber-800">
-            Pronto
-          </span>
+        <div className="flex items-center gap-2">
+          <Wallet className="h-5 w-5 text-emerald-600" />
+          <h2 className="font-heading text-base font-bold">Propinas hoy</h2>
         </div>
         <p className="mt-3 font-heading text-3xl font-extrabold tabular-nums text-zinc-900">
-          $0
+          {formatMoney(todayTipsCents)}
         </p>
         <p className="mt-1 text-xs text-zinc-500">
-          El cálculo se activa cuando registres cobros con propina (Bloque 5).
+          {todayTipsCents > 0
+            ? "Acumulado de cobros con propina de hoy."
+            : "Todavía no se registraron propinas hoy."}
         </p>
       </section>
 
-      {/* Sueldo (placeholder) */}
+      {/* Horas esta semana */}
       <section className="rounded-3xl bg-white p-5 ring-1 ring-zinc-200">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Banknote className="h-5 w-5 text-zinc-600" />
-            <h2 className="font-heading text-base font-bold">Mi sueldo</h2>
-          </div>
-          <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-[10px] font-bold uppercase text-zinc-500">
-            Próximamente
-          </span>
+        <div className="flex items-center gap-2">
+          <Clock className="h-5 w-5 text-zinc-600" />
+          <h2 className="font-heading text-base font-bold">Horas esta semana</h2>
         </div>
-        <p className="mt-3 text-sm text-zinc-600">
-          Vas a poder ver el detalle de tu liquidación semanal acá.
+        <p className="mt-3 font-heading text-3xl font-extrabold tabular-nums text-zinc-900">
+          {formatHoursMinutes(attendance.weeklyMinutes)}
+        </p>
+        <p className="mt-1 text-xs text-zinc-500">
+          {attendance.weeklyDays > 0
+            ? `${attendance.weeklyDays} ${attendance.weeklyDays === 1 ? "día" : "días"} trabajados esta semana.`
+            : "Sin fichajes esta semana."}
         </p>
       </section>
 
-      {/* Asistencias (placeholder) */}
+      {/* Asistencias */}
       <section className="rounded-3xl bg-white p-5 ring-1 ring-zinc-200">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <CalendarCheck className="h-5 w-5 text-zinc-600" />
-            <h2 className="font-heading text-base font-bold">Mis asistencias</h2>
-          </div>
-          <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-[10px] font-bold uppercase text-zinc-500">
-            Próximamente
-          </span>
+        <div className="flex items-center gap-2">
+          <CalendarCheck className="h-5 w-5 text-zinc-600" />
+          <h2 className="font-heading text-base font-bold">Mis asistencias</h2>
         </div>
-        <p className="mt-3 text-sm text-zinc-600">
-          Historial de turnos trabajados, faltas y horas extras.
-        </p>
         <div className="mt-3 grid grid-cols-3 gap-2">
           <div className="rounded-xl bg-zinc-50 p-2.5 text-center">
             <p className="font-heading text-xl font-extrabold tabular-nums text-zinc-900">
-              —
+              {formatHoursMinutes(attendance.weeklyMinutes)}
             </p>
             <p className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
               Esta semana
@@ -1664,7 +1741,7 @@ function YoSection({
           </div>
           <div className="rounded-xl bg-zinc-50 p-2.5 text-center">
             <p className="font-heading text-xl font-extrabold tabular-nums text-zinc-900">
-              —
+              {formatHoursMinutes(attendance.monthlyMinutes)}
             </p>
             <p className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
               Este mes
@@ -1672,7 +1749,7 @@ function YoSection({
           </div>
           <div className="rounded-xl bg-zinc-50 p-2.5 text-center">
             <p className="font-heading text-xl font-extrabold tabular-nums text-zinc-900">
-              —
+              {formatHoursMinutes(attendance.overtimeMinutes)}
             </p>
             <p className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
               Hs. extra
@@ -1709,7 +1786,7 @@ function YoSection({
         >
           <span className="inline-flex items-center gap-3 text-base font-medium text-red-600">
             <LogOut className="h-5 w-5" />
-            {signingOut ? "Cerrando…" : "Cerrar sesión"}
+            {signingOut ? "Cerrando..." : "Cerrar sesión"}
           </span>
           <span className="text-zinc-400">›</span>
         </button>

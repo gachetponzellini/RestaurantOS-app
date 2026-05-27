@@ -4,7 +4,11 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { getFloorPlansForBusiness } from "@/lib/admin/floor-plan/queries";
 import { ensureMozoAccess } from "@/lib/mozo/auth";
-import { getMozosByBusiness } from "@/lib/mozo/queries";
+import {
+  getMozosByBusiness,
+  getTodayTips,
+  getMozoAttendance,
+} from "@/lib/mozo/queries";
 import { listForUser, countUnread } from "@/lib/notifications/queries";
 import { getBusiness } from "@/lib/tenant";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
@@ -39,6 +43,8 @@ export default async function MozoPage({
     mozos,
     notifications,
     unreadCount,
+    todayTipsCents,
+    attendance,
   ] = await Promise.all([
     getFloorPlansForBusiness(business.id),
 
@@ -70,6 +76,10 @@ export default async function MozoPage({
     listForUser({ userId: ctx.user.id, businessId: business.id, role: ctx.role, limit: 10 }),
 
     countUnread({ userId: ctx.user.id, businessId: business.id, role: ctx.role }),
+
+    getTodayTips(business.id, ctx.user.id),
+
+    getMozoAttendance(business.id, ctx.user.id),
   ]);
 
   return (
@@ -169,6 +179,8 @@ export default async function MozoPage({
         role={ctx.role}
         initialNotifications={notifications}
         initialUnreadCount={unreadCount}
+        todayTipsCents={todayTipsCents}
+        attendance={attendance}
       />
     </Suspense>
   );

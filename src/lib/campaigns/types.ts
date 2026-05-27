@@ -7,7 +7,6 @@ export type CampaignAudienceType = "segment" | "all" | "manual";
 
 export const CAMPAIGN_CHANNELS: { value: CampaignChannel; label: string; available: boolean }[] = [
   { value: "manual", label: "Mi WhatsApp (manual)", available: true },
-  { value: "waba", label: "WhatsApp Business API", available: false },
 ];
 
 /**

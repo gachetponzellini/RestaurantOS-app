@@ -5,6 +5,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { actionError, actionOk, type ActionResult } from "@/lib/actions";
 import { requireMozoActionContext } from "@/lib/mozo/auth";
+import { createNotification } from "@/lib/notifications/create";
 import { canCancelItem } from "@/lib/permissions/can";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
@@ -110,7 +111,7 @@ export async function enviarComanda(
   const { data: productRows } = await service
     .from("products")
     .select(
-      "id, name, price_cents, business_id, is_active, is_available, station_id, category:categories(station_id)",
+      "id, name, price_cents, business_id, is_active, is_available, station_id, track_stock, category:categories(station_id)",
     )
     .in("id", productIds);
 
@@ -122,6 +123,7 @@ export async function enviarComanda(
     is_active: boolean;
     is_available: boolean;
     station_id: string | null;
+    track_stock: boolean;
     category: { station_id: string | null } | null;
   };
   const products = (productRows ?? []) as unknown as ProductRow[];
@@ -271,6 +273,11 @@ export async function enviarComanda(
         ? inputItem.seat_number
         : null;
 
+    // Items con track_stock (bebidas, vinos) se marcan entregados directo
+    // — el mozo los sirve sin pasar por cocina. El trigger de stock
+    // (fn_stock_descuento_on_order_item) descuenta igual en el insert.
+    const isStockItem = product.track_stock;
+
     const { data: itemRow, error: itemErr } = await service
       .from("order_items")
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -282,9 +289,9 @@ export async function enviarComanda(
         quantity: inputItem.quantity,
         notes: inputItem.notes ?? null,
         subtotal_cents: subtotal,
-        station_id: stationId,
+        station_id: isStockItem ? null : stationId,
         loaded_by: user.id,
-        kitchen_status: "pending",
+        kitchen_status: isStockItem ? "delivered" : "pending",
         seat_number: seatNum,
       } as any)
       .select("id")
@@ -311,7 +318,8 @@ export async function enviarComanda(
       }
     }
 
-    if (stationId) {
+    // Solo agregar a la comanda si no es item de stock (bebidas skip cocina).
+    if (stationId && !isStockItem) {
       const bucket = itemsByStation.get(stationId) ?? [];
       bucket.push((itemRow as { id: string }).id);
       itemsByStation.set(stationId, bucket);
@@ -552,6 +560,57 @@ export async function marcarComandaEntregada(
       .from("order_items")
       .update({ kitchen_status: "delivered" })
       .in("id", itemIds);
+  }
+
+  // Notify the mozo that the comanda is ready to serve.
+  try {
+    const { data: comandaRow } = await service
+      .from("comandas")
+      .select("station_id, order_id")
+      .eq("id", comandaId)
+      .maybeSingle();
+    const cRow = comandaRow as { station_id: string | null; order_id: string } | null;
+    if (cRow) {
+      const { data: orderRow } = await service
+        .from("orders")
+        .select("table_id")
+        .eq("id", cRow.order_id)
+        .maybeSingle();
+      const tableId = (orderRow as { table_id: string | null } | null)?.table_id;
+      if (tableId) {
+        const { data: tableRow } = await service
+          .from("tables")
+          .select("mozo_id, label")
+          .eq("id", tableId)
+          .maybeSingle();
+        const tbl = tableRow as { mozo_id: string | null; label: string } | null;
+
+        let stationName = "Cocina";
+        if (cRow.station_id) {
+          const { data: stationRow } = await service
+            .from("stations")
+            .select("name")
+            .eq("id", cRow.station_id)
+            .maybeSingle();
+          if (stationRow) stationName = (stationRow as { name: string }).name;
+        }
+
+        if (tbl?.mozo_id) {
+          await createNotification({
+            businessId: business.id,
+            userId: tbl.mozo_id,
+            type: "comanda.entregada",
+            payload: {
+              tableLabel: tbl.label,
+              stationName,
+              itemCount: itemIds.length,
+            },
+          });
+        }
+      }
+    }
+  } catch (e) {
+    console.error("marcarComandaEntregada notification", e);
   }
 
   revalidatePath(`/${slug}/mozo`);

@@ -6,6 +6,7 @@ import { NotificationsLauncher } from "@/components/notifications/notifications-
 import { canManageBusiness, ensureAdminAccess } from "@/lib/admin/context";
 import { getPendingOrderCount } from "@/lib/admin/orders-query";
 import { countUnread, listForUser } from "@/lib/notifications/queries";
+import { getLowStockCount } from "@/lib/stock/queries";
 import { getBusiness, getBusinessSettings } from "@/lib/tenant";
 
 export default async function AdminAuthedLayout({
@@ -29,10 +30,10 @@ export default async function AdminAuthedLayout({
     redirect(`/${business_slug}/mozo`);
   }
 
-  const pendingCount = await getPendingOrderCount(
-    business.id,
-    business.timezone,
-  );
+  const [pendingCount, lowStockCount] = await Promise.all([
+    getPendingOrderCount(business.id, business.timezone),
+    getLowStockCount(business.id),
+  ]);
   const settings = getBusinessSettings(business);
 
   // Notificaciones globales para el layout admin. Para platform admin sin
@@ -72,6 +73,7 @@ export default async function AdminAuthedLayout({
         isPlatformAdmin={ctx.isPlatformAdmin}
         canManageBusiness={canManageBusiness(ctx)}
         initialPendingCount={pendingCount}
+        lowStockCount={lowStockCount}
         isActive={business.is_active ?? true}
       />
       <div className="min-w-0 flex-1">{children}</div>

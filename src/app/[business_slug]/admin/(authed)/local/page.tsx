@@ -13,6 +13,7 @@ import { getTodayOrders } from "@/lib/admin/orders-query";
 import { getCajasConEstado } from "@/lib/caja/queries";
 import { getMozosByBusiness } from "@/lib/mozo/queries";
 import { getCurrentPresent } from "@/lib/rrhh/clock-actions";
+import { getTodaySummary } from "@/lib/rrhh/clock-queries";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 import { getBusiness } from "@/lib/tenant";
 
@@ -52,6 +53,7 @@ export default async function LocalEnVivoPage({
     mozos,
     cajas,
     initialPresent,
+    todaySummary,
   ] = await Promise.all([
     getTodayOrders(business.id, business.timezone),
     getActiveComandas(business.id),
@@ -78,6 +80,7 @@ export default async function LocalEnVivoPage({
     getMozosByBusiness(business.id),
     getCajasConEstado(business.id),
     getCurrentPresent(business_slug),
+    getTodaySummary(business.id),
   ]);
 
   // /admin/local toma full viewport (overlay sobre el sidebar) — sin
@@ -166,6 +169,7 @@ export default async function LocalEnVivoPage({
         role={ctx.isPlatformAdmin ? "admin" : (ctx.role ?? "admin")}
         cajas={cajas}
         initialPresent={initialPresent}
+        todaySummary={todaySummary}
       />
     </>
   );

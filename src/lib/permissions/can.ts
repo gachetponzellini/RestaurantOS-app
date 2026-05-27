@@ -123,16 +123,16 @@ export function canTransitionMesa(
 /**
  * Quién puede transferir una mesa.
  * - admin/encargado: siempre.
- * - mozo: solo si es el origen (mozo_id actual de la mesa coincide con el
- *   usuario de la sesión). Esto evita que un mozo cualquiera mueva la mesa
- *   de otro mozo.
+ * - mozo: si es el origen (su mesa) O si reclama la mesa para sí mismo
+ *   (auto-transfer). Ambos casos generan notificaciones y audit log.
  */
 export function canTransferTable(
   role: BusinessRole,
   isOrigen: boolean,
+  isSelfClaim: boolean = false,
 ): boolean {
   if (role === "admin" || role === "encargado") return true;
-  if (role === "mozo") return isOrigen;
+  if (role === "mozo") return isOrigen || isSelfClaim;
   return false;
 }
 

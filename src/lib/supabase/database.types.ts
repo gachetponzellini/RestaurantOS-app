@@ -122,6 +122,10 @@ export type Database = {
       businesses: {
         Row: {
           address: string | null
+          afip_cuit: string | null
+          afip_default_tipo: string | null
+          afip_provider: string | null
+          afip_punto_venta: number | null
           cover_image_url: string | null
           created_at: string
           currency: string
@@ -147,6 +151,10 @@ export type Database = {
         }
         Insert: {
           address?: string | null
+          afip_cuit?: string | null
+          afip_default_tipo?: string | null
+          afip_provider?: string | null
+          afip_punto_venta?: number | null
           cover_image_url?: string | null
           created_at?: string
           currency?: string
@@ -172,6 +180,10 @@ export type Database = {
         }
         Update: {
           address?: string | null
+          afip_cuit?: string | null
+          afip_default_tipo?: string | null
+          afip_provider?: string | null
+          afip_punto_venta?: number | null
           cover_image_url?: string | null
           created_at?: string
           currency?: string
@@ -907,24 +919,36 @@ export type Database = {
       }
       daily_menu_components: {
         Row: {
+          choice_group_id: string | null
+          choice_group_label: string | null
           description: string | null
           id: string
+          kind: string
           label: string
           menu_id: string
+          product_id: string | null
           sort_order: number
         }
         Insert: {
+          choice_group_id?: string | null
+          choice_group_label?: string | null
           description?: string | null
           id?: string
+          kind?: string
           label: string
           menu_id: string
+          product_id?: string | null
           sort_order?: number
         }
         Update: {
+          choice_group_id?: string | null
+          choice_group_label?: string | null
           description?: string | null
           id?: string
+          kind?: string
           label?: string
           menu_id?: string
+          product_id?: string | null
           sort_order?: number
         }
         Relationships: [
@@ -933,6 +957,13 @@ export type Database = {
             columns: ["menu_id"]
             isOneToOne: false
             referencedRelation: "daily_menus"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "daily_menu_components_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
             referencedColumns: ["id"]
           },
         ]
@@ -1033,6 +1064,100 @@ export type Database = {
             columns: ["business_id"]
             isOneToOne: false
             referencedRelation: "businesses"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      invoices: {
+        Row: {
+          business_id: string
+          cae: string | null
+          cae_vencimiento: string | null
+          created_at: string
+          cuit_receptor: string | null
+          error_message: string | null
+          id: string
+          iva_cents: number
+          iva_rate: number
+          neto_cents: number
+          numero: number
+          order_id: string | null
+          payment_id: string | null
+          pdf_url: string | null
+          provider: string
+          provider_response: Json | null
+          punto_venta: number
+          razon_social_receptor: string | null
+          status: string
+          tipo_comprobante: string
+          total_cents: number
+        }
+        Insert: {
+          business_id: string
+          cae?: string | null
+          cae_vencimiento?: string | null
+          created_at?: string
+          cuit_receptor?: string | null
+          error_message?: string | null
+          id?: string
+          iva_cents: number
+          iva_rate?: number
+          neto_cents: number
+          numero: number
+          order_id?: string | null
+          payment_id?: string | null
+          pdf_url?: string | null
+          provider?: string
+          provider_response?: Json | null
+          punto_venta: number
+          razon_social_receptor?: string | null
+          status?: string
+          tipo_comprobante: string
+          total_cents: number
+        }
+        Update: {
+          business_id?: string
+          cae?: string | null
+          cae_vencimiento?: string | null
+          created_at?: string
+          cuit_receptor?: string | null
+          error_message?: string | null
+          id?: string
+          iva_cents?: number
+          iva_rate?: number
+          neto_cents?: number
+          numero?: number
+          order_id?: string | null
+          payment_id?: string | null
+          pdf_url?: string | null
+          provider?: string
+          provider_response?: Json | null
+          punto_venta?: number
+          razon_social_receptor?: string | null
+          status?: string
+          tipo_comprobante?: string
+          total_cents?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "invoices_business_id_fkey"
+            columns: ["business_id"]
+            isOneToOne: false
+            referencedRelation: "businesses"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "invoices_order_id_fkey"
+            columns: ["order_id"]
+            isOneToOne: false
+            referencedRelation: "orders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "invoices_payment_id_fkey"
+            columns: ["payment_id"]
+            isOneToOne: false
+            referencedRelation: "payments"
             referencedColumns: ["id"]
           },
         ]
@@ -1214,13 +1339,16 @@ export type Database = {
           daily_menu_id: string | null
           daily_menu_snapshot: Json | null
           id: string
+          is_combo_component: boolean
           kitchen_status: string
           loaded_by: string | null
           notes: string | null
           order_id: string
+          parent_order_item_id: string | null
           product_id: string | null
           product_name: string
           quantity: number
+          seat_number: number | null
           station_id: string | null
           subtotal_cents: number
           unit_price_cents: number
@@ -1231,13 +1359,16 @@ export type Database = {
           daily_menu_id?: string | null
           daily_menu_snapshot?: Json | null
           id?: string
+          is_combo_component?: boolean
           kitchen_status?: string
           loaded_by?: string | null
           notes?: string | null
           order_id: string
+          parent_order_item_id?: string | null
           product_id?: string | null
           product_name: string
           quantity: number
+          seat_number?: number | null
           station_id?: string | null
           subtotal_cents: number
           unit_price_cents: number
@@ -1248,13 +1379,16 @@ export type Database = {
           daily_menu_id?: string | null
           daily_menu_snapshot?: Json | null
           id?: string
+          is_combo_component?: boolean
           kitchen_status?: string
           loaded_by?: string | null
           notes?: string | null
           order_id?: string
+          parent_order_item_id?: string | null
           product_id?: string | null
           product_name?: string
           quantity?: number
+          seat_number?: number | null
           station_id?: string | null
           subtotal_cents?: number
           unit_price_cents?: number
@@ -1279,6 +1413,13 @@ export type Database = {
             columns: ["order_id"]
             isOneToOne: false
             referencedRelation: "orders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "order_items_parent_order_item_id_fkey"
+            columns: ["parent_order_item_id"]
+            isOneToOne: false
+            referencedRelation: "order_items"
             referencedColumns: ["id"]
           },
           {
@@ -1570,8 +1711,51 @@ export type Database = {
           },
         ]
       }
+      payment_method_configs: {
+        Row: {
+          adjustment_percent: number
+          business_id: string
+          created_at: string
+          id: string
+          is_active: boolean
+          label: string | null
+          method: string
+          sort_order: number
+        }
+        Insert: {
+          adjustment_percent?: number
+          business_id: string
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          label?: string | null
+          method: string
+          sort_order?: number
+        }
+        Update: {
+          adjustment_percent?: number
+          business_id?: string
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          label?: string | null
+          method?: string
+          sort_order?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "payment_method_configs_business_id_fkey"
+            columns: ["business_id"]
+            isOneToOne: false
+            referencedRelation: "businesses"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       payments: {
         Row: {
+          adjustment_cents: number
+          adjustment_percent: number
           amount_cents: number
           attributed_mozo_id: string | null
           business_id: string
@@ -1593,6 +1777,8 @@ export type Database = {
           tip_cents: number
         }
         Insert: {
+          adjustment_cents?: number
+          adjustment_percent?: number
           amount_cents: number
           attributed_mozo_id?: string | null
           business_id: string
@@ -1614,6 +1800,8 @@ export type Database = {
           tip_cents?: number
         }
         Update: {
+          adjustment_cents?: number
+          adjustment_percent?: number
           amount_cents?: number
           attributed_mozo_id?: string | null
           business_id?: string
@@ -1695,6 +1883,7 @@ export type Database = {
           slug: string
           sort_order: number
           station_id: string | null
+          track_stock: boolean
         }
         Insert: {
           business_id: string
@@ -1711,6 +1900,7 @@ export type Database = {
           slug: string
           sort_order?: number
           station_id?: string | null
+          track_stock?: boolean
         }
         Update: {
           business_id?: string
@@ -1727,6 +1917,7 @@ export type Database = {
           slug?: string
           sort_order?: number
           station_id?: string | null
+          track_stock?: boolean
         }
         Relationships: [
           {
@@ -1962,6 +2153,119 @@ export type Database = {
             columns: ["business_id"]
             isOneToOne: false
             referencedRelation: "businesses"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      stock_items: {
+        Row: {
+          business_id: string
+          created_at: string
+          current_qty: number
+          id: string
+          min_qty: number
+          product_id: string
+          unit: string
+          updated_at: string
+        }
+        Insert: {
+          business_id: string
+          created_at?: string
+          current_qty?: number
+          id?: string
+          min_qty?: number
+          product_id: string
+          unit?: string
+          updated_at?: string
+        }
+        Update: {
+          business_id?: string
+          created_at?: string
+          current_qty?: number
+          id?: string
+          min_qty?: number
+          product_id?: string
+          unit?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "stock_items_business_id_fkey"
+            columns: ["business_id"]
+            isOneToOne: false
+            referencedRelation: "businesses"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "stock_items_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      stock_movimientos: {
+        Row: {
+          business_id: string
+          created_at: string
+          created_by: string | null
+          id: string
+          kind: string
+          order_item_id: string | null
+          qty: number
+          reason: string | null
+          stock_item_id: string
+        }
+        Insert: {
+          business_id: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          kind: string
+          order_item_id?: string | null
+          qty: number
+          reason?: string | null
+          stock_item_id: string
+        }
+        Update: {
+          business_id?: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          kind?: string
+          order_item_id?: string | null
+          qty?: number
+          reason?: string | null
+          stock_item_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "stock_movimientos_business_id_fkey"
+            columns: ["business_id"]
+            isOneToOne: false
+            referencedRelation: "businesses"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "stock_movimientos_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "stock_movimientos_order_item_id_fkey"
+            columns: ["order_item_id"]
+            isOneToOne: false
+            referencedRelation: "order_items"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "stock_movimientos_stock_item_id_fkey"
+            columns: ["stock_item_id"]
+            isOneToOne: false
+            referencedRelation: "stock_items"
             referencedColumns: ["id"]
           },
         ]

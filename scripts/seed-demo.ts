@@ -109,6 +109,9 @@ async function main() {
   // ══════════════════════════════════════════════════════════════════════════
   if (RESET) {
     console.log(`\n[reset] limpiando operativo...`);
+    await supabase.from("stock_movimientos").delete().eq("business_id", biz);
+    await supabase.from("stock_items").delete().eq("business_id", biz);
+    await supabase.from("products").update({ track_stock: false }).eq("business_id", biz);
     await supabase.from("payments").delete().eq("business_id", biz);
     await supabase.from("caja_movimientos").delete().eq("business_id", biz);
     await supabase.from("caja_cortes").delete().eq("business_id", biz);
@@ -137,6 +140,23 @@ async function main() {
     await supabase.from("reservations").delete().eq("business_id", biz);
     await supabase.from("customers").delete().eq("business_id", biz);
     console.log(`  ✓ operativo limpio`);
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // FASE 0b — HORARIOS (business_hours) — abierto 7 días
+  // ══════════════════════════════════════════════════════════════════════════
+  if (!RESET) {
+    await supabase.from("business_hours").delete().eq("business_id", biz);
+    const hourRows = [];
+    for (let dow = 0; dow < 7; dow++) {
+      // Mediodía: 11:30 – 15:30 / Noche: 19:30 – 01:00
+      hourRows.push(
+        { business_id: biz, day_of_week: dow, opens_at: "11:30:00", closes_at: "15:30:00" },
+        { business_id: biz, day_of_week: dow, opens_at: "19:30:00", closes_at: "23:59:59" },
+      );
+    }
+    await supabase.from("business_hours").insert(hourRows);
+    console.log(`  ✓ business_hours (7 días, mediodía + noche)`);
   }
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -473,6 +493,58 @@ async function main() {
   }
 
   // ══════════════════════════════════════════════════════════════════════════
+  // FASE 3c — STOCK DE BEBIDAS
+  // ══════════════════════════════════════════════════════════════════════════
+  {
+    console.log(`\n═══ FASE 3c: Stock de bebidas ═══`);
+
+    // Clean previous stock data
+    await supabase.from("stock_movimientos").delete().eq("business_id", biz);
+    await supabase.from("stock_items").delete().eq("business_id", biz);
+    await supabase.from("products").update({ track_stock: false }).eq("business_id", biz);
+
+    // Categories whose products should be tracked
+    const STOCK_CATEGORIES = ["Cervezas", "Espumantes", "Whiskys", "Aperitivos", "Vinos"];
+
+    const { data: stockCats } = await supabase
+      .from("categories").select("id, name").eq("business_id", biz).in("name", STOCK_CATEGORIES);
+
+    const stockCatIds = new Set((stockCats ?? []).map((c) => c.id));
+
+    const trackableProducts = productRows.filter((p) => stockCatIds.has(p.category_id));
+
+    let stockOk = 0;
+    for (const p of trackableProducts) {
+      await supabase.from("products").update({ track_stock: true }).eq("id", p.id);
+
+      // Random initial stock: most between 12-48, a few low (1-3) for alerts
+      const isLow = Math.random() < 0.25;
+      const currentQty = isLow ? randInt(1, 3) : randInt(12, 48);
+      const minQty = isLow ? 5 : randInt(3, 6);
+
+      const { data: si } = await supabase
+        .from("stock_items")
+        .insert({ business_id: biz, product_id: p.id, current_qty: currentQty, min_qty: minQty })
+        .select("id")
+        .single();
+
+      if (si) {
+        // Seed an initial ingreso movement
+        await supabase.from("stock_movimientos").insert({
+          stock_item_id: si.id,
+          business_id: biz,
+          kind: "ingreso",
+          qty: currentQty,
+          reason: "Stock inicial",
+          created_by: encargadaId,
+        });
+        stockOk++;
+      }
+    }
+    console.log(`  ✓ ${stockOk} productos con stock trackeado`);
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
   // FASE 4 — CAJA
   // ══════════════════════════════════════════════════════════════════════════
   console.log(`\n═══ FASE 4: Caja ═══`);
@@ -578,6 +650,7 @@ async function main() {
         product_id: p.id, product_name: p.name,
         unit_price_cents: p.price_cents, quantity: qty,
         subtotal_cents: p.price_cents * qty, station_id: p.station_id,
+        loaded_by: mozoId,
       };
     });
     const subtotal = items.reduce((acc, it) => acc + it.subtotal_cents, 0);
@@ -700,7 +773,7 @@ async function main() {
     const items = Array.from({ length: itemCount }, () => {
       const p = pickWeighted(weightedProducts);
       const qty = randInt(1, 2);
-      return { product_id: p.id, product_name: p.name, unit_price_cents: p.price_cents, quantity: qty, subtotal_cents: p.price_cents * qty };
+      return { product_id: p.id, product_name: p.name, unit_price_cents: p.price_cents, quantity: qty, subtotal_cents: p.price_cents * qty, loaded_by: rand(mozoIds) };
     });
     const subtotal = items.reduce((s, it) => s + it.subtotal_cents, 0);
     const fee = deliveryType === "delivery" ? 80000 : 0;
@@ -768,7 +841,7 @@ async function main() {
     const items = Array.from({ length: itemCount }, () => {
       const p = pickWeighted(weightedProducts);
       const qty = randInt(1, 2);
-      return { product_id: p.id, product_name: p.name, unit_price_cents: p.price_cents, quantity: qty, subtotal_cents: p.price_cents * qty };
+      return { product_id: p.id, product_name: p.name, unit_price_cents: p.price_cents, quantity: qty, subtotal_cents: p.price_cents * qty, loaded_by: rand(mozoIds) };
     });
     const subtotal = items.reduce((s, it) => s + it.subtotal_cents, 0);
     const fee = deliveryType === "delivery" ? 80000 : 0;

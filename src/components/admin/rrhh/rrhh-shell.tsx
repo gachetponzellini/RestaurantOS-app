@@ -4,11 +4,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 
 import { cn } from "@/lib/utils";
 
-export type RrhhTab = "asistencia" | "equipo" | "mes";
-
-function isTab(v: string | null | undefined): v is RrhhTab {
-  return v === "asistencia" || v === "equipo" || v === "mes";
-}
+export type RrhhTab = "asistencia" | "equipo";
 
 export function RrhhShell({
   activeTab,
@@ -34,11 +30,8 @@ export function RrhhShell({
         aria-label="Secciones RRHH"
         className="inline-flex rounded-2xl bg-white p-1 ring-1 ring-zinc-200/70"
       >
-        <TabButton active={activeTab === "mes"} onClick={() => setTab("mes")}>
-          Mes en curso
-        </TabButton>
         <TabButton active={activeTab === "asistencia"} onClick={() => setTab("asistencia")}>
-          Hoy
+          Asistencia
         </TabButton>
         <TabButton active={activeTab === "equipo"} onClick={() => setTab("equipo")}>
           Equipo

@@ -8,15 +8,20 @@ import {
   Check,
   CheckCircle2,
   CreditCard,
+  FileText,
   Link as LinkIcon,
+  Loader2,
   MoreHorizontal,
   QrCode,
+  RotateCcw,
   Trash2,
   Wallet,
 } from "lucide-react";
 import { toast } from "sonner";
 
 import type { BusinessRole } from "@/lib/admin/context";
+import { emitInvoice, retryInvoice } from "@/lib/afip/emit-invoice";
+import type { Invoice, TipoComprobante } from "@/lib/afip/types";
 import {
   anularCobro,
   iniciarPagoMp,
@@ -67,6 +72,7 @@ type Props = {
   role: BusinessRole;
   cuenta: CuentaState;
   init: IniciarCobroResult;
+  existingInvoice: Invoice | null;
 };
 
 export function CobrarClient({
@@ -76,6 +82,7 @@ export function CobrarClient({
   role,
   cuenta,
   init,
+  existingInvoice,
 }: Props) {
   const router = useRouter();
   const splits = init.hasImplicitSplit
@@ -102,6 +109,14 @@ export function CobrarClient({
   const totalPending = Math.max(0, total - totalPaid);
   const progressPct = total === 0 ? 0 : Math.min(100, (totalPaid / total) * 100);
   const allPaid = totalPending === 0;
+
+  // Redirigir al salón automáticamente cuando se cobra todo.
+  useEffect(() => {
+    if (allPaid) {
+      const t = setTimeout(() => router.push(`/${slug}/mozo`), 1500);
+      return () => clearTimeout(t);
+    }
+  }, [allPaid, slug, router]);
 
   return (
     <div className="min-h-dvh bg-zinc-100/60 pb-12">
@@ -172,12 +187,14 @@ export function CobrarClient({
               onValueChange={(v) => v && setCajaId(v)}
             >
               <SelectTrigger className="mt-1.5">
-                <SelectValue />
+                <SelectValue placeholder="Seleccionar caja">
+                  {init.cajas.find((c) => c.id === cajaId)?.name ?? "Caja"}
+                </SelectValue>
               </SelectTrigger>
               <SelectContent>
                 {init.cajas.map((c) => (
                   <SelectItem key={c.id} value={c.id}>
-                    {c.name}
+                    {c.name || `Caja #${c.sort_order + 1}`}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -212,29 +229,30 @@ export function CobrarClient({
           />
         )}
 
-        {/* Mensaje al cerrar */}
+        {/* Mensaje al cerrar + facturación */}
         {allPaid && (
-          <section className="flex items-center gap-3 rounded-2xl bg-emerald-50 p-4 ring-1 ring-emerald-200">
-            <div className="flex size-10 items-center justify-center rounded-full bg-emerald-500 text-white">
-              <CheckCircle2 className="size-5" />
-            </div>
-            <div className="min-w-0 flex-1">
-              <p className="text-sm font-semibold text-emerald-900">
-                Mesa cobrada
-              </p>
-              <p className="text-xs text-emerald-700">
-                La mesa se va a marcar para limpiar.
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={() => router.push(`/${slug}/mozo`)}
-              className="inline-flex items-center gap-1 rounded-full bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-emerald-700"
-            >
-              Volver al salón
-              <ArrowRight className="size-3.5" />
-            </button>
-          </section>
+          <>
+            <section className="flex items-center gap-3 rounded-2xl bg-emerald-50 p-4 ring-1 ring-emerald-200">
+              <div className="flex size-10 items-center justify-center rounded-full bg-emerald-500 text-white">
+                <CheckCircle2 className="size-5" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-semibold text-emerald-900">
+                  Mesa cobrada
+                </p>
+                <p className="text-xs text-emerald-700">
+                  Volviendo al salón…
+                </p>
+              </div>
+            </section>
+
+            <FacturacionSection
+              orderId={cuenta.order.id}
+              totalCents={total}
+              slug={slug}
+              existingInvoice={existingInvoice}
+            />
+          </>
         )}
       </PageShell>
 
@@ -247,6 +265,7 @@ export function CobrarClient({
           slug={slug}
           isImplicit={init.hasImplicitSplit}
           methodConfigs={init.methodConfigs}
+          orderTipCents={cuenta.order.tip_cents}
           onClose={() => setActiveSplitId(null)}
           onPaid={() => {
             setActiveSplitId(null);
@@ -435,6 +454,7 @@ function CobrarSplitSheet({
   slug,
   isImplicit,
   methodConfigs,
+  orderTipCents,
   onClose,
   onPaid,
 }: {
@@ -444,6 +464,7 @@ function CobrarSplitSheet({
   slug: string;
   isImplicit: boolean;
   methodConfigs: PaymentMethodConfig[];
+  orderTipCents: number;
   onClose: () => void;
   onPaid: () => void;
 }) {
@@ -455,7 +476,8 @@ function CobrarSplitSheet({
   const { adjustmentCents, finalCents } = calculateAdjustment(remaining, adjustmentPercent);
   const [amount, setAmount] = useState(remaining);
   const [hasSetAmount, setHasSetAmount] = useState(false);
-  const [tip, setTip] = useState(0);
+  // La propina se define en la pantalla de cuenta, no acá.
+  const tip = orderTipCents;
   const [lastFour, setLastFour] = useState("");
   const [cardBrand, setCardBrand] = useState<
     "visa" | "mastercard" | "amex" | "otro"
@@ -629,6 +651,14 @@ function CobrarSplitSheet({
         </SheetHeader>
 
         <div className="flex-1 space-y-4 px-4">
+          {/* Propina info — visible antes de elegir método */}
+          {!method && tip > 0 && (
+            <div className="flex items-center justify-between rounded-xl bg-emerald-50 px-3 py-2.5 ring-1 ring-emerald-200/70">
+              <span className="text-xs font-medium text-emerald-800">Propina incluida</span>
+              <span className="text-sm font-bold tabular-nums text-emerald-700">{formatCurrency(tip)}</span>
+            </div>
+          )}
+
           {/* Cards de método */}
           {!method && (
             <div className="space-y-2">
@@ -669,154 +699,148 @@ function CobrarSplitSheet({
 
           {/* Form del método elegido */}
           {method && (
-            <div className="space-y-4">
-              {/* Header con cambio de método */}
-              <button
-                type="button"
-                onClick={() => setMethod(null)}
-                className="inline-flex items-center gap-1.5 text-xs font-semibold text-zinc-600 transition hover:text-zinc-900"
-              >
-                <ArrowRight className="size-3 rotate-180" /> Cambiar método
-              </button>
+            <div className="space-y-3">
+              {/* Método seleccionado — chip con cambio */}
+              {(() => {
+                const meta = METHODS.find((m) => m.value === method)!;
+                const Icon = meta.icon;
+                return (
+                  <div className="flex items-center gap-2">
+                    <div className="flex flex-1 items-center gap-2.5 rounded-xl bg-zinc-900 px-3 py-2.5">
+                      <Icon className="size-4 text-white/70" />
+                      <span className="text-sm font-semibold text-white">{meta.label}</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setMethod(null)}
+                      className="rounded-xl px-3 py-2.5 text-xs font-semibold text-zinc-600 ring-1 ring-zinc-200 transition hover:bg-zinc-50 active:scale-[0.97]"
+                    >
+                      Cambiar
+                    </button>
+                  </div>
+                );
+              })()}
 
-              <div className="rounded-xl bg-zinc-50 p-3 ring-1 ring-zinc-200/70">
-                {(() => {
-                  const meta = METHODS.find((m) => m.value === method)!;
-                  const Icon = meta.icon;
-                  return (
-                    <div className="flex items-center gap-3">
-                      <div className="flex size-9 items-center justify-center rounded-full bg-white">
-                        <Icon className="size-4 text-zinc-700" />
+              {/* Resumen rápido */}
+              <div className="rounded-2xl bg-white p-4 ring-1 ring-zinc-200/70">
+                <div className="space-y-3">
+                  {/* Monto */}
+                  <div>
+                    <label className="text-[10px] font-bold uppercase tracking-wider text-zinc-400">
+                      Monto a cobrar
+                    </label>
+                    <Input
+                      type="number"
+                      value={amount / 100}
+                      onChange={(e) => {
+                        setAmount(Math.max(0, Math.round(Number(e.target.value) * 100)));
+                        setHasSetAmount(true);
+                      }}
+                      inputMode="decimal"
+                      className="mt-1 text-lg font-bold"
+                    />
+                    {adjustmentPercent !== 0 && (
+                      <p className={cn("mt-1 text-xs font-medium", adjustmentPercent < 0 ? "text-emerald-700" : "text-rose-600")}>
+                        {adjustmentPercent < 0 ? "Descuento" : "Recargo"} {adjustmentPercent > 0 ? "+" : ""}{adjustmentPercent}%: {formatCurrency(adjustmentCents)}
+                        <span className="ml-1 text-zinc-500">(base {formatCurrency(remaining)})</span>
+                      </p>
+                    )}
+                    {method === "cash" && amount > finalCents && (
+                      <p className="mt-1 text-xs font-semibold text-emerald-700">
+                        Vuelto: {formatCurrency(amount - finalCents)}
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Propina — informativa */}
+                  {tip > 0 && (
+                    <div className="flex items-center justify-between rounded-lg bg-emerald-50 px-3 py-2 ring-1 ring-emerald-100">
+                      <span className="text-xs font-medium text-emerald-800">Propina</span>
+                      <span className="text-sm font-bold tabular-nums text-emerald-700">{formatCurrency(tip)}</span>
+                    </div>
+                  )}
+
+                  {/* Card: últimos 4 + marca */}
+                  {method === "card_manual" && (
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="text-[10px] font-bold uppercase tracking-wider text-zinc-400">
+                          Últimos 4
+                        </label>
+                        <Input
+                          value={lastFour}
+                          onChange={(e) =>
+                            setLastFour(
+                              e.target.value.replace(/\D/g, "").slice(0, 4),
+                            )
+                          }
+                          placeholder="1234"
+                          maxLength={4}
+                          inputMode="numeric"
+                          className="mt-1"
+                        />
                       </div>
                       <div>
-                        <p className="text-sm font-semibold text-zinc-900">
-                          {meta.label}
-                        </p>
+                        <label className="text-[10px] font-bold uppercase tracking-wider text-zinc-400">
+                          Marca
+                        </label>
+                        <Select
+                          value={cardBrand}
+                          onValueChange={(v) =>
+                            v &&
+                            setCardBrand(
+                              v as "visa" | "mastercard" | "amex" | "otro",
+                            )
+                          }
+                        >
+                          <SelectTrigger className="mt-1">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="visa">Visa</SelectItem>
+                            <SelectItem value="mastercard">MasterCard</SelectItem>
+                            <SelectItem value="amex">Amex</SelectItem>
+                            <SelectItem value="otro">Otra</SelectItem>
+                          </SelectContent>
+                        </Select>
                       </div>
                     </div>
-                  );
-                })()}
-              </div>
+                  )}
 
-              {/* Monto */}
-              <div className="grid gap-1.5">
-                <Label>Monto</Label>
-                <Input
-                  type="number"
-                  value={amount / 100}
-                  onChange={(e) => {
-                    setAmount(Math.max(0, Math.round(Number(e.target.value) * 100)));
-                    setHasSetAmount(true);
-                  }}
-                  inputMode="decimal"
-                />
-                {adjustmentPercent !== 0 && (
-                  <p className={cn("text-xs font-medium", adjustmentPercent < 0 ? "text-emerald-700" : "text-rose-600")}>
-                    {adjustmentPercent < 0 ? "Descuento" : "Recargo"} {adjustmentPercent > 0 ? "+" : ""}{adjustmentPercent}%: {formatCurrency(adjustmentCents)}
-                    <span className="ml-1 text-zinc-500">(base {formatCurrency(remaining)})</span>
-                  </p>
-                )}
-                {method === "cash" && amount > finalCents && (
-                  <p className="text-xs font-semibold text-emerald-700">
-                    Vuelto: {formatCurrency(amount - finalCents)}
-                  </p>
-                )}
-              </div>
-
-              {/* Propina (cash, card_manual, transfer) */}
-              {(method === "cash" || method === "card_manual" || method === "transfer") && (
-                <div className="grid gap-1.5">
-                  <Label>Propina (opcional)</Label>
-                  <Input
-                    type="number"
-                    value={tip / 100}
-                    onChange={(e) =>
-                      setTip(
-                        Math.max(0, Math.round(Number(e.target.value) * 100)),
-                      )
-                    }
-                    inputMode="decimal"
-                  />
+                  {/* Notas */}
+                  {(method === "other" || method === "card_manual" || method === "transfer") && (
+                    <div>
+                      <label className="text-[10px] font-bold uppercase tracking-wider text-zinc-400">
+                        Notas{(method === "other" || method === "transfer") && (
+                          <span className="ml-0.5 text-rose-500">*</span>
+                        )}
+                      </label>
+                      <Textarea
+                        value={notes}
+                        onChange={(e) => setNotes(e.target.value)}
+                        rows={2}
+                        className="mt-1"
+                        placeholder={
+                          method === "transfer"
+                            ? "Alias o referencia de la transferencia…"
+                            : method === "other"
+                              ? "Cheque #1234, cortesía…"
+                              : "Opcional"
+                        }
+                      />
+                    </div>
+                  )}
                 </div>
-              )}
-
-              {/* Card */}
-              {method === "card_manual" && (
-                <>
-                  <div className="grid gap-1.5">
-                    <Label>Últimos 4 dígitos</Label>
-                    <Input
-                      value={lastFour}
-                      onChange={(e) =>
-                        setLastFour(
-                          e.target.value.replace(/\D/g, "").slice(0, 4),
-                        )
-                      }
-                      placeholder="1234"
-                      maxLength={4}
-                      inputMode="numeric"
-                    />
-                  </div>
-                  <div className="grid gap-1.5">
-                    <Label>Marca</Label>
-                    <Select
-                      value={cardBrand}
-                      onValueChange={(v) =>
-                        v &&
-                        setCardBrand(
-                          v as "visa" | "mastercard" | "amex" | "otro",
-                        )
-                      }
-                    >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="visa">Visa</SelectItem>
-                        <SelectItem value="mastercard">MasterCard</SelectItem>
-                        <SelectItem value="amex">Amex</SelectItem>
-                        <SelectItem value="otro">Otra</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </>
-              )}
-
-              {/* Notas */}
-              {(method === "other" || method === "card_manual" || method === "transfer") && (
-                <div className="grid gap-1.5">
-                  <Label>
-                    Notas
-                    {(method === "other" || method === "transfer") && (
-                      <span className="ml-1 text-rose-600">*</span>
-                    )}
-                  </Label>
-                  <Textarea
-                    value={notes}
-                    onChange={(e) => setNotes(e.target.value)}
-                    rows={2}
-                    placeholder={
-                      method === "transfer"
-                        ? "Alias o referencia de la transferencia…"
-                        : method === "other"
-                          ? "Cheque #1234, cortesía…"
-                          : "Opcional"
-                    }
-                  />
-                </div>
-              )}
+              </div>
             </div>
           )}
         </div>
 
         {/* Footer fijo */}
         {method && (
-          <SheetFooter className="border-t border-zinc-100 pt-4">
-            <Button variant="ghost" onClick={onClose} className="flex-shrink-0">
-              Cancelar
-            </Button>
-            <Button
-              className="flex-1"
+          <div className="border-t border-zinc-100 px-4 pb-[max(env(safe-area-inset-bottom),1rem)] pt-3">
+            <button
+              type="button"
               disabled={
                 amount <= 0 ||
                 ((method === "other" || method === "transfer") && notes.trim() === "") ||
@@ -825,13 +849,268 @@ function CobrarSplitSheet({
                   lastFour.length !== 4)
               }
               onClick={handleConfirm}
+              className="flex h-14 w-full items-center justify-center rounded-2xl bg-emerald-600 text-base font-bold text-white shadow-sm transition active:scale-[0.98] disabled:opacity-50"
             >
               Confirmar {formatCurrency(amount)}
-            </Button>
-          </SheetFooter>
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              className="mt-2 flex h-10 w-full items-center justify-center rounded-xl text-sm font-semibold text-zinc-500 transition hover:bg-zinc-100 active:scale-[0.98]"
+            >
+              Cancelar
+            </button>
+          </div>
         )}
       </SheetContent>
     </Sheet>
+  );
+}
+
+// ── Anular cobro ──────────────────────────────────────────────
+
+// ── Facturación AFIP (post-cobro) ─────────────────────────────
+
+function FacturacionSection({
+  orderId,
+  totalCents,
+  slug,
+  existingInvoice,
+}: {
+  orderId: string;
+  totalCents: number;
+  slug: string;
+  existingInvoice: Invoice | null;
+}) {
+  const [, startTransition] = useTransition();
+  const [invoice, setInvoice] = useState<Invoice | null>(existingInvoice);
+  const [tipoA, setTipoA] = useState(false);
+  const [cuit, setCuit] = useState("");
+  const [razonSocial, setRazonSocial] = useState("");
+  const [emitting, setEmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const tipo: TipoComprobante = tipoA ? "factura_a" : "factura_b";
+
+  const handleEmit = () => {
+    if (tipoA && cuit.replace(/\-/g, "").length < 11) {
+      toast.error("El CUIT debe tener 11 dígitos.");
+      return;
+    }
+    setEmitting(true);
+    setError(null);
+    startTransition(async () => {
+      const r = await emitInvoice({
+        orderId,
+        tipoComprobante: tipo,
+        cuitReceptor: tipoA ? cuit.replace(/\-/g, "") : undefined,
+        razonSocialReceptor: tipoA && razonSocial ? razonSocial : undefined,
+        slug,
+      });
+      setEmitting(false);
+      if (!r.ok) {
+        setError(r.error);
+        toast.error(r.error);
+      } else {
+        setInvoice(r.data.invoice);
+        toast.success("Factura emitida");
+      }
+    });
+  };
+
+  const handleRetry = (invoiceId: string) => {
+    setEmitting(true);
+    setError(null);
+    startTransition(async () => {
+      const r = await retryInvoice(invoiceId, slug);
+      setEmitting(false);
+      if (!r.ok) {
+        setError(r.error);
+        toast.error(r.error);
+      } else {
+        setInvoice(r.data.invoice);
+        toast.success("Factura emitida");
+      }
+    });
+  };
+
+  // Ya facturada OK
+  if (invoice && invoice.status === "authorized") {
+    return (
+      <section className="rounded-2xl bg-white p-4 ring-1 ring-zinc-200/70">
+        <div className="flex items-center gap-3">
+          <div className="flex size-10 items-center justify-center rounded-full bg-emerald-100 text-emerald-700">
+            <FileText className="size-5" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-semibold text-zinc-900">
+              {invoice.tipo_comprobante === "factura_a" ? "Factura A" : "Factura B"}{" "}
+              <span className="font-normal text-zinc-500">
+                #{String(invoice.punto_venta).padStart(4, "0")}-
+                {String(invoice.numero).padStart(8, "0")}
+              </span>
+            </p>
+            <p className="text-xs text-zinc-500">
+              CAE: {invoice.cae} · {formatCurrency(invoice.total_cents)}
+            </p>
+          </div>
+          <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[0.65rem] font-semibold text-emerald-800">
+            <span className="size-1.5 rounded-full bg-emerald-500" />
+            Emitida
+          </span>
+        </div>
+        {invoice.pdf_url && (
+          <a
+            href={invoice.pdf_url}
+            target="_blank"
+            rel="noreferrer"
+            className="mt-3 inline-flex items-center gap-1.5 text-xs font-semibold text-zinc-600 transition hover:text-zinc-900"
+          >
+            <FileText className="size-3" /> Ver PDF
+          </a>
+        )}
+      </section>
+    );
+  }
+
+  // Factura fallida — retry
+  if (invoice && invoice.status === "failed") {
+    return (
+      <section className="rounded-2xl bg-white p-4 ring-1 ring-rose-200">
+        <div className="flex items-center gap-3">
+          <div className="flex size-10 items-center justify-center rounded-full bg-rose-100 text-rose-700">
+            <FileText className="size-5" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-semibold text-zinc-900">
+              Factura no emitida
+            </p>
+            <p className="text-xs text-rose-600">
+              {invoice.error_message ?? "Error al emitir el comprobante"}
+            </p>
+          </div>
+          <button
+            type="button"
+            disabled={emitting}
+            onClick={() => handleRetry(invoice.id)}
+            className="inline-flex items-center gap-1.5 rounded-full bg-zinc-900 px-3 py-1.5 text-xs font-semibold text-white transition hover:brightness-95 disabled:opacity-50"
+          >
+            {emitting ? (
+              <Loader2 className="size-3 animate-spin" />
+            ) : (
+              <RotateCcw className="size-3" />
+            )}
+            Reintentar
+          </button>
+        </div>
+      </section>
+    );
+  }
+
+  // Sin factura — formulario de emisión
+  return (
+    <section className="rounded-2xl bg-white p-4 ring-1 ring-zinc-200/70 space-y-3">
+      <div className="flex items-center gap-3">
+        <div className="flex size-10 items-center justify-center rounded-full bg-zinc-100 text-zinc-700">
+          <FileText className="size-5" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-semibold text-zinc-900">
+            Emitir comprobante
+          </p>
+          <p className="text-xs text-zinc-500">
+            Opcional — {formatCurrency(totalCents)}
+          </p>
+        </div>
+      </div>
+
+      {/* Toggle A/B */}
+      <div className="flex gap-2">
+        <button
+          type="button"
+          onClick={() => setTipoA(false)}
+          className={cn(
+            "flex-1 rounded-xl px-3 py-2.5 text-center text-xs font-semibold transition ring-1",
+            !tipoA
+              ? "bg-zinc-900 text-white ring-zinc-900"
+              : "bg-white text-zinc-700 ring-zinc-200 hover:bg-zinc-50",
+          )}
+        >
+          Factura B
+          <span className="block text-[0.6rem] font-normal opacity-70">
+            Consumidor final
+          </span>
+        </button>
+        <button
+          type="button"
+          onClick={() => setTipoA(true)}
+          className={cn(
+            "flex-1 rounded-xl px-3 py-2.5 text-center text-xs font-semibold transition ring-1",
+            tipoA
+              ? "bg-zinc-900 text-white ring-zinc-900"
+              : "bg-white text-zinc-700 ring-zinc-200 hover:bg-zinc-50",
+          )}
+        >
+          Factura A
+          <span className="block text-[0.6rem] font-normal opacity-70">
+            Con CUIT
+          </span>
+        </button>
+      </div>
+
+      {/* Campos Factura A */}
+      {tipoA && (
+        <div className="space-y-2.5">
+          <div className="grid gap-1">
+            <Label className="text-xs text-zinc-600">
+              CUIT del cliente <span className="text-rose-600">*</span>
+            </Label>
+            <Input
+              value={cuit}
+              onChange={(e) => setCuit(e.target.value.replace(/[^\d\-]/g, ""))}
+              placeholder="20-12345678-9"
+              maxLength={13}
+              inputMode="numeric"
+            />
+          </div>
+          <div className="grid gap-1">
+            <Label className="text-xs text-zinc-600">Razón social</Label>
+            <Input
+              value={razonSocial}
+              onChange={(e) => setRazonSocial(e.target.value)}
+              placeholder="Nombre de la empresa"
+            />
+          </div>
+        </div>
+      )}
+
+      {error && (
+        <p className="text-xs text-rose-600">{error}</p>
+      )}
+
+      <button
+        type="button"
+        disabled={emitting}
+        onClick={handleEmit}
+        className="flex w-full items-center justify-center gap-2 rounded-full px-4 py-2.5 text-sm font-semibold transition hover:brightness-95 active:translate-y-px disabled:opacity-50"
+        style={{
+          background: "var(--brand, #18181B)",
+          color: "var(--brand-foreground, white)",
+        }}
+      >
+        {emitting ? (
+          <>
+            <Loader2 className="size-4 animate-spin" />
+            Emitiendo…
+          </>
+        ) : (
+          <>
+            <FileText className="size-4" />
+            Emitir {tipoA ? "Factura A" : "Factura B"}
+          </>
+        )}
+      </button>
+    </section>
   );
 }
 

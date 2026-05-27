@@ -42,11 +42,13 @@ export function UserRow({
   member,
   canManage,
   isCurrentUser,
+  lastClockIn,
 }: {
   slug: string;
   member: BusinessMember;
   canManage: boolean;
   isCurrentUser: boolean;
+  lastClockIn?: string | null;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -139,6 +141,20 @@ export function UserRow({
               month: "short",
               year: "numeric",
             }).format(new Date(member.created_at))}
+            {lastClockIn && (
+              <>
+                {" · "}Última fichada:{" "}
+                {(() => {
+                  const now = new Date();
+                  const d = new Date(lastClockIn);
+                  const diffDays = Math.floor((now.getTime() - d.getTime()) / 86400000);
+                  if (diffDays === 0) return `Hoy ${d.toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" })}`;
+                  if (diffDays === 1) return "Ayer";
+                  if (diffDays < 7) return `Hace ${diffDays}d`;
+                  return d.toLocaleDateString("es-AR", { day: "2-digit", month: "short" });
+                })()}
+              </>
+            )}
           </p>
         </div>
       </div>
