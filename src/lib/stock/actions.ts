@@ -59,7 +59,7 @@ export async function toggleTrackStock(
     }
   }
 
-  revalidatePath(`/${slug}/admin/stock`);
+  revalidatePath(`/${slug}/admin/catalogo`);
   return actionOk(undefined);
 }
 
@@ -121,7 +121,7 @@ export async function setStockLevels(
       .eq("id", productId);
   }
 
-  revalidatePath(`/${slug}/admin/stock`);
+  revalidatePath(`/${slug}/admin/catalogo`);
   return actionOk(undefined);
 }
 
@@ -186,7 +186,7 @@ export async function ingresarStock(
       .eq("id", productId);
   }
 
-  revalidatePath(`/${slug}/admin/stock`);
+  revalidatePath(`/${slug}/admin/catalogo`);
   return actionOk(undefined);
 }
 
@@ -252,6 +252,6 @@ export async function ajustarStock(
       .eq("id", productId);
   }
 
-  revalidatePath(`/${slug}/admin/stock`);
+  revalidatePath(`/${slug}/admin/catalogo`);
   return actionOk(undefined);
 }

@@ -6,10 +6,13 @@ import { Plus } from "lucide-react";
 
 import { CatalogClient } from "@/components/admin/catalog/catalog-client";
 import { CategoriasTab } from "@/components/admin/catalog/categorias-tab";
+import { CosteoTab } from "@/components/admin/catalog/costeo-tab";
+import { IngredientsTab } from "@/components/admin/catalog/ingredients-tab";
 import { SectoresTab } from "@/components/admin/catalog/sectores-tab";
 import { DailyMenuList } from "@/components/admin/daily-menus/daily-menu-list";
 import { BrandButton } from "@/components/admin/shell/brand-button";
 import { PageHeader } from "@/components/admin/shell/page-shell";
+import { StockTab } from "@/components/admin/stock/stock-tab";
 import type {
   AdminCategory,
   AdminProduct,
@@ -17,16 +20,29 @@ import type {
   AdminSuperCategory,
 } from "@/lib/admin/catalog-query";
 import type { AdminDailyMenu } from "@/lib/admin/daily-menu-query";
+import type { KitchenStockFull } from "@/lib/ingredients/queries";
+import type { IngredientOverview, ProductCosteo } from "@/lib/ingredients/types";
+import type { StockOverviewItem } from "@/lib/stock/queries";
 import { cn } from "@/lib/utils";
 
-type Tab = "productos" | "categorias" | "sectores" | "menu-del-dia";
+type Tab =
+  | "productos"
+  | "categorias"
+  | "sectores"
+  | "menu-del-dia"
+  | "insumos"
+  | "costeo"
+  | "stock";
 
 function isTab(value: string | null | undefined): value is Tab {
   return (
     value === "productos" ||
     value === "categorias" ||
     value === "sectores" ||
-    value === "menu-del-dia"
+    value === "menu-del-dia" ||
+    value === "insumos" ||
+    value === "costeo" ||
+    value === "stock"
   );
 }
 
@@ -39,6 +55,10 @@ function TabsInner({
   products,
   menus,
   todayDow,
+  ingredients,
+  costeo,
+  stockBebidas,
+  stockCocina,
 }: {
   slug: string;
   businessId: string;
@@ -48,6 +68,10 @@ function TabsInner({
   products: AdminProduct[];
   menus: AdminDailyMenu[];
   todayDow: number;
+  ingredients: IngredientOverview[];
+  costeo: ProductCosteo[];
+  stockBebidas: StockOverviewItem[];
+  stockCocina: KitchenStockFull[];
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -68,6 +92,9 @@ function TabsInner({
       categorias: superCategories.length + categories.length,
       sectores: stations.length,
       menuDelDia: menus.length,
+      insumos: ingredients.length,
+      costeo: costeo.filter((c) => c.hasRecipe).length,
+      stock: stockBebidas.length + stockCocina.length,
     }),
     [
       products.length,
@@ -75,6 +102,10 @@ function TabsInner({
       superCategories.length,
       stations.length,
       menus.length,
+      ingredients.length,
+      costeo,
+      stockBebidas.length,
+      stockCocina.length,
     ],
   );
 
@@ -100,9 +131,9 @@ function TabsInner({
   return (
     <>
       <PageHeader
-        eyebrow="Oferta"
-        title="Catálogo"
-        description="Productos a la carta y menús del día. Todo lo que tus clientes van a ver para armar su pedido."
+        eyebrow="Gestión"
+        title="Productos e inventario"
+        description="Tu carta, insumos y costos, más el stock de bebidas y cocina. Todo lo que ofrecés y lo que tenés en el local."
         action={action}
       />
 
@@ -138,6 +169,27 @@ function TabsInner({
         >
           Menú del día
         </TabButton>
+        <TabButton
+          active={active === "insumos"}
+          onClick={() => setTab("insumos")}
+          count={counts.insumos}
+        >
+          Insumos
+        </TabButton>
+        <TabButton
+          active={active === "costeo"}
+          onClick={() => setTab("costeo")}
+          count={counts.costeo}
+        >
+          Costeo
+        </TabButton>
+        <TabButton
+          active={active === "stock"}
+          onClick={() => setTab("stock")}
+          count={counts.stock}
+        >
+          Stock
+        </TabButton>
       </nav>
 
       <div>
@@ -169,6 +221,13 @@ function TabsInner({
         )}
         {active === "menu-del-dia" && (
           <DailyMenuList slug={slug} menus={menus} todayDow={todayDow} />
+        )}
+        {active === "insumos" && (
+          <IngredientsTab slug={slug} ingredients={ingredients} />
+        )}
+        {active === "costeo" && <CosteoTab items={costeo} />}
+        {active === "stock" && (
+          <StockTab slug={slug} bebidas={stockBebidas} cocina={stockCocina} />
         )}
       </div>
     </>
@@ -220,6 +279,10 @@ export function CatalogShell(props: {
   products: AdminProduct[];
   menus: AdminDailyMenu[];
   todayDow: number;
+  ingredients: IngredientOverview[];
+  costeo: ProductCosteo[];
+  stockBebidas: StockOverviewItem[];
+  stockCocina: KitchenStockFull[];
 }) {
   return (
     <Suspense fallback={null}>

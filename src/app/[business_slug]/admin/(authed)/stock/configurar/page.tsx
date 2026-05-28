@@ -29,7 +29,10 @@ export default async function StockConfigPage({
         eyebrow="Stock"
         title="Configurar productos"
         description="Activá el tracking de stock para los productos que querés controlar. Al activar, ingresá el stock inicial y el mínimo."
-        back={{ href: `/${business_slug}/admin/stock`, label: "Stock" }}
+        back={{
+          href: `/${business_slug}/admin/catalogo?tab=stock`,
+          label: "Stock",
+        }}
       />
       <StockConfigClient products={products} slug={business_slug} />
     </PageShell>

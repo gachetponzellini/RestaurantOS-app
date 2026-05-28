@@ -63,6 +63,36 @@ export function CajaAdminBoard({ slug, cajas }: Props) {
   >({});
   const [refreshKey, setRefreshKey] = useState(0);
 
+  // ── Selector de caja activa (persiste en localStorage) ──
+  const storageKey = `caja_active_${slug}`;
+  const [activeCajaId, setActiveCajaId] = useState<string>(
+    () => cajas[0]?.id ?? "",
+  );
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const stored = localStorage.getItem(storageKey);
+      if (stored && cajas.some((c) => c.id === stored)) {
+        setActiveCajaId(stored);
+      } else if (cajas[0]) {
+        setActiveCajaId(cajas[0].id);
+      }
+    } catch {
+      // ignore
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [storageKey]);
+  useEffect(() => {
+    if (!cajas.some((c) => c.id === activeCajaId) && cajas[0]) {
+      setActiveCajaId(cajas[0].id);
+    }
+  }, [cajas, activeCajaId]);
+
+  const selectCaja = (id: string) => {
+    setActiveCajaId(id);
+    try { localStorage.setItem(storageKey, id); } catch { /* ignore */ }
+  };
+
   useEffect(() => {
     let cancelled = false;
     const load = async () => {
@@ -141,42 +171,44 @@ export function CajaAdminBoard({ slug, cajas }: Props) {
     );
   }
 
-  const gridCols =
-    cajas.length === 1
-      ? "grid-cols-1"
-      : "grid-cols-1 lg:grid-cols-2";
+  const activeCaja = cajas.find((c) => c.id === activeCajaId) ?? cajas[0];
 
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between gap-3">
-        <p className="text-[0.6rem] font-semibold uppercase tracking-[0.14em] text-zinc-500">
-          Refresco cada 30s
-        </p>
+        {cajas.length > 1 ? (
+          <CajaSelector
+            cajas={cajas}
+            statsByCaja={statsByCaja}
+            activeId={activeCajaId}
+            onSelect={selectCaja}
+          />
+        ) : (
+          <p className="text-[0.6rem] font-semibold uppercase tracking-[0.14em] text-zinc-500">
+            Refresco cada 30s
+          </p>
+        )}
         <button
           type="button"
           onClick={() => {
             setRefreshKey((k) => k + 1);
             router.refresh();
           }}
-          className="inline-flex size-8 items-center justify-center rounded-full text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-900"
+          className="inline-flex size-8 shrink-0 items-center justify-center rounded-full text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-900"
           aria-label="Refrescar"
         >
           <RefreshCw className="size-3.5" />
         </button>
       </div>
 
-      <div className={cn("grid gap-4", gridCols)}>
-        {cajas.map((c) => (
-          <CajaCard
-            key={c.id}
-            caja={c}
-            stats={statsByCaja[c.id] ?? null}
-            movimientos={movimientosByCaja[c.id] ?? []}
-            payments={paymentsByCaja[c.id] ?? []}
-            slug={slug}
-          />
-        ))}
-      </div>
+      <CajaCard
+        key={activeCaja.id}
+        caja={activeCaja}
+        stats={statsByCaja[activeCaja.id] ?? null}
+        movimientos={movimientosByCaja[activeCaja.id] ?? []}
+        payments={paymentsByCaja[activeCaja.id] ?? []}
+        slug={slug}
+      />
 
       <div className="pt-1 text-center">
         <Link
@@ -186,6 +218,59 @@ export function CajaAdminBoard({ slug, cajas }: Props) {
           <Settings className="size-3" />
           Configurar cajas
         </Link>
+      </div>
+    </div>
+  );
+}
+
+// ── Selector de caja (pills horizontales) ─────────────────────────
+
+function CajaSelector({
+  cajas,
+  statsByCaja,
+  activeId,
+  onSelect,
+}: {
+  cajas: CajaConEstado[];
+  statsByCaja: Record<string, CajaLiveStats | null>;
+  activeId: string;
+  onSelect: (id: string) => void;
+}) {
+  return (
+    <div className="-mx-1 overflow-x-auto px-1">
+      <div className="flex gap-1.5">
+        {cajas.map((c) => {
+          const cobros = statsByCaja[c.id]?.cobros_count ?? 0;
+          const isActive = c.id === activeId;
+          return (
+            <button
+              key={c.id}
+              type="button"
+              onClick={() => onSelect(c.id)}
+              aria-pressed={isActive}
+              className={cn(
+                "shrink-0 rounded-full px-3.5 py-1.5 text-sm font-semibold transition active:scale-[0.96]",
+                isActive
+                  ? "bg-zinc-900 text-white shadow-sm"
+                  : "bg-white text-zinc-700 ring-1 ring-zinc-200",
+              )}
+            >
+              {c.name}
+              {cobros > 0 && (
+                <span
+                  className={cn(
+                    "ml-1.5 rounded-full px-1.5 py-0.5 text-[10px] font-bold tabular-nums",
+                    isActive
+                      ? "bg-white/15 text-white"
+                      : "bg-zinc-100 text-zinc-600",
+                  )}
+                >
+                  {cobros}
+                </span>
+              )}
+            </button>
+          );
+        })}
       </div>
     </div>
   );

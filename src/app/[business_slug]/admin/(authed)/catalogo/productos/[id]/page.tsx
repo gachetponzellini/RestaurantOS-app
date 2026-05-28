@@ -1,11 +1,17 @@
 import { notFound } from "next/navigation";
 
 import { ProductForm } from "@/components/admin/catalog/product-form";
+import { RecipeSection } from "@/components/admin/catalog/recipe-section";
 import { PageHeader, PageShell, Surface } from "@/components/admin/shell/page-shell";
 import {
   getAdminCatalog,
   getAdminProduct,
 } from "@/lib/admin/catalog-query";
+import {
+  calculateFoodCost,
+  getIngredientsForSearch,
+  getRecipeForProduct,
+} from "@/lib/ingredients/queries";
 import { getBusiness } from "@/lib/tenant";
 
 export default async function EditProductoPage({
@@ -17,11 +23,16 @@ export default async function EditProductoPage({
   const business = await getBusiness(business_slug);
   if (!business) notFound();
 
-  const [product, { categories, stations }] = await Promise.all([
-    getAdminProduct(id),
-    getAdminCatalog(business.id),
-  ]);
+  const [product, { categories, stations }, recipeLines, ingredientOptions] =
+    await Promise.all([
+      getAdminProduct(id),
+      getAdminCatalog(business.id),
+      getRecipeForProduct(id),
+      getIngredientsForSearch(business.id),
+    ]);
   if (!product) notFound();
+
+  const foodCost = await calculateFoodCost(id, product.price_cents);
 
   return (
     <PageShell width="narrow">
@@ -41,6 +52,17 @@ export default async function EditProductoPage({
           categories={categories}
           stations={stations}
           product={product}
+        />
+      </Surface>
+
+      <Surface padding="default">
+        <RecipeSection
+          slug={business_slug}
+          productId={id}
+          priceCents={product.price_cents}
+          recipeLines={recipeLines}
+          ingredientOptions={ingredientOptions}
+          foodCost={foodCost}
         />
       </Surface>
     </PageShell>

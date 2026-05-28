@@ -96,6 +96,8 @@ export async function getTodayTips(
 // ── Horas trabajadas (semana / mes) ──────────────────────────────────
 
 export type MozoAttendance = {
+  todayMinutes: number;
+  isClockedIn: boolean;
   weeklyMinutes: number;
   weeklyDays: number;
   monthlyMinutes: number;
@@ -136,6 +138,8 @@ export async function getMozoAttendance(
   if (error) {
     console.error("getMozoAttendance", error);
     return {
+      todayMinutes: 0,
+      isClockedIn: false,
       weeklyMinutes: 0,
       weeklyDays: 0,
       monthlyMinutes: 0,
@@ -145,6 +149,9 @@ export async function getMozoAttendance(
   }
 
   const entries = data ?? [];
+  const todayStr = now.toISOString().slice(0, 10);
+  let todayMinutes = 0;
+  let isClockedIn = false;
   let weeklyMinutes = 0;
   const weeklyDaysSet = new Set<string>();
   let monthlyMinutes = 0;
@@ -155,15 +162,30 @@ export async function getMozoAttendance(
   const minutesByDay = new Map<string, number>();
 
   for (const e of entries) {
-    const minutes = (e as { duration_minutes: number | null }).duration_minutes ?? 0;
-    const day = (e as { clock_in: string }).clock_in.slice(0, 10);
+    const clockIn = (e as { clock_in: string }).clock_in;
+    const clockOut = (e as { clock_out: string | null }).clock_out;
+    const storedMinutes = (e as { duration_minutes: number | null }).duration_minutes;
+
+    // Open entries (no clock_out) → compute elapsed from clock_in to now
+    const minutes =
+      clockOut === null
+        ? Math.max(0, Math.floor((now.getTime() - new Date(clockIn).getTime()) / 60_000))
+        : (storedMinutes ?? 0);
+
+    const day = clockIn.slice(0, 10);
+
+    // Today
+    if (day === todayStr) {
+      todayMinutes += minutes;
+      if (clockOut === null) isClockedIn = true;
+    }
 
     monthlyMinutes += minutes;
     monthlyDaysSet.add(day);
 
     minutesByDay.set(day, (minutesByDay.get(day) ?? 0) + minutes);
 
-    const clockInDate = new Date((e as { clock_in: string }).clock_in);
+    const clockInDate = new Date(clockIn);
     if (clockInDate >= weekStart) {
       weeklyMinutes += minutes;
       weeklyDaysSet.add(day);
@@ -178,6 +200,8 @@ export async function getMozoAttendance(
   }
 
   return {
+    todayMinutes,
+    isClockedIn,
     weeklyMinutes,
     weeklyDays: weeklyDaysSet.size,
     monthlyMinutes,

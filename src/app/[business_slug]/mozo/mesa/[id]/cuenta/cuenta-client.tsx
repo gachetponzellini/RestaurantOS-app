@@ -71,7 +71,7 @@ export function CuentaClient({
   cuenta,
 }: Props) {
   const router = useRouter();
-  const [, startTransition] = useTransition();
+  const [isPending, startTransition] = useTransition();
   const subtotal = cuenta.totals.subtotal_cents;
 
   const [tipPercent, setTipPercent] = useState<number | "custom">(
@@ -452,7 +452,7 @@ export function CuentaClient({
           <button
             type="button"
             onClick={handleConfirmar}
-            disabled={cantApplyDiscount || total === 0}
+            disabled={cantApplyDiscount || total === 0 || isPending}
             className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-full text-base font-semibold transition hover:brightness-95 disabled:opacity-50"
             style={{
               background: "var(--brand, #18181B)",
@@ -473,6 +473,7 @@ export function CuentaClient({
         items={cuenta.items.filter((i) => i.cancelled_at === null)}
         orderId={cuenta.order.id}
         slug={slug}
+        parentStartTransition={startTransition}
         onDone={() => {
           setDividirOpen(false);
           router.refresh();
@@ -622,6 +623,7 @@ function DividirModal({
   items,
   orderId,
   slug,
+  parentStartTransition,
   onDone,
 }: {
   open: boolean;
@@ -629,9 +631,10 @@ function DividirModal({
   items: CuentaState["items"];
   orderId: string;
   slug: string;
+  parentStartTransition: (cb: () => void | Promise<void>) => void;
   onDone: () => void;
 }) {
-  const [, startTransition] = useTransition();
+  const startTransition = parentStartTransition;
   const [tab, setTab] = useState<"personas" | "items" | "comensal">("personas");
   const [count, setCount] = useState(2);
   const [mapping, setMapping] = useState<Record<string, number>>({});
@@ -704,8 +707,9 @@ function DividirModal({
                 El total se reparte equitativo (2 a 20 personas).
               </p>
             </div>
-            <Button
-              className="w-full"
+            <button
+              type="button"
+              className="mt-1 inline-flex h-12 w-full items-center justify-center gap-2 rounded-full bg-primary text-sm font-bold text-primary-foreground transition hover:bg-primary/90 active:translate-y-px disabled:opacity-50"
               onClick={() =>
                 startTransition(async () => {
                   const r = await dividirPorPersonas(orderId, count, slug);
@@ -718,7 +722,7 @@ function DividirModal({
               }
             >
               Confirmar división
-            </Button>
+            </button>
           </TabsContent>
           <TabsContent value="items" className="space-y-3">
             <div>
@@ -797,8 +801,9 @@ function DividirModal({
                 </li>
               ))}
             </ul>
-            <Button
-              className="w-full"
+            <button
+              type="button"
+              className="mt-1 inline-flex h-12 w-full items-center justify-center gap-2 rounded-full bg-primary text-sm font-bold text-primary-foreground transition hover:bg-primary/90 active:translate-y-px disabled:opacity-50"
               disabled={!allAssigned}
               onClick={() =>
                 startTransition(async () => {
@@ -821,7 +826,7 @@ function DividirModal({
               }
             >
               {allAssigned ? "Confirmar" : "Asigná todos los items"}
-            </Button>
+            </button>
           </TabsContent>
           {hasSeatNumbers && (
             <TabsContent value="comensal" className="space-y-4">
@@ -865,8 +870,9 @@ function DividirModal({
                   ));
                 })()}
               </ul>
-              <Button
-                className="w-full"
+              <button
+                type="button"
+                className="mt-1 inline-flex h-12 w-full items-center justify-center gap-2 rounded-full bg-primary text-sm font-bold text-primary-foreground transition hover:bg-primary/90 active:translate-y-px disabled:opacity-50"
                 onClick={() =>
                   startTransition(async () => {
                     const r = await dividirPorComensal(orderId, slug);
@@ -879,7 +885,7 @@ function DividirModal({
                 }
               >
                 Confirmar división por comensal
-              </Button>
+              </button>
             </TabsContent>
           )}
         </Tabs>

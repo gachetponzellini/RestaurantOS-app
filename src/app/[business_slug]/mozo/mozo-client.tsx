@@ -521,7 +521,7 @@ export function MozoClient({
             name={myName}
             role={role}
             initials={myInitials}
-            myActiveCount={myActiveCount}
+            myActiveCount={myTables.length}
             todayTipsCents={todayTipsCents}
             attendance={attendance}
           />
@@ -532,7 +532,7 @@ export function MozoClient({
         active={activeTab}
         onChange={setActiveTab}
         unreadCount={liveUnreadCount}
-        myActiveCount={myTables.length}
+        myActiveCount={myActiveCount}
       />
 
       {/* Toasts iOS-style. Dispara desde realtime vía el hook arriba. */}
@@ -1675,7 +1675,7 @@ function YoSection({
         <div className="mt-4 grid grid-cols-2 gap-3">
           <div className="rounded-2xl bg-zinc-50 p-3">
             <p className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">
-              Mesas activas
+              Mis mesas
             </p>
             <p className="mt-1 font-heading text-2xl font-extrabold tabular-nums text-zinc-900">
               {myActiveCount}
@@ -1683,11 +1683,18 @@ function YoSection({
           </div>
           <div className="rounded-2xl bg-zinc-50 p-3">
             <p className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">
-              Turno
+              Turno hoy
             </p>
             <p className="mt-1 font-heading text-2xl font-extrabold tabular-nums text-zinc-900">
-              —
+              {attendance.todayMinutes > 0
+                ? formatHoursMinutes(attendance.todayMinutes)
+                : "—"}
             </p>
+            {attendance.isClockedIn && (
+              <p className="mt-0.5 text-[10px] font-semibold text-emerald-600">
+                En turno
+              </p>
+            )}
           </div>
         </div>
       </section>

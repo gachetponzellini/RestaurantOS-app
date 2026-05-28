@@ -184,7 +184,7 @@ export default async function DemoHubPage({
           icon: CalendarDays,
         },
         {
-          href: `/${business_slug}/admin/stock`,
+          href: `/${business_slug}/admin/catalogo?tab=stock`,
           title: "Stock",
           description: "Controlá las unidades de bebidas y vinos en tiempo real.",
           icon: Warehouse,

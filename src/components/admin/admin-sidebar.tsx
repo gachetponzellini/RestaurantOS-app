@@ -23,7 +23,6 @@ import {
   // Tag,
   Users,
   Wallet,
-  Warehouse,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -77,17 +76,12 @@ function buildNav(slug: string, showBusinessTools: boolean): NavItem[] {
     },
     {
       href: `${adminBase}/catalogo`,
-      label: "Catálogo",
+      label: "Productos e inventario",
       icon: <Package className="size-5" strokeWidth={1.75} />,
       match: (p) =>
         p.startsWith(`${adminBase}/catalogo`) ||
-        p.startsWith(`${adminBase}/menu-del-dia`),
-    },
-    {
-      href: `${adminBase}/stock`,
-      label: "Stock",
-      icon: <Warehouse className="size-5" strokeWidth={1.75} />,
-      match: (p) => p.startsWith(`${adminBase}/stock`),
+        p.startsWith(`${adminBase}/menu-del-dia`) ||
+        p.startsWith(`${adminBase}/stock`),
     },
     {
       href: `${adminBase}/salones`,
@@ -336,7 +330,7 @@ export function AdminSidebar({
               badge={
                 item.label === "Local en vivo" && pendingCount > 0
                   ? pendingCount
-                  : item.label === "Stock" && lowStockCount > 0
+                  : item.label === "Productos e inventario" && lowStockCount > 0
                     ? lowStockCount
                     : undefined
               }

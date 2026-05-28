@@ -596,3 +596,256 @@ export const RESERVATION_NOTES = [
   "Vienen con un bebé, traer silla alta", "Un comensal celíaco",
   "Reunión de trabajo", "Mesa tranquila si se puede",
 ];
+
+// ════════════════════════════════════════════════════════════════════════════
+// INGREDIENTES Y RECETAS (Fase 6 — plan-recetas-costeo)
+// ════════════════════════════════════════════════════════════════════════════
+
+export type IngredientDef = {
+  name: string;
+  unit: "kg" | "lt" | "un" | "g" | "ml";
+  waste_percent: number;
+  stock_quantity: number;
+  stock_min_alert: number | null;
+  presentations: { name: string; net_quantity: number; cost_cents: number; is_default: boolean }[];
+};
+
+export type RecipeDef = {
+  /** Must match a product name from PRODUCTS */
+  product_name: string;
+  lines: { ingredient_name: string; quantity: number; notes?: string }[];
+};
+
+export const INGREDIENTS: IngredientDef[] = [
+  {
+    name: "Harina 000",
+    unit: "kg",
+    waste_percent: 1,
+    stock_quantity: 45,
+    stock_min_alert: 10,
+    presentations: [
+      { name: "Bolsa 25kg", net_quantity: 25, cost_cents: 1200000, is_default: true },
+      { name: "Bolsa 1kg", net_quantity: 1, cost_cents: 65000, is_default: false },
+    ],
+  },
+  {
+    name: "Aceite girasol",
+    unit: "lt",
+    waste_percent: 0,
+    stock_quantity: 30,
+    stock_min_alert: 5,
+    presentations: [
+      { name: "Bidón 5lt", net_quantity: 5, cost_cents: 750000, is_default: true },
+    ],
+  },
+  {
+    name: "Huevos",
+    unit: "un",
+    waste_percent: 3,
+    stock_quantity: 120,
+    stock_min_alert: 30,
+    presentations: [
+      { name: "Maple 30 un", net_quantity: 30, cost_cents: 850000, is_default: true },
+    ],
+  },
+  {
+    name: "Carne entrecot",
+    unit: "kg",
+    waste_percent: 12,
+    stock_quantity: 18,
+    stock_min_alert: 5,
+    presentations: [
+      { name: "Media res (aprox 30kg)", net_quantity: 30, cost_cents: 15000000, is_default: true },
+      { name: "Corte suelto 1kg", net_quantity: 1, cost_cents: 600000, is_default: false },
+    ],
+  },
+  {
+    name: "Muzarella",
+    unit: "kg",
+    waste_percent: 2,
+    stock_quantity: 8,
+    stock_min_alert: 3,
+    presentations: [
+      { name: "Barra 5kg", net_quantity: 5, cost_cents: 2500000, is_default: true },
+    ],
+  },
+  {
+    name: "Tomates",
+    unit: "kg",
+    waste_percent: 10,
+    stock_quantity: 12,
+    stock_min_alert: 4,
+    presentations: [
+      { name: "Cajón 20kg", net_quantity: 20, cost_cents: 1800000, is_default: true },
+      { name: "Kg suelto", net_quantity: 1, cost_cents: 120000, is_default: false },
+    ],
+  },
+  {
+    name: "Pan de miga",
+    unit: "un",
+    waste_percent: 5,
+    stock_quantity: 40,
+    stock_min_alert: 10,
+    presentations: [
+      { name: "Paquete 20 un", net_quantity: 20, cost_cents: 400000, is_default: true },
+    ],
+  },
+  {
+    name: "Papa",
+    unit: "kg",
+    waste_percent: 15,
+    stock_quantity: 50,
+    stock_min_alert: 10,
+    presentations: [
+      { name: "Bolsa 50kg", net_quantity: 50, cost_cents: 3000000, is_default: true },
+    ],
+  },
+  {
+    name: "Jamón cocido",
+    unit: "kg",
+    waste_percent: 3,
+    stock_quantity: 5,
+    stock_min_alert: 2,
+    presentations: [
+      { name: "Pieza 4kg", net_quantity: 4, cost_cents: 2800000, is_default: true },
+    ],
+  },
+  {
+    name: "Asado de tira",
+    unit: "kg",
+    waste_percent: 18,
+    stock_quantity: 25,
+    stock_min_alert: 8,
+    presentations: [
+      { name: "Compra 10kg", net_quantity: 10, cost_cents: 6500000, is_default: true },
+    ],
+  },
+  {
+    name: "Ojo de bife",
+    unit: "kg",
+    waste_percent: 8,
+    stock_quantity: 10,
+    stock_min_alert: 3,
+    presentations: [
+      { name: "Lomo 5kg", net_quantity: 5, cost_cents: 5000000, is_default: true },
+    ],
+  },
+  {
+    name: "Ravioles frescos",
+    unit: "kg",
+    waste_percent: 2,
+    stock_quantity: 6,
+    stock_min_alert: 2,
+    presentations: [
+      { name: "Plancha 1kg", net_quantity: 1, cost_cents: 350000, is_default: true },
+    ],
+  },
+  {
+    name: "Salsa fileto",
+    unit: "lt",
+    waste_percent: 0,
+    stock_quantity: 8,
+    stock_min_alert: 2,
+    presentations: [
+      { name: "Olla 5lt", net_quantity: 5, cost_cents: 500000, is_default: true },
+    ],
+  },
+  {
+    name: "Lechuga",
+    unit: "un",
+    waste_percent: 20,
+    stock_quantity: 15,
+    stock_min_alert: 5,
+    presentations: [
+      { name: "Cajón 12 un", net_quantity: 12, cost_cents: 300000, is_default: true },
+    ],
+  },
+  {
+    name: "Dulce de leche",
+    unit: "kg",
+    waste_percent: 0,
+    stock_quantity: 4,
+    stock_min_alert: 1,
+    presentations: [
+      { name: "Balde 5kg", net_quantity: 5, cost_cents: 900000, is_default: true },
+    ],
+  },
+  {
+    name: "Crema de leche",
+    unit: "lt",
+    waste_percent: 0,
+    stock_quantity: 6,
+    stock_min_alert: 2,
+    presentations: [
+      { name: "Sachet 1lt", net_quantity: 1, cost_cents: 180000, is_default: true },
+    ],
+  },
+];
+
+/**
+ * Recipes linking products to ingredients.
+ * Product names must match entries in PRODUCTS.
+ * Ingredient names must match entries in INGREDIENTS.
+ */
+export const RECIPES: RecipeDef[] = [
+  {
+    product_name: "Milanesa",
+    lines: [
+      { ingredient_name: "Carne entrecot", quantity: 0.35 },
+      { ingredient_name: "Huevos", quantity: 2 },
+      { ingredient_name: "Harina 000", quantity: 0.05, notes: "Para empanizar" },
+      { ingredient_name: "Pan de miga", quantity: 1 },
+      { ingredient_name: "Aceite girasol", quantity: 0.15 },
+    ],
+  },
+  {
+    product_name: "Milanesa Napolitana",
+    lines: [
+      { ingredient_name: "Carne entrecot", quantity: 0.35 },
+      { ingredient_name: "Huevos", quantity: 2 },
+      { ingredient_name: "Harina 000", quantity: 0.05 },
+      { ingredient_name: "Pan de miga", quantity: 1 },
+      { ingredient_name: "Aceite girasol", quantity: 0.15 },
+      { ingredient_name: "Muzarella", quantity: 0.08 },
+      { ingredient_name: "Tomates", quantity: 0.10, notes: "Salsa o rodajas" },
+      { ingredient_name: "Jamón cocido", quantity: 0.05 },
+    ],
+  },
+  {
+    product_name: "Milanesa Entrecot",
+    lines: [
+      { ingredient_name: "Carne entrecot", quantity: 0.4 },
+      { ingredient_name: "Huevos", quantity: 2 },
+      { ingredient_name: "Harina 000", quantity: 0.05 },
+      { ingredient_name: "Pan de miga", quantity: 1 },
+      { ingredient_name: "Aceite girasol", quantity: 0.2 },
+    ],
+  },
+  {
+    product_name: "Ravioles",
+    lines: [
+      { ingredient_name: "Ravioles frescos", quantity: 0.35 },
+      { ingredient_name: "Salsa fileto", quantity: 0.15 },
+      { ingredient_name: "Muzarella", quantity: 0.03, notes: "Rallado encima" },
+    ],
+  },
+  {
+    product_name: "Asado de Tira",
+    lines: [
+      { ingredient_name: "Asado de tira", quantity: 0.5 },
+    ],
+  },
+  {
+    product_name: "Ojo de Bife",
+    lines: [
+      { ingredient_name: "Ojo de bife", quantity: 0.4 },
+    ],
+  },
+  {
+    product_name: "Papas Fritas",
+    lines: [
+      { ingredient_name: "Papa", quantity: 0.4 },
+      { ingredient_name: "Aceite girasol", quantity: 0.1 },
+    ],
+  },
+];

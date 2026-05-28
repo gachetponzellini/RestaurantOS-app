@@ -29,6 +29,7 @@ import {
   SALON_TABLES, TERRAZA_TABLES, RESERVATION_SCHEDULE,
   TEAM, TEAM_PASSWORD,
   FIRST_NAMES, LAST_NAMES, STREETS, RESERVATION_NOTES,
+  INGREDIENTS, RECIPES,
 } from "./seed-data";
 
 config({ path: ".env.local" });
@@ -504,7 +505,7 @@ async function main() {
     await supabase.from("products").update({ track_stock: false }).eq("business_id", biz);
 
     // Categories whose products should be tracked
-    const STOCK_CATEGORIES = ["Cervezas", "Espumantes", "Whiskys", "Aperitivos", "Vinos"];
+    const STOCK_CATEGORIES = ["Aguas", "Gaseosas", "Cervezas", "Espumantes", "Whiskys", "Aperitivos", "Vinos", "Kiosko"];
 
     const { data: stockCats } = await supabase
       .from("categories").select("id, name").eq("business_id", biz).in("name", STOCK_CATEGORIES);
@@ -941,6 +942,92 @@ async function main() {
     if (!error) resOk++;
   }
   console.log(`  ✓ ${resOk} reservas (incluye ${todaySlots.length} de hoy)`);
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // FASE 7 — INGREDIENTES Y RECETAS
+  // ══════════════════════════════════════════════════════════════════════════
+  if (!RESET) {
+    console.log(`\n═══ FASE 7: Ingredientes y recetas ═══`);
+
+    const ingredientIdByName = new Map<string, string>();
+
+    for (const ing of INGREDIENTS) {
+      const { data: existing } = await supabase
+        .from("ingredients")
+        .select("id")
+        .eq("business_id", biz)
+        .eq("name", ing.name)
+        .maybeSingle();
+
+      if (existing) {
+        ingredientIdByName.set(ing.name, existing.id);
+        continue;
+      }
+
+      const { data: inserted, error } = await supabase
+        .from("ingredients")
+        .insert({
+          business_id: biz,
+          name: ing.name,
+          unit: ing.unit,
+          waste_percent: ing.waste_percent,
+          stock_quantity: ing.stock_quantity,
+          stock_min_alert: ing.stock_min_alert,
+          is_active: true,
+        })
+        .select("id")
+        .single();
+
+      if (error || !inserted) {
+        console.error(`  ✗ Ingredient "${ing.name}":`, error?.message);
+        continue;
+      }
+      ingredientIdByName.set(ing.name, inserted.id);
+
+      if (ing.presentations.length > 0) {
+        await supabase.from("ingredient_presentations").insert(
+          ing.presentations.map((p) => ({
+            ingredient_id: inserted.id,
+            name: p.name,
+            net_quantity: p.net_quantity,
+            cost_cents: p.cost_cents,
+            is_default: p.is_default,
+          })),
+        );
+      }
+    }
+    console.log(`  ✓ ${ingredientIdByName.size} ingredientes`);
+
+    const productIdByName = new Map<string, string>();
+    for (const p of resolvedProducts) productIdByName.set(p.name, p.id);
+
+    let recipeOk = 0;
+    for (const recipe of RECIPES) {
+      const productId = productIdByName.get(recipe.product_name);
+      if (!productId) continue;
+
+      await supabase.from("recipes").delete().eq("product_id", productId);
+
+      const lines = recipe.lines
+        .map((l) => {
+          const ingId = ingredientIdByName.get(l.ingredient_name);
+          if (!ingId) return null;
+          return {
+            product_id: productId,
+            ingredient_id: ingId,
+            quantity: l.quantity,
+            notes: l.notes?.trim() || null,
+          };
+        })
+        .filter(Boolean);
+
+      if (lines.length > 0) {
+        const { error } = await supabase.from("recipes").insert(lines);
+        if (!error) recipeOk++;
+      }
+    }
+    console.log(`  ✓ ${recipeOk} recetas`);
+  }
 
   // ══════════════════════════════════════════════════════════════════════════
   // DONE

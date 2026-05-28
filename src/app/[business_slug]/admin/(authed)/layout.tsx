@@ -5,6 +5,7 @@ import { BrandStyle } from "@/components/admin/shell/brand-style";
 import { NotificationsLauncher } from "@/components/notifications/notifications-launcher";
 import { canManageBusiness, ensureAdminAccess } from "@/lib/admin/context";
 import { getPendingOrderCount } from "@/lib/admin/orders-query";
+import { getLowKitchenStockCount } from "@/lib/ingredients/queries";
 import { countUnread, listForUser } from "@/lib/notifications/queries";
 import { getLowStockCount } from "@/lib/stock/queries";
 import { getBusiness, getBusinessSettings } from "@/lib/tenant";
@@ -30,10 +31,14 @@ export default async function AdminAuthedLayout({
     redirect(`/${business_slug}/mozo`);
   }
 
-  const [pendingCount, lowStockCount] = await Promise.all([
+  const [pendingCount, lowBebidasCount, lowCocinaCount] = await Promise.all([
     getPendingOrderCount(business.id, business.timezone),
     getLowStockCount(business.id),
+    getLowKitchenStockCount(business.id),
   ]);
+  // El badge de "Productos e inventario" suma faltantes de bebidas + cocina,
+  // ya que ambos stocks ahora viven en la misma sección.
+  const lowStockCount = lowBebidasCount + lowCocinaCount;
   const settings = getBusinessSettings(business);
 
   // Notificaciones globales para el layout admin. Para platform admin sin
