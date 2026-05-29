@@ -155,12 +155,14 @@ export function CobrarDesktopClient({
                 onValueChange={(v) => v && setCajaId(v)}
               >
                 <SelectTrigger className="mt-1.5">
-                  <SelectValue />
+                  <SelectValue placeholder="Seleccionar caja">
+                    {init.cajas.find((c) => c.id === cajaId)?.name ?? "Caja"}
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   {init.cajas.map((c) => (
                     <SelectItem key={c.id} value={c.id}>
-                      {c.name}
+                      {c.name || `Caja #${c.sort_order + 1}`}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -756,7 +758,14 @@ function CobrarSplitPanel({
                   }
                 >
                   <SelectTrigger>
-                    <SelectValue />
+                    <SelectValue>
+                      {{
+                        visa: "Visa",
+                        mastercard: "MasterCard",
+                        amex: "Amex",
+                        otro: "Otra",
+                      }[cardBrand] ?? "Marca"}
+                    </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="visa">Visa</SelectItem>
