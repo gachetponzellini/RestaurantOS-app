@@ -3,6 +3,7 @@ import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { startOfTodayUtc } from "@/lib/admin/orders-query";
 import type { ComandaStatus, KitchenItemStatus } from "@/lib/comandas/types";
 
 type GenericClient = SupabaseClient;
@@ -49,22 +50,27 @@ export type LocalStation = {
 };
 
 /**
- * Comandas activas del día (status != entregado, o entregadas hace menos de
- * 30 min). Usado por la tab "Comandas" del nuevo `/admin/local`.
+ * Comandas del día operativo. Usado por la tab "Comandas" del nuevo
+ * `/admin/local`.
  *
  * No filtramos por mozo/encargado — esta vista es panorámica del operativo.
  *
- * "Activas" = pendiente | en_preparacion. Sumamos también las "entregado"
- * recientes para que no desaparezcan justo cuando el encargado las marca.
+ * "Activas" (pendiente | en_preparacion) se traen sin recorte temporal.
+ * Las "entregado" se traen desde la medianoche del business (día operativo):
+ * la columna Entregadas muestra todo lo que salió hoy, ordenado por hora de
+ * entrega desc, con un tope de seguridad para no inflar el DOM en un local de
+ * mucho volumen. El corte por día se elige porque el KDS se "resetea" cada
+ * jornada; si hiciera falta turno-de-caja o últimas-N es un cambio de una línea.
  */
 export async function getActiveComandas(
   businessId: string,
+  timezone: string,
 ): Promise<LocalComanda[]> {
   const supabase = (await createSupabaseServerClient()) as unknown as GenericClient;
 
-  const thirtyMinAgo = new Date(Date.now() - 30 * 60_000).toISOString();
+  const startOfDay = startOfTodayUtc(timezone).toISOString();
 
-  // Dos queries paralelas: pendientes/en_preparacion + entregadas recientes.
+  // Dos queries paralelas: pendientes/en_preparacion + entregadas del día.
   // Antes había una sola con `.or()` + `and()` anidado pero la sintaxis
   // PostgREST con timestamp ISO embebido era frágil.
   const select = `
@@ -95,8 +101,9 @@ export async function getActiveComandas(
       .select(select)
       .eq("orders.business_id", businessId)
       .eq("status", "entregado")
-      .gte("delivered_at", thirtyMinAgo)
-      .order("delivered_at", { ascending: false }),
+      .gte("delivered_at", startOfDay)
+      .order("delivered_at", { ascending: false })
+      .limit(100),
   ]);
 
   if (activeRes.error) {

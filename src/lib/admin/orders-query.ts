@@ -19,7 +19,7 @@ export type AdminOrder = {
   items: { product_name: string; quantity: number }[];
 };
 
-function startOfTodayUtc(tz: string): Date {
+export function startOfTodayUtc(tz: string): Date {
   // Midnight in the business timezone, converted to UTC for the query.
   const now = new Date();
   const parts = new Intl.DateTimeFormat("en-US", {

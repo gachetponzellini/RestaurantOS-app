@@ -56,7 +56,7 @@ export default async function LocalEnVivoPage({
     todaySummary,
   ] = await Promise.all([
     getTodayOrders(business.id, business.timezone),
-    getActiveComandas(business.id),
+    getActiveComandas(business.id, business.timezone),
     getStationsForLocal(business.id),
     getFloorPlansForBusiness(business.id),
     service

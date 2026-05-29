@@ -117,6 +117,24 @@ function elapsedTone(min: number, terminal: boolean): string {
   return "text-muted-foreground";
 }
 
+/** Tiempo de preparación de una comanda entregada (delivered − emitted). */
+function prepMinutes(emitted: string, delivered: string | null): number | null {
+  if (!delivered) return null;
+  return Math.max(
+    0,
+    Math.floor(
+      (new Date(delivered).getTime() - new Date(emitted).getTime()) / 60_000,
+    ),
+  );
+}
+
+/** Color del KPI de prep: verde rápido, ámbar medio, rojo lento. */
+function prepTone(min: number): string {
+  if (min <= 10) return "text-emerald-700";
+  if (min <= 20) return "text-amber-700";
+  return "text-rose-700";
+}
+
 function deliveryIcon(type: string) {
   if (type === "delivery") return Truck;
   if (type === "take_away") return Package;
@@ -258,8 +276,10 @@ export function ComandasKanban({
     for (const c of comandas) {
       groups[c.status].push(c);
     }
-    // Cap entregadas para que no crezca infinito en pantalla.
-    groups.entregado = groups.entregado.slice(0, 20);
+    // Entregadas ya vienen acotadas al día operativo + tope 100 desde la
+    // query, ordenadas por delivered_at desc. Cap de display por las dudas
+    // (locales de mucho volumen) sin perder el "todo lo de hoy" práctico.
+    groups.entregado = groups.entregado.slice(0, 60);
     return groups;
   }, [comandas]);
 
@@ -400,6 +420,10 @@ function ComandaCard({
 }) {
   const elapsed = useElapsedMinutes(comanda.emitted_at);
   const isTerminal = comanda.status === "entregado";
+  // Para entregadas mostramos la recencia ("hace X") en vez del tiempo desde
+  // emisión, que crecería sin sentido. El KPI de prep va abajo en su chip.
+  const deliveredAgo = useElapsedMinutes(comanda.delivered_at ?? comanda.emitted_at);
+  const prep = prepMinutes(comanda.emitted_at, comanda.delivered_at);
 
   const liveItems = comanda.items.filter((it) => !it.cancelled_at);
   const cancelledItems = comanda.items.filter((it) => it.cancelled_at);
@@ -429,7 +453,11 @@ function ComandaCard({
           <span
             className={`text-xs font-medium tabular-nums ${elapsedTone(elapsed, isTerminal)}`}
           >
-            {formatRelativeTime(elapsed)}
+            {isTerminal
+              ? deliveredAgo < 1
+                ? "recién"
+                : `hace ${formatRelativeTime(deliveredAgo)}`
+              : formatRelativeTime(elapsed)}
           </span>
         </div>
         <ChannelIcon
@@ -542,6 +570,17 @@ function ComandaCard({
               Entregar
             </button>
           )}
+        </div>
+      )}
+
+      {/* Entregadas: sin botón, pero mostramos el tiempo de preparación
+          (delivered − emitted) como KPI — verde rápido / rojo lento. */}
+      {isTerminal && prep != null && (
+        <div className="border-border/40 mt-0.5 flex items-center gap-1.5 border-t pt-2">
+          <Check className={`size-3.5 ${prepTone(prep)}`} strokeWidth={2.5} />
+          <span className={`text-[11px] font-semibold ${prepTone(prep)}`}>
+            Preparada en {formatRelativeTime(prep)}
+          </span>
         </div>
       )}
     </article>
