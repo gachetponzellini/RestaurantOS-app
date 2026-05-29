@@ -151,6 +151,7 @@ export default async function ConfirmacionPage({
         subtotalCents={Number(order.subtotal_cents)}
         deliveryFeeCents={Number(order.delivery_fee_cents)}
         totalCents={Number(order.total_cents)}
+        estimatedMinutes={business.estimated_delivery_minutes}
         whatsappHref={whatsappHref}
         canCancel={canCancel}
         wasPaid={order.payment_status === "paid"}

@@ -15,8 +15,10 @@ import {
   AdminCreateReservationInputSchema,
   CancelOwnReservationInputSchema,
   CreateReservationInputSchema,
+  SentarReservaInputSchema,
   UpdateReservationStatusInputSchema,
 } from "@/lib/reservations/schema";
+import { openTable } from "@/lib/mozo/open-table";
 import type { Reservation } from "@/lib/reservations/types";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
@@ -324,6 +326,119 @@ export async function updateReservationStatus(
   }
   revalidatePath(`/${parsed.data.business_slug}/admin/reservas`);
   return actionOk(null);
+}
+
+/**
+ * Sentar una reserva confirmada: marca la mesa como ocupada, crea la order
+ * dine_in y actualiza la reserva a "seated". Conecta los dos sistemas
+ * (reservas ↔ operación de mesas) usando openTable() compartido.
+ */
+export async function sentarReserva(
+  input: unknown,
+): Promise<ActionResult<{ orderId: string | null }>> {
+  const parsed = SentarReservaInputSchema.safeParse(input);
+  if (!parsed.success) return actionError("Datos inválidos.");
+
+  const supabase = await createSupabaseServerClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return actionError("No autenticado.");
+
+  const business = await getBusiness(parsed.data.business_slug);
+  if (!business) return actionError("Negocio no encontrado.");
+  if (!(await assertCanManage(business.id, user.id))) {
+    return actionError("Permiso denegado.");
+  }
+
+  const service = createSupabaseServiceClient() as unknown as GenericClient;
+
+  // Fetch reserva + validar.
+  const { data: reservationRow } = await service
+    .from("reservations")
+    .select("id, table_id, customer_name, customer_phone, party_size, status, notes")
+    .eq("id", parsed.data.reservation_id)
+    .eq("business_id", business.id)
+    .maybeSingle();
+  if (!reservationRow) return actionError("Reserva no encontrada.");
+  const reservation = reservationRow as {
+    id: string; table_id: string | null; customer_name: string;
+    customer_phone: string; party_size: number; status: string; notes: string | null;
+  };
+  if (reservation.status !== "confirmed") {
+    return actionError("Solo se pueden sentar reservas confirmadas.");
+  }
+  if (!reservation.table_id) {
+    return actionError("La reserva no tiene mesa asignada.");
+  }
+
+  // Fetch table con cross-tenant validation.
+  const { data: tableRow } = await service
+    .from("tables")
+    .select("id, operational_status, opened_at, mozo_id, floor_plans!inner(business_id)")
+    .eq("id", reservation.table_id)
+    .maybeSingle();
+  if (!tableRow) return actionError("Mesa no encontrada.");
+  const fpRaw = (tableRow as unknown as { floor_plans: unknown }).floor_plans;
+  const fp = Array.isArray(fpRaw)
+    ? (fpRaw[0] as { business_id: string } | undefined)
+    : (fpRaw as { business_id: string } | null);
+  if (!fp || fp.business_id !== business.id) {
+    return actionError("Mesa no encontrada.");
+  }
+  const table = tableRow as {
+    id: string; operational_status: string; opened_at: string | null; mozo_id: string | null;
+  };
+
+  // Customer upsert por phone.
+  let customerId: string | null = null;
+  if (reservation.customer_phone) {
+    const { data: existing } = await service
+      .from("customers")
+      .select("id, name")
+      .eq("business_id", business.id)
+      .eq("phone", reservation.customer_phone)
+      .maybeSingle();
+    const existingRow = existing as { id: string; name: string | null } | null;
+    if (existingRow) {
+      customerId = existingRow.id;
+      if (reservation.customer_name && reservation.customer_name !== existingRow.name) {
+        await service.from("customers").update({ name: reservation.customer_name }).eq("id", existingRow.id);
+      }
+    } else {
+      const { data: created } = await service
+        .from("customers")
+        .insert({ business_id: business.id, phone: reservation.customer_phone, name: reservation.customer_name })
+        .select("id")
+        .single();
+      if (created) customerId = (created as { id: string }).id;
+    }
+  }
+
+  // Abrir la mesa (shared con walk-in).
+  const openResult = await openTable({
+    service,
+    businessId: business.id,
+    table,
+    actorUserId: user.id,
+    customerName: reservation.customer_name,
+    customerPhone: reservation.customer_phone,
+    customerId,
+    notes: reservation.notes,
+  });
+  if (!openResult.ok) return openResult;
+
+  // Marcar reserva como seated.
+  const { error: resErr } = await service
+    .from("reservations")
+    .update({ status: "seated" })
+    .eq("id", reservation.id)
+    .eq("business_id", business.id);
+  if (resErr) console.error("sentarReserva status update", resErr);
+
+  const slug = parsed.data.business_slug;
+  revalidatePath(`/${slug}/admin/local`);
+  revalidatePath(`/${slug}/admin/reservas`);
+  revalidatePath(`/${slug}/mozo`);
+  return actionOk({ orderId: openResult.data.orderId });
 }
 
 export async function cancelOwnReservation(

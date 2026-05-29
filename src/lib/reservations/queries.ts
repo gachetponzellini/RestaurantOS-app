@@ -153,18 +153,3 @@ export async function getReservationsInRange(
   return (data ?? []) as Reservation[];
 }
 
-export async function listReservationsForDay(
-  businessId: string,
-  fromIso: string,
-  toIso: string,
-): Promise<Reservation[]> {
-  const supabase = (await createSupabaseServerClient()) as unknown as GenericClient;
-  const { data } = await supabase
-    .from("reservations")
-    .select("*")
-    .eq("business_id", businessId)
-    .gte("starts_at", fromIso)
-    .lt("starts_at", toIso)
-    .order("starts_at", { ascending: true });
-  return (data ?? []) as Reservation[];
-}

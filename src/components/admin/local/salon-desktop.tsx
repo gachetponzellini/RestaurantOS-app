@@ -10,12 +10,15 @@ import {
   Clock,
   Pencil,
   Receipt,
+  UserCheck,
   UserPlus,
   Users,
   X,
 } from "lucide-react";
 import { toast } from "sonner";
 
+import { NewReservationModal } from "@/components/admin/local/new-reservation-modal";
+import { ReservationsPanel } from "@/components/admin/local/reservations-panel";
 import { AsignarMozosPanel } from "@/components/mozo/asignar-mozos-panel";
 import { FloorPlanViewer } from "@/components/mozo/floor-plan-viewer";
 import { OrderSummaryCard } from "@/components/mozo/order-summary-card";
@@ -25,6 +28,7 @@ import { Button } from "@/components/ui/button";
 import type { BusinessRole } from "@/lib/admin/context";
 import type { FloorPlanWithTables } from "@/lib/admin/floor-plan/queries";
 import { anularMesa, assignMozoToTable } from "@/lib/mozo/actions";
+import { sentarReserva } from "@/lib/reservations/booking-actions";
 import { initialsFromName, mozoColor, mozoPalette } from "@/lib/mozo/colors";
 import type { MozoMember } from "@/lib/mozo/queries";
 import { type OperationalStatus } from "@/lib/mozo/state-machine";
@@ -169,6 +173,7 @@ export function SalonDesktop({
     label: string;
   } | null>(null);
   const [anularReason, setAnularReason] = useState("");
+  const [showNewReservation, setShowNewReservation] = useState(false);
 
   // ── Multi-salón ──
   // Selección persistida por business. Si el id guardado ya no existe (plano
@@ -262,6 +267,16 @@ export function SalonDesktop({
     return m;
   }, [mozos]);
 
+  const tableLabelById = useMemo(() => {
+    const m: Record<string, string> = {};
+    for (const fp of floorPlans) {
+      for (const t of fp.tables) {
+        m[t.id] = t.label;
+      }
+    }
+    return m;
+  }, [floorPlans]);
+
   // ── Acciones server ──
   const handleAnular = useCallback(() => {
     if (!anularPrompt) return;
@@ -282,6 +297,25 @@ export function SalonDesktop({
       router.refresh();
     });
   }, [anularPrompt, anularReason, slug, router]);
+
+  const handleSentarReserva = useCallback(
+    (reservationId: string) => {
+      startTransition(async () => {
+        const r = await sentarReserva({
+          business_slug: slug,
+          reservation_id: reservationId,
+        });
+        if (!r.ok) {
+          toast.error(r.error);
+          return;
+        }
+        toast.success("Mesa abierta con reserva.");
+        setSelectedId(null);
+        router.refresh();
+      });
+    },
+    [slug, router],
+  );
 
   // ── Selección ──
   const selected = selectedId
@@ -496,26 +530,38 @@ export function SalonDesktop({
               pending={pending}
               onClose={() => setSelectedId(null)}
               onWalkIn={() => setWalkInTableId(selected.id)}
+              onSentarReserva={() => {
+                const res = reservationByTable[selected.id];
+                if (res) handleSentarReserva(res.id);
+              }}
               onTransfer={() => setTransferTableId(selected.id)}
               onAnular={() =>
                 setAnularPrompt({ tableId: selected.id, label: selected.label })
               }
             />
           ) : (
-            <ActiveTablesList
-              tables={activeTables}
-              orderByTable={orderByTable}
-              reservationByTable={reservationByTable}
-              mozoNameById={mozoNameById}
-              onSelect={(id) => setSelectedId(id)}
-              canDistribuir={canAssignMozo(role) && !!onDistribuirOpen}
-              onDistribuir={() => onDistribuirOpen?.()}
-              editPlanHref={
-                canAssignMozo(role) && active?.plan.id
-                  ? `/${slug}/admin/salones/${active.plan.id}`
-                  : null
-              }
-            />
+            <>
+              <ReservationsPanel
+                reservations={reservations}
+                slug={slug}
+                tableLabelById={tableLabelById}
+                onNewReservation={() => setShowNewReservation(true)}
+              />
+              <ActiveTablesList
+                tables={activeTables}
+                orderByTable={orderByTable}
+                reservationByTable={reservationByTable}
+                mozoNameById={mozoNameById}
+                onSelect={(id) => setSelectedId(id)}
+                canDistribuir={canAssignMozo(role) && !!onDistribuirOpen}
+                onDistribuir={() => onDistribuirOpen?.()}
+                editPlanHref={
+                  canAssignMozo(role) && active?.plan.id
+                    ? `/${slug}/admin/salones/${active.plan.id}`
+                    : null
+                }
+              />
+            </>
           )}
         </aside>
       </div>
@@ -551,6 +597,15 @@ export function SalonDesktop({
             setTransferTableId(null);
             router.refresh();
           }}
+        />
+      )}
+
+      {showNewReservation && (
+        <NewReservationModal
+          slug={slug}
+          tables={activeTables}
+          floorPlanId={plan?.id ?? null}
+          onClose={() => setShowNewReservation(false)}
         />
       )}
 
@@ -1051,6 +1106,7 @@ function TableDetail({
   pending,
   onClose,
   onWalkIn,
+  onSentarReserva,
   onTransfer,
   onAnular,
 }: {
@@ -1064,6 +1120,7 @@ function TableDetail({
   pending: boolean;
   onClose: () => void;
   onWalkIn: () => void;
+  onSentarReserva: () => void;
   onTransfer: () => void;
   onAnular: () => void;
 }) {
@@ -1210,7 +1267,7 @@ function TableDetail({
         {/* Empty state: mesa libre sin reserva. En vez de dejar un hueco
             grande entre header y footer, ponemos info útil + hint a la
             acción primaria. */}
-        {status === "libre" && !reservation && !order && (
+        {status === "libre" && !order && !reservation && (
           <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-zinc-200 bg-zinc-50/60 px-6 py-10 text-center">
             <div className="flex size-12 items-center justify-center rounded-full bg-white ring-1 ring-zinc-200">
               <Users className="size-5 text-zinc-400" />
@@ -1243,6 +1300,19 @@ function TableDetail({
           // emerald-600 con shadow. button HTML, no Button shadcn.
           const primaryClass =
             "flex h-14 w-full items-center justify-center gap-2 rounded-2xl bg-emerald-600 text-base font-semibold text-white shadow-sm transition active:scale-[0.98] disabled:opacity-60";
+          if (canWalkIn && reservation) {
+            return (
+              <button
+                type="button"
+                onClick={onSentarReserva}
+                disabled={pending}
+                className={primaryClass}
+              >
+                <UserCheck className="h-5 w-5" />
+                Sentar reserva
+              </button>
+            );
+          }
           if (canWalkIn) {
             return (
               <button
@@ -1307,11 +1377,27 @@ function TableDetail({
         {/* Secundarios. Si solo hay 1 secundario, ocupa full width (no
             queda colgado a media columna). Si hay 2+, grid 2-cols. */}
         {(() => {
+          // Cuando el primario es "Sentar reserva", ofrecer walk-in como alternativa.
+          const showWalkInSec = canWalkIn && !!reservation;
           const showVolverAPedir = status === "pidio_cuenta" && canPedir;
           const showCargarMas = status === "ocupada" && hasItems && canPedir;
           const showPedirCuentaSec =
             status === "ocupada" && !hasItems && canShowCuenta;
           const buttons: React.ReactNode[] = [];
+          if (showWalkInSec) {
+            buttons.push(
+              <button
+                key="walkin"
+                type="button"
+                onClick={onWalkIn}
+                disabled={pending}
+                className="flex h-10 w-full items-center justify-center gap-1.5 rounded-xl bg-zinc-100 px-3 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-200 active:scale-[0.97] disabled:opacity-60"
+              >
+                <UserPlus className="h-3.5 w-3.5" />
+                Sentar walk-in
+              </button>,
+            );
+          }
           if (showVolverAPedir) {
             buttons.push(
               <button

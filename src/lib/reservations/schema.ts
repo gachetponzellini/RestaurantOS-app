@@ -95,6 +95,11 @@ export const UpdateReservationStatusInputSchema = z.object({
   status: z.enum(["confirmed", "seated", "completed", "no_show", "cancelled"]),
 });
 
+export const SentarReservaInputSchema = z.object({
+  business_slug: z.string().min(1),
+  reservation_id: z.string().uuid(),
+});
+
 export type UpdateReservationStatusInput = z.infer<typeof UpdateReservationStatusInputSchema>;
 
 export const CancelOwnReservationInputSchema = z.object({

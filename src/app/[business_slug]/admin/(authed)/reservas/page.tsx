@@ -2,10 +2,10 @@ import { notFound } from "next/navigation";
 import { fromZonedTime } from "date-fns-tz";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-import { AdminDayList } from "@/components/reservations/admin-day-list";
+import { AdminDayList, type AdminRow } from "@/components/reservations/admin-day-list";
 import { PageHeader, PageShell } from "@/components/admin/shell/page-shell";
 import { ensureAdminAccess } from "@/lib/admin/context";
-import type { Reservation } from "@/lib/reservations/types";
+import type { FloorTable } from "@/lib/reservations/types";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 import { getBusiness } from "@/lib/tenant";
 
@@ -41,14 +41,35 @@ export default async function AdminReservasPage({
   const dayEnd = new Date(dayStart.getTime() + 24 * 60 * 60 * 1000);
 
   const service = createSupabaseServiceClient() as unknown as SupabaseClient;
+
+  // Reservas del día con join a tables y floor_plans para nombre de salón.
   const { data } = await service
     .from("reservations")
-    .select("*, tables(label)")
+    .select("*, tables(label, floor_plans(id, name))")
     .eq("business_id", business.id)
     .gte("starts_at", dayStart.toISOString())
     .lt("starts_at", dayEnd.toISOString())
     .order("starts_at", { ascending: true });
-  const rows = (data ?? []) as (Reservation & { tables: { label: string } | null })[];
+  const rows = (data ?? []) as AdminRow[];
+
+  // Floor plans y mesas activas para el modal "Nueva reserva".
+  const { data: fpData } = await service
+    .from("floor_plans")
+    .select("id, name")
+    .eq("business_id", business.id)
+    .order("created_at", { ascending: true });
+  const floorPlans = (fpData ?? []) as Array<{ id: string; name: string }>;
+
+  const fpIds = floorPlans.map((fp) => fp.id);
+  let activeTables: FloorTable[] = [];
+  if (fpIds.length > 0) {
+    const { data: tablesData } = await service
+      .from("tables")
+      .select("*")
+      .in("floor_plan_id", fpIds)
+      .eq("status", "active");
+    activeTables = (tablesData ?? []) as FloorTable[];
+  }
 
   return (
     <PageShell width="wide" className="space-y-6">
@@ -57,7 +78,14 @@ export default async function AdminReservasPage({
         title="Reservas del día"
         description="Lista por hora con estado actual. Usá el plano y la configuración desde los botones de arriba."
       />
-      <AdminDayList slug={business_slug} date={date} rows={rows} timezone={business.timezone} />
+      <AdminDayList
+        slug={business_slug}
+        date={date}
+        rows={rows}
+        timezone={business.timezone}
+        floorPlans={floorPlans}
+        activeTables={activeTables}
+      />
     </PageShell>
   );
 }

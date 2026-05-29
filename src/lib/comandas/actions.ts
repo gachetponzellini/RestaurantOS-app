@@ -823,10 +823,22 @@ export async function cancelarItem(
   const newSubtotal = ((items ?? []) as { subtotal_cents: number; cancelled_at: string | null }[])
     .filter((it) => !it.cancelled_at)
     .reduce((a, it) => a + Number(it.subtotal_cents), 0);
+
+  // Leer tip/discount actuales para no pisar el total si ya se aplicaron.
+  const { data: orderRow } = await service
+    .from("orders")
+    .select("tip_cents, discount_cents, delivery_fee_cents")
+    .eq("id", orderId)
+    .single();
+  const tip = Number((orderRow as { tip_cents: number } | null)?.tip_cents ?? 0);
+  const discount = Number((orderRow as { discount_cents: number } | null)?.discount_cents ?? 0);
+  const fee = Number((orderRow as { delivery_fee_cents: number } | null)?.delivery_fee_cents ?? 0);
+  const newTotal = Math.max(0, newSubtotal + tip + fee - discount);
+
   await service
     .from("orders")
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    .update({ subtotal_cents: newSubtotal, total_cents: newSubtotal } as any)
+    .update({ subtotal_cents: newSubtotal, total_cents: newTotal } as any)
     .eq("id", orderId);
 
   revalidatePath(`/${slug}/cocina`);

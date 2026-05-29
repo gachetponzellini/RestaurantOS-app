@@ -30,7 +30,7 @@ export function CartPageClient({
   const isEmpty = items.length === 0;
   const underMin = !isEmpty && minOrderCents > 0 && subtotal < minOrderCents;
   const missing = Math.max(0, minOrderCents - subtotal);
-  const total = subtotal + (isEmpty ? 0 : deliveryFeeCents);
+  const total = subtotal;
 
   return (
     <div
@@ -332,11 +332,25 @@ export function CartPageClient({
                 Resumen
               </div>
               <Row label="Subtotal" value={formatCurrency(subtotal)} />
-              <Row
-                label="Envío"
-                value={formatCurrency(deliveryFeeCents)}
-                muted
-              />
+              {deliveryFeeCents > 0 && (
+                <>
+                  <Row
+                    label="Envío (delivery)"
+                    value={formatCurrency(deliveryFeeCents)}
+                    muted
+                  />
+                  <div
+                    style={{
+                      fontSize: 11,
+                      color: "var(--ink-3)",
+                      marginTop: 2,
+                      marginBottom: 2,
+                    }}
+                  >
+                    Retiro en local sin cargo. El envío se suma si elegís delivery.
+                  </div>
+                </>
+              )}
               <div
                 style={{
                   display: "flex",

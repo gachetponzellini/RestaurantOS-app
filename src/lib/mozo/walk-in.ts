@@ -6,7 +6,7 @@ import { z } from "zod";
 
 import { actionError, actionOk, type ActionResult } from "@/lib/actions";
 import { requireMozoActionContext } from "@/lib/mozo/auth";
-import { canTransition, nextOpenedAt } from "@/lib/mozo/state-machine";
+import { openTable } from "@/lib/mozo/open-table";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 import { getBusiness } from "@/lib/tenant";
 
@@ -32,13 +32,8 @@ export type SentarWalkInResult = {
  * Sentar un walk-in (CU-08/a):
  *   1. Cross-tenant + canTransition libre→ocupada.
  *   2. Si phone: upsert customer (idempotente por (business_id, phone)).
- *   3. tables.operational_status = 'ocupada', opened_at = now.
- *   4. Auto-asigna mozo si no había (CU-09 R2).
- *   5. **Crea la order open** con customer_name del input (snapshot) +
- *      customer_id si se resolvió. enviarComanda la reusa después al cargar
- *      items. Esto pega el nombre en la card desde el inicio (antes
- *      mostraba "Walk-in" genérico hasta el primer envío).
- *   6. Audit log: status (libre→ocupada) y, si correspondió, assignment.
+ *   3. Delega a openTable(): marca ocupada, crea order, audit log.
+ *   4. revalidatePath.
  *
  * Si el cliente se sienta y se va sin pedir, el encargado anula la mesa
  * → la order open se marca cancelled (`anularMesa`).
@@ -84,13 +79,6 @@ export async function sentarWalkIn(
     mozo_id: string | null;
   };
 
-  if (table.operational_status !== "libre") {
-    return actionError("La mesa no está libre.");
-  }
-  if (!canTransition("libre", "ocupada")) {
-    return actionError("Transición no permitida.");
-  }
-
   // Customer upsert por (business_id, phone). Idempotente.
   let customerId: string | null = null;
   if (input.phone) {
@@ -103,7 +91,6 @@ export async function sentarWalkIn(
     const existingRow = existing as { id: string; name: string | null } | null;
     if (existingRow) {
       customerId = existingRow.id;
-      // Actualizar el nombre si llegó uno y difiere del guardado.
       if (input.name && input.name !== existingRow.name) {
         const { error: updErr } = await service
           .from("customers")
@@ -129,99 +116,22 @@ export async function sentarWalkIn(
     }
   }
 
-  // Auto-asignación: si la mesa no tenía mozo asignado, queda el de la sesión.
-  const willAssignMozo = table.mozo_id === null;
-  const newMozoId = table.mozo_id ?? ctx.userId;
-
-  const newOpenedAt = nextOpenedAt("libre", "ocupada", table.opened_at);
-  const { error: tableErr } = await service
-    .from("tables")
-    .update({
-      operational_status: "ocupada",
-      opened_at: newOpenedAt,
-      mozo_id: newMozoId,
-    })
-    .eq("id", table.id);
-  if (tableErr) {
-    console.error("walk-in table update", tableErr);
-    return actionError("No pudimos abrir la mesa.");
-  }
-
-  // Crear la order open: snapshot de customer_name/phone para mostrar en
-  // la card desde ya. Si ya existe una order open para esta mesa (caso
-  // edge: walk-in disparado dos veces), no insertamos otra — el partial
-  // unique nos protege.
-  const { data: existingOrder } = await service
-    .from("orders")
-    .select("id")
-    .eq("table_id", table.id)
-    .eq("business_id", business.id)
-    .eq("lifecycle_status", "open")
-    .maybeSingle();
-  if (!existingOrder) {
-    const { error: orderErr } = await service
-      .from("orders")
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      .insert({
-        order_number: 0,
-        business_id: business.id,
-        customer_name: input.name?.trim() || "Walk-in",
-        customer_phone: input.phone?.trim() || "-",
-        customer_id: customerId,
-        delivery_type: "dine_in",
-        table_id: table.id,
-        mozo_id: newMozoId,
-        lifecycle_status: "open",
-        subtotal_cents: 0,
-        delivery_fee_cents: 0,
-        total_cents: 0,
-        delivery_notes: input.notes?.trim() || null,
-        payment_method: "cash",
-      } as any)
-      .select("id");
-    if (orderErr) {
-      console.error("walk-in order insert", orderErr);
-      // No es bloqueante: la mesa quedó ocupada, enviarComanda la creará
-      // cuando carguen items. Solo perdemos el snapshot del nombre.
-    }
-  }
-
-  // Audit: status + (eventualmente) assignment.
-  const auditRows: Array<{
-    table_id: string;
-    business_id: string;
-    kind: "status" | "assignment";
-    from_value: string | null;
-    to_value: string | null;
-    by_user_id: string;
-  }> = [
-    {
-      table_id: table.id,
-      business_id: business.id,
-      kind: "status",
-      from_value: "libre",
-      to_value: "ocupada",
-      by_user_id: ctx.userId,
-    },
-  ];
-  if (willAssignMozo) {
-    auditRows.push({
-      table_id: table.id,
-      business_id: business.id,
-      kind: "assignment",
-      from_value: null,
-      to_value: ctx.userId,
-      by_user_id: ctx.userId,
-    });
-  }
-  const { error: auditErr } = await service
-    .from("tables_audit_log")
-    .insert(auditRows);
-  if (auditErr) console.error("walk-in audit", auditErr);
+  // Delegar a openTable() la lógica de abrir mesa + crear order.
+  const openResult = await openTable({
+    service,
+    businessId: business.id,
+    table,
+    actorUserId: ctx.userId,
+    customerName: input.name?.trim() || "Walk-in",
+    customerPhone: input.phone?.trim() || "-",
+    customerId,
+    notes: input.notes?.trim() || null,
+  });
+  if (!openResult.ok) return openResult;
 
   revalidatePath(`/${input.slug}/mozo`);
   return actionOk({
     customerId,
-    autoAssignedMozo: willAssignMozo,
+    autoAssignedMozo: openResult.data.autoAssignedMozo,
   });
 }

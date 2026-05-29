@@ -38,6 +38,7 @@ export function OrderTracking({
   subtotalCents,
   deliveryFeeCents,
   totalCents,
+  estimatedMinutes,
   whatsappHref,
   canCancel = false,
   wasPaid = false,
@@ -53,6 +54,7 @@ export function OrderTracking({
   subtotalCents: number;
   deliveryFeeCents: number;
   totalCents: number;
+  estimatedMinutes?: number | null;
   whatsappHref?: string | null;
   canCancel?: boolean;
   wasPaid?: boolean;
@@ -169,7 +171,13 @@ export function OrderTracking({
               marginTop: 4,
             }}
           >
-            {cancelled ? "Cancelado" : step === 3 ? "¡Listo!" : "20–35 min"}
+            {cancelled
+              ? "Cancelado"
+              : step === 3
+                ? "¡Listo!"
+                : estimatedMinutes
+                  ? `~${estimatedMinutes} min`
+                  : "En preparación"}
           </div>
           {!cancelled && (
             <div style={{ fontSize: 13, color: "var(--ink-2)", marginTop: 6 }}>
