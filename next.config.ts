@@ -1,6 +1,10 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  eslint: {
+    // El lint se corre aparte (npm run lint). No bloquea el build/deploy.
+    ignoreDuringBuilds: true,
+  },
   images: {
     remotePatterns: [
       { protocol: "https", hostname: "picsum.photos" },
