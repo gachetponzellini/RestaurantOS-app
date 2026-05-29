@@ -1,6 +1,7 @@
 import "server-only";
 
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { createSupabaseServiceClient } from "@/lib/supabase/service";
 import {
   computeSegments,
   matchesSegment,
@@ -465,7 +466,11 @@ export async function getCustomerChatbotConversation(
   const digits = customerPhone.replace(/\D/g, "");
   if (!digits) return null;
 
-  const supabase = await createSupabaseServerClient();
+  // Las tablas `chatbot_*` tienen RLS habilitado sin policy de SELECT para
+  // staff, así que el cliente con cookie devuelve 0 filas. Usamos el service
+  // client (igual que el resto del chatbot); el acceso ya está gateado por
+  // `ensureAdminAccess` + scoping explícito por `business_id`.
+  const supabase = createSupabaseServiceClient();
 
   // Filtramos por igualdad-de-dígitos en JS para evitar falsos positivos
   // (un identifier "1122" no debería matchear "11221234").

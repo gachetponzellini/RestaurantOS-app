@@ -350,24 +350,44 @@ async function resolveSystemPrompt(
   enabledTools: string[] | null,
   toolOverrides: ToolOverrides,
 ): Promise<string> {
-  const { data } = await service
-    .from("chatbot_configs")
-    .select("system_prompt")
-    .eq("business_id", businessId)
-    .maybeSingle();
+  const [{ data }, { data: business }] = await Promise.all([
+    service
+      .from("chatbot_configs")
+      .select("system_prompt")
+      .eq("business_id", businessId)
+      .maybeSingle(),
+    service
+      .from("businesses")
+      .select("timezone")
+      .eq("id", businessId)
+      .maybeSingle(),
+  ]);
 
   const template =
     data?.system_prompt && data.system_prompt.trim().length > 0
       ? data.system_prompt
       : DEFAULT_SYSTEM_PROMPT;
 
-  return template
-    .replaceAll("{{businessName}}", businessName)
-    .replaceAll("{{enabled_tools_list}}", buildEnabledToolsList(enabledTools))
-    .replaceAll(
-      "{{enabled_tools_markdown}}",
-      buildEnabledToolsMarkdown(enabledTools, toolOverrides),
-    );
+  // Contexto temporal: sin esto el LLM no sabe qué día es hoy y resuelve mal
+  // las fechas relativas ("mañana", "el sábado") en reservas. Lo computamos en
+  // la zona horaria del negocio (no la del server). Solo fecha + día de semana
+  // (no la hora) para no romper el prompt caching cada minuto — la hora exacta
+  // la da `check_business_status` cuando hace falta.
+  const tz = business?.timezone || "America/Argentina/Buenos_Aires";
+  const now = new Date();
+  const todayIso = formatInTimeZone(now, tz, "yyyy-MM-dd");
+  const todayDow = toZonedTime(now, tz).getUTCDay();
+  const dateContext = `\n\n## Contexto temporal\nHoy es ${DAY_NAMES_ES[todayDow]} ${todayIso} (zona horaria ${tz}). Usá esta fecha para resolver referencias relativas como "hoy", "mañana" o "el sábado". Las fechas que pases a las herramientas van siempre en formato YYYY-MM-DD.`;
+
+  return (
+    template
+      .replaceAll("{{businessName}}", businessName)
+      .replaceAll("{{enabled_tools_list}}", buildEnabledToolsList(enabledTools))
+      .replaceAll(
+        "{{enabled_tools_markdown}}",
+        buildEnabledToolsMarkdown(enabledTools, toolOverrides),
+      ) + dateContext
+  );
 }
 
 async function loadToolConfig(
