@@ -1,19 +1,33 @@
 import { notFound } from "next/navigation";
 
+import { CashControlCard } from "@/components/admin/reports/cash-control";
 import { CategoryBreakdownSection } from "@/components/admin/reports/category-breakdown";
 import { CustomersAnalysis } from "@/components/admin/reports/customers-analysis";
+import { FiscalSummarySection } from "@/components/admin/reports/fiscal-summary";
+import { MarketingSummarySection } from "@/components/admin/reports/marketing-summary";
+import { MenuEngineeringSection } from "@/components/admin/reports/menu-engineering";
+import { MozoLeaderboard } from "@/components/admin/reports/mozo-leaderboard";
 import { PrepTimes } from "@/components/admin/reports/prep-times";
 import { RangeSelector } from "@/components/admin/reports/range-selector";
 import { ReservationFunnelSection } from "@/components/admin/reports/reservation-funnel";
 import { RevenueChart } from "@/components/admin/reports/revenue-chart";
+import { StationTimingsSection } from "@/components/admin/reports/station-timings";
 import { SummaryCards } from "@/components/admin/reports/summary-cards";
 import { TopProducts } from "@/components/admin/reports/top-products";
 import { PageHeader, PageShell } from "@/components/admin/shell/page-shell";
+import { getCashControl } from "@/lib/admin/dashboard-query";
+import { getMenuEngineering } from "@/lib/admin/profit-query";
+import {
+  getFiscalSummary,
+  getMarketingSummary,
+  getStationTimings,
+} from "@/lib/admin/reports-extra-query";
 import {
   getReportData,
   REPORT_RANGES,
   type ReportRange,
 } from "@/lib/admin/reports-query";
+import { getMozoPerformance } from "@/lib/admin/staff-query";
 import { getBusiness } from "@/lib/tenant";
 
 export default async function ReportesPage({
@@ -35,6 +49,18 @@ export default async function ReportesPage({
     : "7d";
 
   const data = await getReportData(business.id, business.timezone, range);
+  const { startIso, endIso } = data.summary;
+
+  const [menuEng, mozos, cash, fiscal, marketing, stations] =
+    await Promise.all([
+      getMenuEngineering(business.id, startIso, endIso),
+      getMozoPerformance(business.id, startIso, endIso),
+      getCashControl(business.id, startIso, endIso),
+      getFiscalSummary(business.id, startIso, endIso),
+      getMarketingSummary(business.id, startIso, endIso),
+      getStationTimings(business.id, startIso, endIso),
+    ]);
+
   const isEmpty =
     data.summary.orderCount === 0 && data.summary.cancelledCount === 0;
 
@@ -60,6 +86,10 @@ export default async function ReportesPage({
             <TopProducts products={data.topProducts} />
           </div>
 
+          <MenuEngineeringSection data={menuEng} />
+
+          <MozoLeaderboard data={mozos} />
+
           <CustomersAnalysis data={data.customers} />
 
           <div className="grid gap-5 lg:grid-cols-2">
@@ -68,6 +98,15 @@ export default async function ReportesPage({
             ) : null}
             <PrepTimes data={data.prepTimes} />
           </div>
+
+          <StationTimingsSection data={stations} />
+
+          <div className="grid gap-5 lg:grid-cols-2">
+            <FiscalSummarySection data={fiscal} />
+            <MarketingSummarySection data={marketing} />
+          </div>
+
+          <CashControlCard data={cash} />
 
           {data.reservationFunnel ? (
             <ReservationFunnelSection data={data.reservationFunnel} />

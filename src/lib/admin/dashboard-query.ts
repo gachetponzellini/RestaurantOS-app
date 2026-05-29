@@ -1,6 +1,7 @@
 import "server-only";
 
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { getProfitMetrics, type ProfitMetrics } from "@/lib/admin/profit-query";
 
 export type DashboardOverview = {
   today: {
@@ -334,4 +335,168 @@ export async function getHourlyHeatmap(
   const totalOrders = cells.reduce((s, c) => s + c.orderCount, 0);
 
   return { cells, maxCount, totalOrders, rangeDays: HEATMAP_DAYS };
+}
+
+// ── Rentabilidad del dashboard (últimos 30 días) ──────────────────
+
+export async function getDashboardProfit(
+  businessId: string,
+  timezone: string,
+): Promise<ProfitMetrics> {
+  const start = startOfDayUtc(timezone, DAYS_IN_MONTH_RANGE - 1);
+  const end = new Date();
+  return getProfitMetrics(businessId, start.toISOString(), end.toISOString());
+}
+
+// ── Mix de medios de pago (últimos 30 días) ───────────────────────
+
+export type PaymentMethodKey =
+  | "cash"
+  | "card_manual"
+  | "mp_link"
+  | "mp_qr"
+  | "transfer"
+  | "other";
+
+export type PaymentMix = {
+  byMethod: Record<PaymentMethodKey, { count: number; amountCents: number }>;
+  totalCents: number;
+  cashCents: number;
+  digitalCents: number;
+  tipsCents: number;
+};
+
+const EMPTY_MIX: Record<PaymentMethodKey, { count: number; amountCents: number }> =
+  {
+    cash: { count: 0, amountCents: 0 },
+    card_manual: { count: 0, amountCents: 0 },
+    mp_link: { count: 0, amountCents: 0 },
+    mp_qr: { count: 0, amountCents: 0 },
+    transfer: { count: 0, amountCents: 0 },
+    other: { count: 0, amountCents: 0 },
+  };
+
+export async function getPaymentMix(
+  businessId: string,
+  timezone: string,
+): Promise<PaymentMix> {
+  const supabase = await createSupabaseServerClient();
+  const start = startOfDayUtc(timezone, DAYS_IN_MONTH_RANGE - 1);
+
+  const { data } = await supabase
+    .from("payments")
+    .select("method, amount_cents, tip_cents")
+    .eq("business_id", businessId)
+    .eq("payment_status", "paid")
+    .gte("created_at", start.toISOString());
+
+  const byMethod: Record<
+    PaymentMethodKey,
+    { count: number; amountCents: number }
+  > = JSON.parse(JSON.stringify(EMPTY_MIX));
+  let totalCents = 0;
+  let tipsCents = 0;
+
+  for (const p of data ?? []) {
+    const row = p as { method: string; amount_cents: number; tip_cents: number };
+    const key = (row.method as PaymentMethodKey) in byMethod
+      ? (row.method as PaymentMethodKey)
+      : "other";
+    const amount = Number(row.amount_cents) || 0;
+    byMethod[key].count += 1;
+    byMethod[key].amountCents += amount;
+    totalCents += amount;
+    tipsCents += Number(row.tip_cents) || 0;
+  }
+
+  const cashCents = byMethod.cash.amountCents;
+  const digitalCents = totalCents - cashCents;
+
+  return { byMethod, totalCents, cashCents, digitalCents, tipsCents };
+}
+
+// ── Propinas de hoy ───────────────────────────────────────────────
+
+export async function getTipsToday(
+  businessId: string,
+  timezone: string,
+): Promise<number> {
+  const supabase = await createSupabaseServerClient();
+  const start = startOfDayUtc(timezone, 0);
+
+  const { data } = await supabase
+    .from("payments")
+    .select("tip_cents")
+    .eq("business_id", businessId)
+    .eq("payment_status", "paid")
+    .gte("created_at", start.toISOString());
+
+  let tips = 0;
+  for (const p of data ?? []) {
+    tips += Number((p as { tip_cents: number }).tip_cents) || 0;
+  }
+  return tips;
+}
+
+// ── Control de caja (por rango) ───────────────────────────────────
+
+export type CashControl = {
+  corteCount: number;
+  netDifferenceCents: number; // suma de diferencias (sobrante - faltante)
+  shortageCents: number; // total faltante (diferencias negativas)
+  surplusCents: number; // total sobrante (diferencias positivas)
+  sangriaCents: number;
+  ingresoCents: number;
+};
+
+export async function getCashControl(
+  businessId: string,
+  startIso: string,
+  endIso: string,
+): Promise<CashControl> {
+  const supabase = await createSupabaseServerClient();
+
+  const [cortesRes, movRes] = await Promise.all([
+    supabase
+      .from("caja_cortes")
+      .select("difference_cents")
+      .eq("business_id", businessId)
+      .gte("created_at", startIso)
+      .lt("created_at", endIso),
+    supabase
+      .from("caja_movimientos")
+      .select("kind, amount_cents")
+      .eq("business_id", businessId)
+      .gte("created_at", startIso)
+      .lt("created_at", endIso),
+  ]);
+
+  let netDifferenceCents = 0;
+  let shortageCents = 0;
+  let surplusCents = 0;
+  const cortes = cortesRes.data ?? [];
+  for (const c of cortes) {
+    const diff = Number((c as { difference_cents: number }).difference_cents) || 0;
+    netDifferenceCents += diff;
+    if (diff < 0) shortageCents += Math.abs(diff);
+    else surplusCents += diff;
+  }
+
+  let sangriaCents = 0;
+  let ingresoCents = 0;
+  for (const m of movRes.data ?? []) {
+    const row = m as { kind: string; amount_cents: number };
+    const amount = Number(row.amount_cents) || 0;
+    if (row.kind === "sangria") sangriaCents += amount;
+    else if (row.kind === "ingreso") ingresoCents += amount;
+  }
+
+  return {
+    corteCount: cortes.length,
+    netDifferenceCents,
+    shortageCents,
+    surplusCents,
+    sangriaCents,
+    ingresoCents,
+  };
 }

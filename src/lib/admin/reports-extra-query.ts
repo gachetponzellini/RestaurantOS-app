@@ -1,0 +1,225 @@
+import "server-only";
+
+import { createSupabaseServerClient } from "@/lib/supabase/server";
+
+// ── Facturación fiscal (AFIP) ─────────────────────────────────────
+
+export type FiscalSummary = {
+  invoicedCents: number; // total autorizado (facturado)
+  ivaCents: number; // IVA generado
+  netSalesCents: number; // ventas del período (base de comparación)
+  invoicedRatePct: number | null; // facturado / ventas
+  authorizedCount: number;
+  pendingCount: number;
+  failedCount: number;
+};
+
+export async function getFiscalSummary(
+  businessId: string,
+  startIso: string,
+  endIso: string,
+): Promise<FiscalSummary> {
+  const supabase = await createSupabaseServerClient();
+
+  const [invoicesRes, ordersRes] = await Promise.all([
+    supabase
+      .from("invoices")
+      .select("total_cents, iva_cents, status")
+      .eq("business_id", businessId)
+      .gte("created_at", startIso)
+      .lt("created_at", endIso),
+    supabase
+      .from("orders")
+      .select("total_cents")
+      .eq("business_id", businessId)
+      .neq("status", "cancelled")
+      .gte("created_at", startIso)
+      .lt("created_at", endIso),
+  ]);
+
+  let invoicedCents = 0;
+  let ivaCents = 0;
+  let authorizedCount = 0;
+  let pendingCount = 0;
+  let failedCount = 0;
+
+  for (const inv of invoicesRes.data ?? []) {
+    const row = inv as {
+      total_cents: number;
+      iva_cents: number;
+      status: string;
+    };
+    if (row.status === "authorized") {
+      invoicedCents += Number(row.total_cents) || 0;
+      ivaCents += Number(row.iva_cents) || 0;
+      authorizedCount += 1;
+    } else if (row.status === "pending") {
+      pendingCount += 1;
+    } else if (row.status === "failed") {
+      failedCount += 1;
+    }
+  }
+
+  let netSalesCents = 0;
+  for (const o of ordersRes.data ?? []) {
+    netSalesCents += Number((o as { total_cents: number }).total_cents) || 0;
+  }
+
+  return {
+    invoicedCents,
+    ivaCents,
+    netSalesCents,
+    invoicedRatePct:
+      netSalesCents > 0 ? (invoicedCents / netSalesCents) * 100 : null,
+    authorizedCount,
+    pendingCount,
+    failedCount,
+  };
+}
+
+// ── Marketing ROI ─────────────────────────────────────────────────
+
+export type MarketingSummary = {
+  discountsCents: number; // total resignado en descuentos
+  ordersWithPromo: number;
+  revenueWithPromoCents: number;
+  campaignsSent: number;
+  campaignsRedeemed: number;
+  redemptionRatePct: number | null;
+};
+
+export async function getMarketingSummary(
+  businessId: string,
+  startIso: string,
+  endIso: string,
+): Promise<MarketingSummary> {
+  const supabase = await createSupabaseServerClient();
+
+  const [ordersRes, campaignsRes] = await Promise.all([
+    supabase
+      .from("orders")
+      .select("discount_cents, total_cents, promo_code_id")
+      .eq("business_id", businessId)
+      .neq("status", "cancelled")
+      .gte("created_at", startIso)
+      .lt("created_at", endIso),
+    supabase
+      .from("campaigns")
+      .select("sent_count, redeemed_count")
+      .eq("business_id", businessId)
+      .gte("created_at", startIso)
+      .lt("created_at", endIso),
+  ]);
+
+  let discountsCents = 0;
+  let ordersWithPromo = 0;
+  let revenueWithPromoCents = 0;
+  for (const o of ordersRes.data ?? []) {
+    const row = o as {
+      discount_cents: number | null;
+      total_cents: number;
+      promo_code_id: string | null;
+    };
+    discountsCents += Number(row.discount_cents) || 0;
+    if (row.promo_code_id) {
+      ordersWithPromo += 1;
+      revenueWithPromoCents += Number(row.total_cents) || 0;
+    }
+  }
+
+  let campaignsSent = 0;
+  let campaignsRedeemed = 0;
+  for (const c of campaignsRes.data ?? []) {
+    const row = c as { sent_count: number; redeemed_count: number };
+    campaignsSent += Number(row.sent_count) || 0;
+    campaignsRedeemed += Number(row.redeemed_count) || 0;
+  }
+
+  return {
+    discountsCents,
+    ordersWithPromo,
+    revenueWithPromoCents,
+    campaignsSent,
+    campaignsRedeemed,
+    redemptionRatePct:
+      campaignsSent > 0 ? (campaignsRedeemed / campaignsSent) * 100 : null,
+  };
+}
+
+// ── Tiempos de cocina por sector ──────────────────────────────────
+
+export type StationTiming = {
+  stationId: string;
+  stationName: string;
+  ticketCount: number; // comandas entregadas con tiempo medible
+  avgMinutes: number;
+  isBottleneck: boolean;
+};
+
+export type StationTimings = {
+  stations: StationTiming[];
+  overallAvgMinutes: number;
+};
+
+export async function getStationTimings(
+  businessId: string,
+  startIso: string,
+  endIso: string,
+): Promise<StationTimings> {
+  const supabase = await createSupabaseServerClient();
+
+  const { data } = await supabase
+    .from("comandas")
+    .select(
+      "station_id, emitted_at, delivered_at, stations(name), orders!inner(business_id, created_at)",
+    )
+    .eq("orders.business_id", businessId)
+    .gte("orders.created_at", startIso)
+    .lt("orders.created_at", endIso)
+    .not("delivered_at", "is", null);
+
+  const agg = new Map<
+    string,
+    { name: string; sum: number; count: number }
+  >();
+  let totalSum = 0;
+  let totalCount = 0;
+
+  for (const row of data ?? []) {
+    const r = row as {
+      station_id: string;
+      emitted_at: string;
+      delivered_at: string;
+      stations: { name: string } | { name: string }[] | null;
+    };
+    const emitted = new Date(r.emitted_at).getTime();
+    const delivered = new Date(r.delivered_at).getTime();
+    const minutes = (delivered - emitted) / 60000;
+    if (minutes <= 0 || minutes > 240) continue; // descartar outliers
+    const station = Array.isArray(r.stations) ? r.stations[0] : r.stations;
+    const name = station?.name ?? "Sin sector";
+    const existing = agg.get(r.station_id) ?? { name, sum: 0, count: 0 };
+    existing.sum += minutes;
+    existing.count += 1;
+    agg.set(r.station_id, existing);
+    totalSum += minutes;
+    totalCount += 1;
+  }
+
+  const stationsRaw = [...agg.entries()].map(([stationId, v]) => ({
+    stationId,
+    stationName: v.name,
+    ticketCount: v.count,
+    avgMinutes: v.count > 0 ? v.sum / v.count : 0,
+  }));
+
+  const maxAvg = stationsRaw.reduce((m, s) => Math.max(m, s.avgMinutes), 0);
+  const stations: StationTiming[] = stationsRaw
+    .map((s) => ({ ...s, isBottleneck: s.avgMinutes === maxAvg && maxAvg > 0 }))
+    .sort((a, b) => b.avgMinutes - a.avgMinutes);
+
+  return {
+    stations,
+    overallAvgMinutes: totalCount > 0 ? totalSum / totalCount : 0,
+  };
+}

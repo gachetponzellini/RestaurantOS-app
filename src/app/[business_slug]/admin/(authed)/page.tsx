@@ -3,9 +3,12 @@ import Link from "next/link";
 import {
   ArrowUpRight,
   CircleDollarSign,
+  Coins,
   Flame,
+  HandCoins,
   Receipt,
   Timer,
+  Trash2,
   Users,
   Wallet,
 } from "lucide-react";
@@ -13,7 +16,9 @@ import {
 import { ChannelDonut } from "@/components/admin/dashboard/channel-donut";
 import { DailyMenuPreview } from "@/components/admin/dashboard/daily-menu-preview";
 import { DashboardHeader } from "@/components/admin/dashboard/dashboard-header";
+import { HealthGauges } from "@/components/admin/dashboard/health-gauges";
 import { HourlyHeatmap } from "@/components/admin/dashboard/hourly-heatmap";
+import { PaymentMixDonut } from "@/components/admin/dashboard/payment-mix-donut";
 import { RecentOrders } from "@/components/admin/dashboard/recent-orders";
 import { RevenueChart } from "@/components/admin/dashboard/revenue-chart";
 import { SalonStatsSection } from "@/components/admin/dashboard/salon-stats";
@@ -24,7 +29,10 @@ import { ensureAdminAccess } from "@/lib/admin/context";
 import { getAdminDailyMenus } from "@/lib/admin/daily-menu-query";
 import {
   getDashboardOverview,
+  getDashboardProfit,
   getHourlyHeatmap,
+  getPaymentMix,
+  getTipsToday,
 } from "@/lib/admin/dashboard-query";
 import { getTodayOrders } from "@/lib/admin/orders-query";
 import { getSalonStats } from "@/lib/admin/reports-query";
@@ -61,13 +69,17 @@ export default async function AdminDashboardPage({
 
   const ctx = await ensureAdminAccess(business.id, business_slug);
 
-  const [overview, heatmap, menus, orders, salon] = await Promise.all([
-    getDashboardOverview(business.id, business.timezone),
-    getHourlyHeatmap(business.id, business.timezone),
-    getAdminDailyMenus(business.id),
-    getTodayOrders(business.id, business.timezone),
-    getSalonStats(business.id, business.timezone),
-  ]);
+  const [overview, heatmap, menus, orders, salon, profit, paymentMix, tipsToday] =
+    await Promise.all([
+      getDashboardOverview(business.id, business.timezone),
+      getHourlyHeatmap(business.id, business.timezone),
+      getAdminDailyMenus(business.id),
+      getTodayOrders(business.id, business.timezone),
+      getSalonStats(business.id, business.timezone),
+      getDashboardProfit(business.id, business.timezone),
+      getPaymentMix(business.id, business.timezone),
+      getTipsToday(business.id, business.timezone),
+    ]);
 
   const todayDow = currentDayOfWeek(business.timezone);
 
@@ -136,6 +148,35 @@ export default async function AdminDashboardPage({
         />
       </section>
 
+      <HealthGauges
+        foodCostPct={profit.foodCostPct}
+        grossMarginPct={profit.grossMarginPct}
+        grossMarginCents={profit.grossMarginCents}
+        hasCostData={profit.hasCostData}
+      />
+
+      <section className="grid gap-4 md:grid-cols-3">
+        <StatTile
+          eyebrow="CMV · 30 días"
+          value={formatCurrency(profit.foodCostCents)}
+          sub="costo de mercadería vendida"
+          icon={<Coins className="size-4" strokeWidth={1.75} />}
+        />
+        <StatTile
+          eyebrow="Merma · 30 días"
+          value={formatCurrency(profit.mermaCents)}
+          sub="insumos perdidos"
+          icon={<Trash2 className="size-4" strokeWidth={1.75} />}
+        />
+        <StatTile
+          eyebrow="Propinas hoy"
+          value={formatCurrency(tipsToday)}
+          sub="cobradas al personal"
+          icon={<HandCoins className="size-4" strokeWidth={1.75} />}
+          accent="dark"
+        />
+      </section>
+
       <section className="grid gap-5 lg:grid-cols-5">
         <div className="lg:col-span-3">
           <RevenueChart data={overview.month.dailyRevenue} />
@@ -153,19 +194,17 @@ export default async function AdminDashboardPage({
         <SalonStatsSection data={salon} />
       ) : null}
 
-      <section className="grid gap-5 lg:grid-cols-5">
-        <div className="lg:col-span-3">
-          <HourlyHeatmap
-            cells={heatmap.cells}
-            maxCount={heatmap.maxCount}
-            totalOrders={heatmap.totalOrders}
-            rangeDays={heatmap.rangeDays}
-          />
-        </div>
-        <div className="lg:col-span-2">
-          <ChannelDonut data={overview.channelBreakdown} rangeDays={30} />
-        </div>
+      <section className="grid gap-5 lg:grid-cols-2">
+        <ChannelDonut data={overview.channelBreakdown} rangeDays={30} />
+        <PaymentMixDonut data={paymentMix} />
       </section>
+
+      <HourlyHeatmap
+        cells={heatmap.cells}
+        maxCount={heatmap.maxCount}
+        totalOrders={heatmap.totalOrders}
+        rangeDays={heatmap.rangeDays}
+      />
 
       <section className="grid gap-5 lg:grid-cols-5">
         <div className="lg:col-span-3">

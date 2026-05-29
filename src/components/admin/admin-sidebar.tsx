@@ -7,7 +7,7 @@ import { useEffect, useRef, useState } from "react";
 import { Menu } from "@base-ui/react/menu";
 import {
   ArrowLeft,
-  // BarChart3,
+  BarChart3,
   CalendarDays,
   Clock,
   History,
@@ -108,12 +108,12 @@ function buildNav(slug: string, showBusinessTools: boolean): NavItem[] {
     //   icon: <Megaphone className="size-5" strokeWidth={1.75} />,
     //   match: (p) => p.startsWith(`${adminBase}/campanas`),
     // },
-    // {
-    //   href: `${adminBase}/reportes`,
-    //   label: "Reportes",
-    //   icon: <BarChart3 className="size-5" strokeWidth={1.75} />,
-    //   match: (p) => p.startsWith(`${adminBase}/reportes`),
-    // },
+    {
+      href: `${adminBase}/reportes`,
+      label: "Reportes",
+      icon: <BarChart3 className="size-5" strokeWidth={1.75} />,
+      match: (p) => p.startsWith(`${adminBase}/reportes`),
+    },
     {
       href: `${adminBase}/chatbot`,
       label: "Chatbot",
