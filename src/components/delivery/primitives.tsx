@@ -48,7 +48,7 @@ export function StatusDot({ status }: { status: "open" | "busy" | "closed" }) {
       ? "var(--fresh)"
       : status === "busy"
         ? "#C78A3B"
-        : "#999";
+        : "#B94A2A";
   const label =
     status === "open" ? "Abierto" : status === "busy" ? "Demorado" : "Cerrado";
   return (

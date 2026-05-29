@@ -1,5 +1,6 @@
 import { notFound, redirect } from "next/navigation";
 
+import { OrderStatusPoller } from "@/components/checkout/order-status-poller";
 import { OrderTracking } from "@/components/checkout/order-tracking";
 import { PaymentBanner } from "@/components/checkout/payment-banner";
 import { PaymentStatusPoller } from "@/components/checkout/payment-status-poller";
@@ -113,6 +114,7 @@ export default async function ConfirmacionPage({
         paymentStatus={order.payment_status}
         paymentMethod={order.payment_method}
       />
+      <OrderStatusPoller status={order.status} />
       <div style={{ maxWidth: 520, margin: "0 auto" }}>
         <PaymentBanner
           slug={business_slug}
