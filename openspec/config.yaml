@@ -1,0 +1,118 @@
+# openspec/config.yaml — Spec-Driven Development config (gentle-ai)
+# ---------------------------------------------------------------------------
+# Contrato legible por máquina que gobierna cómo los agentes de IA trabajan en
+# este repo. El contexto narrativo vive en ../AGENTS.md; este archivo fija el
+# FLUJO (fases), las REGLAS por fase y los GATES. No dupliques narrativa acá.
+# ---------------------------------------------------------------------------
+
+schema: spec-driven
+version: 1
+language: es-AR            # specs, escenarios y proposals en español (AR)
+
+project:
+  name: RestaurantOS
+  package: pedidos          # nombre interno del paquete npm
+  domain: pedidos.com.ar    # dominio de producción
+  kind: saas-multitenant
+  anchor: AGENTS.md         # leer SIEMPRE antes de trabajar
+  overview: openspec/project.md
+  changes_index: openspec/changes/README.md
+
+# ── Contexto técnico mínimo (la verdad ampliada está en AGENTS.md) ──────────
+context:
+  stack:
+    framework: "Next.js 15.5 (App Router, Turbopack) · React 19 · TypeScript 5"
+    data: "Supabase (Postgres + RLS, Auth SSR @supabase/ssr, Google OAuth)"
+    ui: "Tailwind v4 · shadcn (Radix + @base-ui/react) · lucide-react · sonner · recharts · next-themes · @dnd-kit"
+    forms: "react-hook-form + Zod 4"
+    client_state: "Zustand (src/stores)"
+    payments: "Mercado Pago SDK (config por negocio en tabla businesses)"
+    invoicing: "AFIP/ARCA vía TusFacturas (src/lib/afip)"
+    chatbot: "LangChain (@langchain/anthropic, @langchain/openai)"
+    dates: "date-fns / date-fns-tz (timezone AR)"
+    pkg_manager: pnpm
+  architecture:
+    multitenancy: "rutas src/app/[business_slug]/… ; prod = subdominio, dev = path ; scope por business_id + RLS"
+    module_pattern: "src/lib/<dominio>/ → actions.ts (Server Actions) · queries.ts (reads) · types.ts/schema.ts (Zod) · lógica pura testeable · *.test.ts / *.integration.test.ts co-ubicados"
+    data_changes: "toda feature de datos = nueva migración numerada supabase/migrations/00NN_*.sql + policies RLS ; regenerar tipos con `pnpm db:types`"
+  style:
+    money: "centavos (*_cents); formateo vía src/lib/currency.ts"
+    timezone: "AR vía date-fns-tz; nunca Date naïve para turnos/caja"
+    permissions: "centralizados en src/lib/permissions/can.ts (dueño/admin, encargado, mozo, personal)"
+    mutations: "solo en Server Actions (actions.ts), validadas con Zod; nunca escritura desde cliente"
+    realtime: "Supabase channels para pedidos/comandas/mesas"
+
+# ── Testing & verificación ──────────────────────────────────────────────────
+testing:
+  runner:
+    command: "pnpm test"        # == vitest run
+    watch: "pnpm test:watch"
+  typecheck: "pnpm typecheck"   # tsc --noEmit
+  lint: "pnpm lint"
+  convention: "lógica de dominio pura → unidad (*.test.ts); flujos con DB → *.integration.test.ts (co-ubicados)"
+  gate: "todo cambio debe dejar `pnpm typecheck` y `pnpm test` en verde antes de cerrar"
+
+strict_tdd: true              # para lógica de negocio nueva: test (rojo) → impl → verde → refactor
+
+# ── Flujo SDD: fases y reglas ───────────────────────────────────────────────
+phases:
+  - explore
+  - propose
+  - spec
+  - design        # condicional (ver gates)
+  - tasks
+  - apply
+  - verify
+  - archive
+
+gates:
+  approval_gate:
+    description: "No se escribe código de producción hasta que proposal.md + spec.md estén aprobados."
+    before_phase: apply
+  design_required_when:
+    - "el cambio toca una máquina de estados o el flujo de comandas/estados de pedido"
+    - "el cambio cruza ≥2 módulos de dominio o cambia contratos entre ellos"
+    - "el cambio toca dinero real: pagos, propina, caja, facturación ARCA"
+    - "el cambio afecta multi-tenancy, RLS o deploy on-site"
+
+rules:
+  explore:
+    - "Leé AGENTS.md y este config antes de tocar nada."
+    - "Leé el módulo real afectado (actions.ts/queries.ts/migración) — el sistema ya está muy avanzado (migraciones 0001–0051); la mayoría de los cambios son refinamientos, no greenfield."
+    - "Recuperá memoria/decisiones previas si están disponibles. No re-litigues decisiones ya tomadas en la reunión."
+  propose:
+    - "proposal.md responde: Por qué (problema/decisión de la reunión), Qué cambia, Alcance e fuera-de-alcance, Impacto (archivos/migraciones/RLS reales), Riesgos, Preguntas abiertas."
+    - "Referenciá rutas REALES del repo (src/lib/<dominio>/…, supabase/migrations/00NN). Nada de paths inventados."
+  spec:
+    - "spec.md describe requisitos verificables agrupados por capability."
+    - "Cada requisito lleva ≥1 escenario en español, formato Dado / Cuando / Entonces (Given/When/Then)."
+    - "Usá los marcadores ## ADDED / ## MODIFIED / ## REMOVED Requirements para distinguir lo nuevo de lo que cambia sobre el comportamiento actual."
+    - "Sé explícito con permisos (quién puede), scope multi-tenant (business_id/RLS) y dinero en centavos."
+  design:
+    - "Sólo si aplica un gate. Documentá: contexto, opciones consideradas, decisión, trade-offs, impacto en datos (migración/policies) y en máquinas de estado."
+  tasks:
+    - "tasks.md = checklist ordenada y chica, en TDD. Primero el/los test(s) que fallan, luego la implementación, luego verify (typecheck+test)."
+    - "Incluí explícitamente: migración + RLS (si toca datos), regenerar tipos, y actualización de permisos si corresponde."
+  apply:
+    - "Seguí los patrones de §3/§5 de AGENTS.md. Mutaciones en Server Actions; validación Zod en el borde."
+    - "No expongas SUPABASE_SERVICE_ROLE_KEY ni secretos al cliente. Secretos nunca en chat ni en commits; enmascarar al pedir output."
+  verify:
+    - "Corré `pnpm typecheck` y `pnpm test`. Revisión fresca de los archivos tocados antes de cerrar."
+  archive:
+    - "Marcá el cambio como aplicado en openspec/changes/README.md. Si el comportamiento ahora es la verdad vigente, reflejalo."
+
+# ── Estructura de un cambio ─────────────────────────────────────────────────
+change_layout:
+  dir: "openspec/changes/<NN-id>/"
+  files:
+    proposal.md: required
+    spec.md: required
+    tasks.md: required
+    design.md: "condicional (ver gates.design_required_when)"
+  id_format: "NN-kebab-case (NN = orden de prioridad de 2 dígitos)"
+
+conventions:
+  scenario_format: "Dado / Cuando / Entonces"
+  requirement_markers: ["ADDED", "MODIFIED", "REMOVED"]
+  no_invented_paths: true
+  source_of_truth_backlog: "../RestaurantOS_Reunion/Reunion_Demo_RestaurantOS.md"
