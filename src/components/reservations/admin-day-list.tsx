@@ -4,12 +4,13 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useMemo, useState, useTransition } from "react";
 import { formatInTimeZone } from "date-fns-tz";
-import { CalendarPlus, Search, X } from "lucide-react";
+import { CalendarPlus, Check, Clock, Pencil, Search, UserPlus, X } from "lucide-react";
 import { toast } from "sonner";
 
 import { NewReservationModal } from "@/components/admin/local/new-reservation-modal";
 import {
   sentarReserva,
+  updateReservationDetails,
   updateReservationStatus,
 } from "@/lib/reservations/booking-actions";
 import type {
@@ -204,6 +205,27 @@ export function AdminDayList({
       });
       if (result.ok) {
         toast.success("Estado actualizado.");
+        router.refresh();
+      } else {
+        toast.error(result.error);
+      }
+    });
+  }
+
+  function handleUpdateDetails(
+    reservationId: string,
+    tableId: string,
+    partySize: number,
+  ) {
+    start(async () => {
+      const result = await updateReservationDetails({
+        business_slug: slug,
+        reservation_id: reservationId,
+        table_id: tableId,
+        party_size: partySize,
+      });
+      if (result.ok) {
+        toast.success("Reserva actualizada.");
         router.refresh();
       } else {
         toast.error(result.error);
@@ -475,6 +497,8 @@ export function AdminDayList({
               timezone={timezone}
               pending={pending}
               multiSalon={multiSalon}
+              activeTables={activeTables}
+              floorPlans={floorPlans}
               onSentar={() => handleSentar(r.id)}
               onComplete={() => handleChangeStatus(r.id, "completed")}
               onNoShow={() =>
@@ -490,6 +514,9 @@ export function AdminDayList({
                   status: "cancelled",
                   customerName: r.customer_name,
                 })
+              }
+              onUpdateDetails={(tableId, partySize) =>
+                handleUpdateDetails(r.id, tableId, partySize)
               }
             />
           ))}
@@ -617,19 +644,25 @@ function ReservationRow({
   timezone,
   pending,
   multiSalon,
+  activeTables,
+  floorPlans,
   onSentar,
   onComplete,
   onNoShow,
   onCancel,
+  onUpdateDetails,
 }: {
   row: AdminRow;
   timezone: string;
   pending: boolean;
   multiSalon: boolean;
+  activeTables: FloorTable[];
+  floorPlans: Array<{ id: string; name: string }>;
   onSentar: () => void;
   onComplete: () => void;
   onNoShow: () => void;
   onCancel: () => void;
+  onUpdateDetails: (tableId: string, partySize: number) => void;
 }) {
   const timeStart = formatInTimeZone(
     new Date(row.starts_at),
@@ -646,6 +679,29 @@ function ReservationRow({
   );
   const salonName = row.tables?.floor_plans?.name ?? null;
   const ago = timeAgo(row.created_at);
+
+  // Build floor_plan lookup for table labels
+  const floorPlanMap = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const fp of floorPlans) map.set(fp.id, fp.name);
+    return map;
+  }, [floorPlans]);
+
+  const [editing, setEditing] = useState(false);
+  const [editPartySize, setEditPartySize] = useState(row.party_size);
+  const [editTableId, setEditTableId] = useState(row.table_id ?? "");
+
+  function openEdit() {
+    setEditPartySize(row.party_size);
+    setEditTableId(row.table_id ?? "");
+    setEditing(true);
+  }
+
+  function handleSave() {
+    if (!editTableId) return;
+    onUpdateDetails(editTableId, editPartySize);
+    setEditing(false);
+  }
 
   return (
     <li
@@ -731,62 +787,126 @@ function ReservationRow({
         </span>
 
         {/* Actions */}
-        <div className="flex flex-wrap items-center gap-1.5">
-          {row.status === "confirmed" && (
+        <div className="flex flex-wrap items-center gap-2">
+          {row.status === "confirmed" && !editing && (
             <>
-              <ActionPill onClick={onSentar} disabled={pending} tone="primary">
+              <button
+                type="button"
+                onClick={onSentar}
+                disabled={pending}
+                className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-emerald-600 px-3.5 text-xs font-semibold text-white shadow-sm transition hover:bg-emerald-700 active:scale-[0.97] disabled:opacity-60"
+              >
+                <UserPlus className="h-3.5 w-3.5" />
                 Sentar
-              </ActionPill>
-              <ActionPill onClick={onNoShow} disabled={pending}>
+              </button>
+              <button
+                type="button"
+                onClick={openEdit}
+                disabled={pending}
+                className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-zinc-100 px-3 text-xs font-semibold text-zinc-700 ring-1 ring-zinc-200 transition hover:bg-zinc-200 active:scale-[0.97] disabled:opacity-60"
+              >
+                <Pencil className="h-3.5 w-3.5" />
+                Editar
+              </button>
+              <button
+                type="button"
+                onClick={onNoShow}
+                disabled={pending}
+                className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-amber-50 px-3 text-xs font-semibold text-amber-800 ring-1 ring-amber-200 transition hover:bg-amber-100 active:scale-[0.97] disabled:opacity-60"
+              >
+                <Clock className="h-3.5 w-3.5" />
                 No vino
-              </ActionPill>
-              <ActionPill onClick={onCancel} disabled={pending} tone="danger">
+              </button>
+              <button
+                type="button"
+                onClick={onCancel}
+                disabled={pending}
+                className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-rose-50 px-3 text-xs font-semibold text-rose-700 ring-1 ring-rose-200 transition hover:bg-rose-100 active:scale-[0.97] disabled:opacity-60"
+              >
+                <X className="h-3.5 w-3.5" />
                 Cancelar
-              </ActionPill>
+              </button>
             </>
           )}
           {row.status === "seated" && (
-            <ActionPill onClick={onComplete} disabled={pending} tone="primary">
+            <button
+              type="button"
+              onClick={onComplete}
+              disabled={pending}
+              className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-emerald-600 px-3.5 text-xs font-semibold text-white shadow-sm transition hover:bg-emerald-700 active:scale-[0.97] disabled:opacity-60"
+            >
+              <Check className="h-3.5 w-3.5" />
               Completar
-            </ActionPill>
+            </button>
           )}
         </div>
       </div>
-    </li>
-  );
-}
 
-/* ─── Action Pill ────────────────────────────────────────────────────────── */
-
-function ActionPill({
-  children,
-  onClick,
-  disabled,
-  tone = "ghost",
-}: {
-  children: React.ReactNode;
-  onClick: () => void;
-  disabled?: boolean;
-  tone?: "ghost" | "primary" | "danger";
-}) {
-  const styles =
-    tone === "primary"
-      ? "bg-zinc-900 text-white ring-zinc-900 hover:bg-zinc-800"
-      : tone === "danger"
-        ? "bg-white text-rose-700 ring-rose-200 hover:bg-rose-50"
-        : "bg-white text-zinc-700 ring-zinc-200 hover:bg-zinc-50";
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      className={cn(
-        "inline-flex h-7 items-center rounded-full px-3 text-[11px] font-medium uppercase tracking-[0.12em] ring-1 transition active:scale-[0.97] disabled:opacity-50",
-        styles,
+      {/* ── Inline edit panel ─────────────────────────────────────────── */}
+      {editing && (
+        <div className="mt-3 flex flex-wrap items-end gap-3 rounded-xl bg-zinc-50 p-3 ring-1 ring-zinc-200/60">
+          <div>
+            <label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-[0.14em] text-zinc-500">
+              Comensales
+            </label>
+            <input
+              type="number"
+              min={1}
+              max={100}
+              value={editPartySize}
+              onChange={(e) => {
+                const v = parseInt(e.target.value, 10);
+                if (!Number.isNaN(v) && v >= 1) setEditPartySize(v);
+              }}
+              className="h-9 w-16 rounded-xl border-0 bg-white px-2 text-center text-sm font-semibold tabular-nums text-zinc-900 ring-1 ring-zinc-200 focus:outline-none focus:ring-2 focus:ring-emerald-300"
+            />
+          </div>
+          <div className="min-w-0 flex-1">
+            <label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-[0.14em] text-zinc-500">
+              Mesa
+            </label>
+            <select
+              value={editTableId}
+              onChange={(e) => setEditTableId(e.target.value)}
+              className="h-9 w-full max-w-[240px] rounded-xl border-0 bg-white px-2.5 text-sm font-medium text-zinc-900 ring-1 ring-zinc-200 focus:outline-none focus:ring-2 focus:ring-emerald-300"
+            >
+              {!editTableId && (
+                <option value="" disabled>
+                  Elegir mesa…
+                </option>
+              )}
+              {activeTables.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.label} ({t.seats}p)
+                  {multiSalon
+                    ? ` — ${floorPlanMap.get(t.floor_plan_id) ?? ""}`
+                    : ""}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={handleSave}
+              disabled={pending || !editTableId}
+              className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-zinc-900 px-4 text-xs font-semibold text-white shadow-sm transition hover:bg-zinc-800 active:scale-[0.97] disabled:opacity-50"
+            >
+              <Check className="h-3.5 w-3.5" />
+              Guardar
+            </button>
+            <button
+              type="button"
+              onClick={() => setEditing(false)}
+              disabled={pending}
+              className="inline-flex h-9 items-center rounded-xl bg-white px-3 text-xs font-semibold text-zinc-600 ring-1 ring-zinc-200 transition hover:bg-zinc-100 active:scale-[0.97] disabled:opacity-50"
+            >
+              Cancelar
+            </button>
+          </div>
+        </div>
       )}
-    >
-      {children}
-    </button>
+    </li>
   );
 }
 

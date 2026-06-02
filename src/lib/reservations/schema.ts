@@ -106,6 +106,15 @@ export const CancelOwnReservationInputSchema = z.object({
   id: z.string().uuid(),
 });
 
+export const UpdateReservationDetailsInputSchema = z.object({
+  business_slug: z.string().min(1),
+  reservation_id: z.string().uuid(),
+  table_id: z.string().uuid(),
+  party_size: z.coerce.number().int().min(1).max(100),
+});
+
+export type UpdateReservationDetailsInput = z.infer<typeof UpdateReservationDetailsInputSchema>;
+
 export const AvailabilityQuerySchema = z.object({
   business_slug: z.string().min(1),
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Fecha inválida (YYYY-MM-DD)"),

@@ -44,6 +44,36 @@ export function pickTable(params: AssignTableParams): FloorTable | null {
   return null;
 }
 
+export type IsTableAvailableParams = {
+  tableId: string;
+  reservations: Pick<Reservation, "id" | "table_id" | "starts_at" | "ends_at" | "status">[];
+  windowStart: Date;
+  windowEnd: Date;
+  bufferMs?: number;
+  /** When re-assigning a reservation, exclude it from the conflict check
+   *  so it doesn't conflict with itself. */
+  excludeReservationId?: string;
+};
+
+/**
+ * Check whether a specific table is free for the given time window.
+ * Used by `updateReservationTable` to pre-validate before hitting the DB.
+ * The DB exclusion constraint is still the source of truth.
+ */
+export function isTableAvailableForReservation(params: IsTableAvailableParams): boolean {
+  const { tableId, reservations, windowStart, windowEnd, bufferMs = 0, excludeReservationId } = params;
+
+  const conflict = reservations.some((r) => {
+    if (r.table_id !== tableId) return false;
+    if (!LIVE_RESERVATION_STATUSES.includes(r.status)) return false;
+    if (excludeReservationId && r.id === excludeReservationId) return false;
+    const rs = new Date(r.starts_at);
+    const re = new Date(new Date(r.ends_at).getTime() + bufferMs);
+    return rs < windowEnd && windowStart < re;
+  });
+  return !conflict;
+}
+
 /**
  * Same shape as pickTable but excludes a set of table ids that the caller
  * already tried (and lost the race for). Used to drive retries after a

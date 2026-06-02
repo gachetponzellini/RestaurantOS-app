@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { pickTable, pickTableExcluding } from "./assign-table";
+import { isTableAvailableForReservation, pickTable, pickTableExcluding } from "./assign-table";
 import type { FloorTable, Reservation } from "./types";
 
 function makeTable(id: string, seats: number, status: "active" | "disabled" = "active"): FloorTable {
@@ -135,5 +135,118 @@ describe("pickTableExcluding", () => {
       new Set(["a", "b"]),
     );
     expect(result?.id).toBe("c");
+  });
+});
+
+describe("isTableAvailableForReservation", () => {
+  const windowStart = new Date("2026-04-21T20:00:00Z");
+  const windowEnd = new Date("2026-04-21T22:00:00Z");
+
+  function makeReservation(
+    overrides: Partial<Pick<Reservation, "table_id" | "starts_at" | "ends_at" | "status" | "id">>,
+  ): Pick<Reservation, "table_id" | "starts_at" | "ends_at" | "status" | "id"> {
+    return {
+      id: "r-default",
+      table_id: "a",
+      starts_at: "2026-04-21T19:00:00Z",
+      ends_at: "2026-04-21T20:30:00Z",
+      status: "confirmed",
+      ...overrides,
+    };
+  }
+
+  it("returns true when the table has no reservations in the window", () => {
+    const result = isTableAvailableForReservation({
+      tableId: "a",
+      reservations: [],
+      windowStart,
+      windowEnd,
+      bufferMs: 0,
+    });
+    expect(result).toBe(true);
+  });
+
+  it("returns false when a live reservation overlaps the window", () => {
+    const result = isTableAvailableForReservation({
+      tableId: "a",
+      reservations: [makeReservation({ table_id: "a", status: "confirmed" })],
+      windowStart,
+      windowEnd,
+      bufferMs: 0,
+    });
+    expect(result).toBe(false);
+  });
+
+  it("returns false when overlap happens due to buffer", () => {
+    // Reservation ends at 19:46 — no raw overlap with 20:00–22:00,
+    // but with 15 min buffer (900_000ms) the effective end is 20:01 → overlaps.
+    const result = isTableAvailableForReservation({
+      tableId: "a",
+      reservations: [
+        makeReservation({
+          table_id: "a",
+          starts_at: "2026-04-21T18:00:00Z",
+          ends_at: "2026-04-21T19:46:00Z",
+          status: "confirmed",
+        }),
+      ],
+      windowStart,
+      windowEnd,
+      bufferMs: 15 * 60_000,
+    });
+    expect(result).toBe(false);
+  });
+
+  it("ignores cancelled reservations on the table", () => {
+    const result = isTableAvailableForReservation({
+      tableId: "a",
+      reservations: [makeReservation({ table_id: "a", status: "cancelled" })],
+      windowStart,
+      windowEnd,
+      bufferMs: 0,
+    });
+    expect(result).toBe(true);
+  });
+
+  it("ignores no_show reservations on the table", () => {
+    const result = isTableAvailableForReservation({
+      tableId: "a",
+      reservations: [makeReservation({ table_id: "a", status: "no_show" })],
+      windowStart,
+      windowEnd,
+      bufferMs: 0,
+    });
+    expect(result).toBe(true);
+  });
+
+  it("ignores reservations on a different table", () => {
+    const result = isTableAvailableForReservation({
+      tableId: "a",
+      reservations: [makeReservation({ table_id: "b", status: "confirmed" })],
+      windowStart,
+      windowEnd,
+      bufferMs: 0,
+    });
+    expect(result).toBe(true);
+  });
+
+  it("excludes the reservation being moved (excludeReservationId)", () => {
+    const result = isTableAvailableForReservation({
+      tableId: "a",
+      reservations: [
+        makeReservation({
+          id: "r-moving",
+          table_id: "a",
+          starts_at: "2026-04-21T20:00:00Z",
+          ends_at: "2026-04-21T22:00:00Z",
+          status: "confirmed",
+        }),
+      ],
+      windowStart,
+      windowEnd,
+      bufferMs: 0,
+      excludeReservationId: "r-moving",
+    });
+    expect(result).toBe(true);
   });
 });

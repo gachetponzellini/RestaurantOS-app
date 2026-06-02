@@ -5,7 +5,7 @@ import { fromZonedTime } from "date-fns-tz";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { actionError, actionOk, type ActionResult } from "@/lib/actions";
-import { pickTableExcluding } from "@/lib/reservations/assign-table";
+import { isTableAvailableForReservation, pickTableExcluding } from "@/lib/reservations/assign-table";
 import {
   getBusinessTables,
   getReservationSettings,
@@ -16,6 +16,7 @@ import {
   CancelOwnReservationInputSchema,
   CreateReservationInputSchema,
   SentarReservaInputSchema,
+  UpdateReservationDetailsInputSchema,
   UpdateReservationStatusInputSchema,
 } from "@/lib/reservations/schema";
 import { openTable } from "@/lib/mozo/open-table";
@@ -439,6 +440,125 @@ export async function sentarReserva(
   revalidatePath(`/${slug}/admin/reservas`);
   revalidatePath(`/${slug}/mozo`);
   return actionOk({ orderId: openResult.data.orderId });
+}
+
+/**
+ * Actualizar mesa y/o comensales de una reserva confirmada — atómico.
+ * Solo admin/encargado/plataforma. Valida todo cruzado: capacidad de la mesa
+ * para el nuevo party_size, solape con otras reservas, cross-tenant, etc.
+ * Fuente de verdad de solape: constraint de exclusión en la DB (23P01).
+ */
+export async function updateReservationDetails(
+  input: unknown,
+): Promise<ActionResult<null>> {
+  const parsed = UpdateReservationDetailsInputSchema.safeParse(input);
+  if (!parsed.success) return actionError("Datos inválidos.");
+
+  const supabase = await createSupabaseServerClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return actionError("No autenticado.");
+
+  const business = await getBusiness(parsed.data.business_slug);
+  if (!business) return actionError("Negocio no encontrado.");
+  if (!(await assertCanManage(business.id, user.id))) {
+    return actionError("Permiso denegado.");
+  }
+
+  const settings = await getReservationSettings(business.id, { useService: true });
+  if (parsed.data.party_size > settings.max_party_size) {
+    return actionError(`El máximo es ${settings.max_party_size} comensales.`);
+  }
+
+  const service = createSupabaseServiceClient() as unknown as GenericClient;
+
+  // Fetch reservation + validate state.
+  const { data: reservationRow } = await service
+    .from("reservations")
+    .select("id, table_id, party_size, starts_at, ends_at, status")
+    .eq("id", parsed.data.reservation_id)
+    .eq("business_id", business.id)
+    .maybeSingle();
+  if (!reservationRow) return actionError("Reserva no encontrada.");
+  const reservation = reservationRow as {
+    id: string; table_id: string | null; party_size: number;
+    starts_at: string; ends_at: string; status: string;
+  };
+  if (reservation.status !== "confirmed") {
+    return actionError("Solo se pueden editar reservas confirmadas.");
+  }
+
+  const newPartySize = parsed.data.party_size;
+  const newTableId = parsed.data.table_id;
+
+  // Fetch target table + cross-tenant validation via floor_plans.
+  const { data: tableRow } = await service
+    .from("tables")
+    .select("id, label, seats, status, floor_plans!inner(business_id)")
+    .eq("id", newTableId)
+    .maybeSingle();
+  if (!tableRow) return actionError("Mesa no encontrada.");
+  const fpRaw = (tableRow as unknown as { floor_plans: unknown }).floor_plans;
+  const fp = Array.isArray(fpRaw)
+    ? (fpRaw[0] as { business_id: string } | undefined)
+    : (fpRaw as { business_id: string } | null);
+  if (!fp || fp.business_id !== business.id) {
+    return actionError("Mesa no encontrada.");
+  }
+  const table = tableRow as { id: string; label: string; seats: number; status: string };
+  if (table.status !== "active") {
+    return actionError("La mesa está deshabilitada.");
+  }
+  // Cross-validate: new party_size against new table capacity.
+  if (table.seats < newPartySize) {
+    return actionError(
+      `La mesa "${table.label}" tiene ${table.seats} lugares para ${newPartySize} comensales.`,
+    );
+  }
+
+  // Pre-check overlap (only when table changes).
+  const tableChanged = newTableId !== reservation.table_id;
+  if (tableChanged) {
+    const bufferMs = settings.buffer_min * 60_000;
+    const windowStart = new Date(reservation.starts_at);
+    const windowEnd = new Date(reservation.ends_at);
+    const lookupStart = new Date(windowStart.getTime() - bufferMs);
+    const lookupEnd = new Date(windowEnd.getTime() + bufferMs);
+    const reservations = await getReservationsInRange(
+      business.id,
+      lookupStart.toISOString(),
+      lookupEnd.toISOString(),
+      { useService: true },
+    );
+
+    const available = isTableAvailableForReservation({
+      tableId: table.id,
+      reservations,
+      windowStart,
+      windowEnd,
+      bufferMs,
+      excludeReservationId: reservation.id,
+    });
+    if (!available) {
+      return actionError("La mesa ya está reservada en ese horario.");
+    }
+  }
+
+  // Atomic update.
+  const { error } = await service
+    .from("reservations")
+    .update({ table_id: newTableId, party_size: newPartySize })
+    .eq("id", reservation.id)
+    .eq("business_id", business.id);
+  if (error) {
+    if ((error as { code?: string }).code === EXCLUSION_VIOLATION) {
+      return actionError("La mesa ya está reservada en ese horario.");
+    }
+    console.error("updateReservationDetails", error);
+    return actionError("No pudimos actualizar la reserva.");
+  }
+
+  revalidatePath(`/${parsed.data.business_slug}/admin/reservas`);
+  return actionOk(null);
 }
 
 export async function cancelOwnReservation(
