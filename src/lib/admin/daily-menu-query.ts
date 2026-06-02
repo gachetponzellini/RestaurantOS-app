@@ -26,11 +26,13 @@ export type AdminDailyMenu = {
   is_active: boolean;
   is_available: boolean;
   sort_order: number;
+  display_context: "delivery" | "salon" | "both";
+  is_suggestion: boolean;
   components: AdminDailyMenuComponent[];
 };
 
 const SELECT =
-  "id, name, slug, description, price_cents, image_url, available_days, is_active, is_available, sort_order, daily_menu_components(id, label, description, sort_order, kind, product_id, choice_group_id, choice_group_label, products(id, name, image_url))";
+  "id, name, slug, description, price_cents, image_url, available_days, is_active, is_available, sort_order, display_context, is_suggestion, daily_menu_components(id, label, description, sort_order, kind, product_id, choice_group_id, choice_group_label, products(id, name, image_url))";
 
 function mapRow(
   row: {
@@ -44,6 +46,8 @@ function mapRow(
     is_active: boolean;
     is_available: boolean;
     sort_order: number;
+    display_context: string;
+    is_suggestion: boolean;
     daily_menu_components:
       | {
           id: string;
@@ -70,6 +74,8 @@ function mapRow(
     is_active: row.is_active,
     is_available: row.is_available,
     sort_order: row.sort_order,
+    display_context: row.display_context as "delivery" | "salon" | "both",
+    is_suggestion: row.is_suggestion,
     components: (row.daily_menu_components ?? [])
       .slice()
       .sort((a, b) => a.sort_order - b.sort_order)

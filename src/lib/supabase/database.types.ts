@@ -974,10 +974,12 @@ export type Database = {
           business_id: string
           created_at: string
           description: string | null
+          display_context: string
           id: string
           image_url: string | null
           is_active: boolean
           is_available: boolean
+          is_suggestion: boolean
           name: string
           price_cents: number
           slug: string
@@ -989,10 +991,12 @@ export type Database = {
           business_id: string
           created_at?: string
           description?: string | null
+          display_context?: string
           id?: string
           image_url?: string | null
           is_active?: boolean
           is_available?: boolean
+          is_suggestion?: boolean
           name: string
           price_cents: number
           slug: string
@@ -1004,10 +1008,12 @@ export type Database = {
           business_id?: string
           created_at?: string
           description?: string | null
+          display_context?: string
           id?: string
           image_url?: string | null
           is_active?: boolean
           is_available?: boolean
+          is_suggestion?: boolean
           name?: string
           price_cents?: number
           slug?: string

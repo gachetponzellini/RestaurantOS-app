@@ -76,6 +76,8 @@ export function DailyMenuForm({
           is_active: menu.is_active,
           is_available: menu.is_available,
           sort_order: menu.sort_order,
+          display_context: menu.display_context,
+          is_suggestion: menu.is_suggestion,
           components: menu.components.map((c) => ({
             id: c.id,
             label: c.label,
@@ -90,10 +92,12 @@ export function DailyMenuForm({
           name: "",
           slug: "",
           price_cents: 0,
-          available_days: [1, 2, 3, 4, 5], // default L-V, típico menú ejecutivo
+          available_days: [1, 2, 3, 4, 5],
           is_active: true,
           is_available: true,
           sort_order: 0,
+          display_context: "both" as const,
+          is_suggestion: false,
           components: [{ label: "", kind: "text" as const }],
         },
   });
@@ -255,7 +259,7 @@ export function DailyMenuForm({
           }}
         />
 
-        <div className="flex gap-4">
+        <div className="flex flex-wrap gap-4">
           <FormField
             control={form.control}
             name="is_available"
@@ -294,7 +298,50 @@ export function DailyMenuForm({
               </FormItem>
             )}
           />
+          <FormField
+            control={form.control}
+            name="is_suggestion"
+            render={({ field }) => (
+              <FormItem>
+                <FormControl>
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      className="size-4"
+                      checked={field.value}
+                      onChange={(e) => field.onChange(e.target.checked)}
+                    />
+                    <span>Sugerencia del día</span>
+                  </label>
+                </FormControl>
+              </FormItem>
+            )}
+          />
         </div>
+
+        <FormField
+          control={form.control}
+          name="display_context"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>Visible en</FormLabel>
+              <FormControl>
+                <select
+                  value={field.value}
+                  onChange={(e) => field.onChange(e.target.value)}
+                  className="border-input bg-background h-9 rounded-md border px-3 text-sm"
+                >
+                  <option value="both">Delivery y salón</option>
+                  <option value="delivery">Solo delivery</option>
+                  <option value="salon">Solo salón</option>
+                </select>
+              </FormControl>
+              <p className="text-muted-foreground text-xs">
+                En qué superficie se muestra este menú.
+              </p>
+            </FormItem>
+          )}
+        />
 
         <ComponentsEditor businessId={businessId} productNames={productNames} />
 

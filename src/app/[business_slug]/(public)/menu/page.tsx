@@ -60,6 +60,7 @@ export default async function MenuPage({
       coverImageUrl={business.cover_image_url ?? business.logo_url}
       logoUrl={business.logo_url}
       categories={menu.categories}
+      beverageSuperCategoryId={menu.beverageSuperCategoryId}
       todaysMenus={menu.todaysMenus}
       todayLabel={todayLabel}
       deliveryFeeCents={Number(business.delivery_fee_cents)}

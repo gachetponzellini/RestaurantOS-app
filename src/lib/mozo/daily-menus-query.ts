@@ -56,6 +56,7 @@ export async function getDailyMenusForToday(
     .eq("is_active", true)
     .eq("is_available", true)
     .contains("available_days", [todayDow])
+    .in("display_context", ["salon", "both"])
     .order("sort_order");
 
   if (error) {

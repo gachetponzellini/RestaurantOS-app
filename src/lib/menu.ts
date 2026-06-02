@@ -40,6 +40,7 @@ export type MenuCategory = {
   name: string;
   slug: string;
   sort_order: number;
+  super_category_id: string | null;
   products: MenuProduct[];
 };
 
@@ -70,6 +71,7 @@ export type MenuDailyMenu = {
   components: MenuDailyMenuComponent[];
   choice_groups: MenuDailyMenuChoiceGroup[];
   has_choices: boolean;
+  is_suggestion: boolean;
 };
 
 export type BusinessHour = {
@@ -82,6 +84,7 @@ export type MenuData = {
   categories: MenuCategory[];
   hours: BusinessHour[];
   todaysMenus: MenuDailyMenu[];
+  beverageSuperCategoryId: string | null;
 };
 
 /**
@@ -99,10 +102,11 @@ export const getMenu = cache(
       { data: products },
       { data: hours },
       { data: dailyMenus },
+      { data: superCategories },
     ] = await Promise.all([
       supabase
         .from("categories")
-        .select("id, name, slug, sort_order")
+        .select("id, name, slug, sort_order, super_category_id")
         .eq("business_id", businessId)
         .eq("is_active", true)
         .order("sort_order"),
@@ -121,13 +125,20 @@ export const getMenu = cache(
       supabase
         .from("daily_menus")
         .select(
-          "id, name, description, price_cents, image_url, available_days, daily_menu_components(id, label, description, sort_order, kind, product_id, choice_group_id, choice_group_label, products(id, name, image_url))",
+          "id, name, description, price_cents, image_url, available_days, is_suggestion, daily_menu_components(id, label, description, sort_order, kind, product_id, choice_group_id, choice_group_label, products(id, name, image_url))",
         )
         .eq("business_id", businessId)
         .eq("is_active", true)
         .eq("is_available", true)
         .contains("available_days", [todayDow])
+        .in("display_context", ["delivery", "both"])
         .order("sort_order"),
+      supabase
+        .from("super_categories")
+        .select("id, slug")
+        .eq("business_id", businessId)
+        .eq("slug", "bebidas")
+        .maybeSingle(),
     ]);
 
   const productsList: MenuProduct[] = (products ?? []).map((p) => ({
@@ -168,6 +179,7 @@ export const getMenu = cache(
     name: c.name,
     slug: c.slug,
     sort_order: c.sort_order,
+    super_category_id: (c as any).super_category_id ?? null,
     products: productsList.filter((p) => p.category_id === c.id),
   }));
 
@@ -213,6 +225,7 @@ export const getMenu = cache(
       components,
       choice_groups: [...groupMap.values()],
       has_choices: groupMap.size > 0,
+      is_suggestion: m.is_suggestion ?? false,
     };
   });
 
@@ -220,5 +233,6 @@ export const getMenu = cache(
     categories: cats,
     hours: (hours ?? []) as BusinessHour[],
     todaysMenus,
+    beverageSuperCategoryId: superCategories?.id ?? null,
   };
 });

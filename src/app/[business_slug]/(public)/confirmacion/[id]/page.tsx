@@ -46,7 +46,7 @@ export default async function ConfirmacionPage({
        delivery_fee_cents, payment_method, payment_status, customer_id,
        customers!inner(user_id),
        order_items(product_name, quantity, subtotal_cents,
-         daily_menu_snapshot,
+         is_combo_component, daily_menu_snapshot,
          order_item_modifiers(modifier_name))`,
     )
     .eq("id", id)
@@ -130,24 +130,24 @@ export default async function ConfirmacionPage({
         orderNumber={order.order_number}
         status={order.status as React.ComponentProps<typeof OrderTracking>["status"]}
         deliveryType={order.delivery_type as "delivery" | "pickup"}
-        items={(order.order_items ?? []).map((it) => {
-          // Si la línea es un menú del día, el snapshot trae los componentes;
-          // los pasamos al OrderTracking para que los muestre debajo del nombre.
-          const menuSnap = it.daily_menu_snapshot as
-            | { components?: { label: string }[] }
-            | null;
-          return {
-            product_name: it.product_name,
-            quantity: it.quantity,
-            subtotal_cents: Number(it.subtotal_cents),
-            modifiers: (it.order_item_modifiers ?? []).map(
-              (m) => m.modifier_name,
-            ),
-            daily_menu_components: (menuSnap?.components ?? []).map(
-              (c) => c.label,
-            ),
-          };
-        })}
+        items={(order.order_items ?? [])
+          .filter((it) => !(it as any).is_combo_component)
+          .map((it) => {
+            const menuSnap = it.daily_menu_snapshot as
+              | { components?: { label: string }[] }
+              | null;
+            return {
+              product_name: it.product_name,
+              quantity: it.quantity,
+              subtotal_cents: Number(it.subtotal_cents),
+              modifiers: (it.order_item_modifiers ?? []).map(
+                (m) => m.modifier_name,
+              ),
+              daily_menu_components: (menuSnap?.components ?? []).map(
+                (c) => c.label,
+              ),
+            };
+          })}
         subtotalCents={Number(order.subtotal_cents)}
         deliveryFeeCents={Number(order.delivery_fee_cents)}
         totalCents={Number(order.total_cents)}

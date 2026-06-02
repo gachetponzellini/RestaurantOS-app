@@ -50,10 +50,9 @@ export default async function BusinessLayout({
   const accent = s.primary_color ?? BRANDING_DEFAULTS.primary_color;
   const accentFg = s.primary_foreground ?? BRANDING_DEFAULTS.primary_foreground;
   const mode = s.default_mode ?? BRANDING_DEFAULTS.default_mode;
-  const background =
-    mode === "dark"
-      ? (s.background_color_dark ?? BRANDING_DEFAULTS.background_color_dark)
-      : (s.background_color ?? BRANDING_DEFAULTS.background_color);
+  const backgroundLight = s.background_color ?? BRANDING_DEFAULTS.background_color;
+  const backgroundDark = s.background_color_dark ?? BRANDING_DEFAULTS.background_color_dark;
+  const background = mode === "dark" ? backgroundDark : backgroundLight;
   const muted = s.muted_color ?? BRANDING_DEFAULTS.muted_color;
   const border = s.border_color ?? BRANDING_DEFAULTS.border_color;
   const success = s.success_color ?? BRANDING_DEFAULTS.success_color;
@@ -109,6 +108,10 @@ export default async function BusinessLayout({
   --hairline:${border};
   --display:${fontHeading}, Georgia, serif;
   font-family: ${fontSans}, -apple-system, system-ui, sans-serif;
+}
+.dark .delivery-theme{
+  --bg:${backgroundDark};
+  --accent-soft:color-mix(in oklch, ${accent} 14%, ${backgroundDark});
 }
 [data-brand-scope]{
   --accent:${accent};

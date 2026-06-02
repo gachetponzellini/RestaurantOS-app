@@ -37,6 +37,9 @@ export const DailyMenuComponentInput = z
   });
 export type DailyMenuComponentInput = z.infer<typeof DailyMenuComponentInput>;
 
+export const DisplayContext = z.enum(["delivery", "salon", "both"]);
+export type DisplayContext = z.infer<typeof DisplayContext>;
+
 export const DailyMenuInput = z.object({
   name: z.string().min(1, "Requerido.").max(80),
   slug: z
@@ -47,14 +50,14 @@ export const DailyMenuInput = z.object({
   description: z.string().max(500).optional().nullable(),
   price_cents: z.number().int().min(0),
   image_url: z.string().url().nullable().optional(),
-  // Al menos 1 día — un menú sin días no tiene sentido. Validación de rango
-  // 0..6 duplica el check de DB, pero falla más temprano (en el form).
   available_days: z
     .array(z.number().int().min(0).max(6))
     .min(1, "Elegí al menos un día."),
   is_active: z.boolean(),
   is_available: z.boolean(),
   sort_order: z.number().int().min(0),
+  display_context: DisplayContext,
+  is_suggestion: z.boolean(),
   components: z
     .array(DailyMenuComponentInput)
     .min(1, "Agregá al menos un componente."),

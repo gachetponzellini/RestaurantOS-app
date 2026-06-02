@@ -17,6 +17,59 @@ import { DailyMenuSheet } from "./daily-menu-sheet";
 import { ProductCard } from "./product-card";
 import { ProductSheet } from "./product-sheet";
 
+type DisplayTab = {
+  id: string;
+  name: string;
+  products: MenuProduct[];
+  subcategories?: { name: string; products: MenuProduct[] }[];
+};
+
+function buildDisplayTabs(
+  categories: MenuCategory[],
+  beverageSuperCategoryId: string | null,
+): DisplayTab[] {
+  if (!beverageSuperCategoryId) {
+    return categories.map((c) => ({
+      id: c.id,
+      name: c.name,
+      products: c.products,
+    }));
+  }
+
+  const bevCats = categories.filter(
+    (c) => c.super_category_id === beverageSuperCategoryId,
+  );
+  const nonBevCats = categories.filter(
+    (c) => c.super_category_id !== beverageSuperCategoryId,
+  );
+
+  if (bevCats.length === 0) {
+    return categories.map((c) => ({
+      id: c.id,
+      name: c.name,
+      products: c.products,
+    }));
+  }
+
+  const bevTab: DisplayTab = {
+    id: "bebidas-grouped",
+    name: "Bebidas",
+    products: bevCats.flatMap((c) => c.products),
+    subcategories: bevCats.map((c) => ({
+      name: c.name,
+      products: c.products,
+    })),
+  };
+
+  const tabs: DisplayTab[] = nonBevCats.map((c) => ({
+    id: c.id,
+    name: c.name,
+    products: c.products,
+  }));
+  tabs.push(bevTab);
+  return tabs;
+}
+
 export function MenuClient({
   slug,
   businessName,
@@ -24,6 +77,7 @@ export function MenuClient({
   coverImageUrl,
   logoUrl,
   categories,
+  beverageSuperCategoryId,
   todaysMenus,
   todayLabel,
   deliveryFeeCents,
@@ -41,6 +95,7 @@ export function MenuClient({
   coverImageUrl: string | null;
   logoUrl: string | null;
   categories: MenuCategory[];
+  beverageSuperCategoryId: string | null;
   todaysMenus: MenuDailyMenu[];
   todayLabel: string;
   deliveryFeeCents: number;
@@ -52,7 +107,12 @@ export function MenuClient({
   isOpenInitial: boolean;
   user: { name?: string; email: string } | null;
 }) {
-  const [active, setActive] = useState(categories[0]?.id ?? "");
+  const displayTabs = useMemo(
+    () => buildDisplayTabs(categories, beverageSuperCategoryId),
+    [categories, beverageSuperCategoryId],
+  );
+
+  const [active, setActive] = useState(displayTabs[0]?.id ?? "");
   const [selected, setSelected] = useState<MenuProduct | null>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [selectedDailyMenu, setSelectedDailyMenu] =
@@ -66,9 +126,9 @@ export function MenuClient({
     return () => clearInterval(id);
   }, [hours, timezone]);
 
-  const activeCategory = useMemo(
-    () => categories.find((c) => c.id === active) ?? categories[0],
-    [active, categories],
+  const activeTab = useMemo(
+    () => displayTabs.find((t) => t.id === active) ?? displayTabs[0],
+    [active, displayTabs],
   );
 
   const items = useCart(slug, (s) => s.items);
@@ -356,7 +416,7 @@ export function MenuClient({
       />
 
       {/* Sticky category tabs */}
-      {categories.length > 0 && (
+      {displayTabs.length > 0 && (
         <div
           style={{
             position: "sticky",
@@ -376,12 +436,12 @@ export function MenuClient({
             }}
             className="no-scrollbar"
           >
-            {categories.map((c) => {
-              const isActive = c.id === active;
+            {displayTabs.map((t) => {
+              const isActive = t.id === active;
               return (
                 <button
-                  key={c.id}
-                  onClick={() => setActive(c.id)}
+                  key={t.id}
+                  onClick={() => setActive(t.id)}
                   style={{
                     flexShrink: 0,
                     padding: "12px 0 10px",
@@ -397,7 +457,7 @@ export function MenuClient({
                     marginBottom: -1,
                   }}
                 >
-                  {c.name}
+                  {t.name}
                 </button>
               );
             })}
@@ -407,16 +467,42 @@ export function MenuClient({
 
       {/* Products */}
       <div>
-        {activeCategory?.products.map((p) => (
-          <ProductCard
-            key={p.id}
-            product={p}
-            cartQty={cartByProduct.get(p.id) ?? 0}
-            disabled={!isOpen}
-            onSelect={handleSelect}
-          />
-        ))}
-        {activeCategory?.products.length === 0 && (
+        {activeTab?.subcategories
+          ? activeTab.subcategories.map((sub) => (
+              <div key={sub.name}>
+                <div
+                  style={{
+                    padding: "14px 16px 6px",
+                    fontSize: 13,
+                    fontWeight: 600,
+                    color: "var(--ink-2)",
+                    textTransform: "uppercase",
+                    letterSpacing: 0.4,
+                  }}
+                >
+                  {sub.name}
+                </div>
+                {sub.products.map((p) => (
+                  <ProductCard
+                    key={p.id}
+                    product={p}
+                    cartQty={cartByProduct.get(p.id) ?? 0}
+                    disabled={!isOpen}
+                    onSelect={handleSelect}
+                  />
+                ))}
+              </div>
+            ))
+          : activeTab?.products.map((p) => (
+              <ProductCard
+                key={p.id}
+                product={p}
+                cartQty={cartByProduct.get(p.id) ?? 0}
+                disabled={!isOpen}
+                onSelect={handleSelect}
+              />
+            ))}
+        {activeTab?.products.length === 0 && (
           <div
             style={{
               padding: "40px 16px",
