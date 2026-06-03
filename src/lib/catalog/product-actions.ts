@@ -6,7 +6,11 @@ import { actionError, actionOk, type ActionResult } from "@/lib/actions";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 
-import { ProductInput, type ModifierGroupInput } from "./schemas";
+import {
+  ProductInput,
+  type ModifierGroupInput,
+  warnGarnishModifierGroups,
+} from "./schemas";
 
 async function getBusinessIdBySlug(slug: string): Promise<string | null> {
   const service = createSupabaseServiceClient();
@@ -117,7 +121,7 @@ async function syncModifierGroups(
 export async function createProduct(
   businessSlug: string,
   input: unknown,
-): Promise<ActionResult<{ id: string }>> {
+): Promise<ActionResult<{ id: string; warnings: string[] }>> {
   const parsed = ProductInput.safeParse(input);
   if (!parsed.success) return actionError("Datos inválidos.");
 
@@ -144,14 +148,15 @@ export async function createProduct(
     if (err) return actionError(err);
   }
   revalidatePath(`/${businessSlug}/admin/catalogo`);
-  return actionOk({ id: data.id });
+  const warnings = warnGarnishModifierGroups(modifier_groups);
+  return actionOk({ id: data.id, warnings });
 }
 
 export async function updateProduct(
   businessSlug: string,
   id: string,
   input: unknown,
-): Promise<ActionResult<{ id: string }>> {
+): Promise<ActionResult<{ id: string; warnings: string[] }>> {
   const parsed = ProductInput.safeParse(input);
   if (!parsed.success) return actionError("Datos inválidos.");
 
@@ -176,7 +181,8 @@ export async function updateProduct(
   if (err) return actionError(err);
   revalidatePath(`/${businessSlug}/admin/catalogo`);
   revalidatePath(`/${businessSlug}/menu`);
-  return actionOk({ id });
+  const warnings = warnGarnishModifierGroups(modifier_groups);
+  return actionOk({ id, warnings });
 }
 
 export async function deleteProduct(

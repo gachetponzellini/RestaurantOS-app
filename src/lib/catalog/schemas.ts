@@ -83,3 +83,16 @@ export const ProductInput = z.object({
   modifier_groups: z.array(ModifierGroupInput),
 });
 export type ProductInput = z.infer<typeof ProductInput>;
+
+const GARNISH_PATTERN = /^guarnici[oó]n(es)?$/i;
+
+export function warnGarnishModifierGroups(
+  groups: ModifierGroupInput[],
+): string[] {
+  return groups
+    .filter((g) => GARNISH_PATTERN.test(g.name.trim()))
+    .map(
+      (g) =>
+        `El grupo "${g.name}" parece una guarnición. Convención: la guarnición se carga como producto aparte, no como adicional del plato.`,
+    );
+}

@@ -127,6 +127,11 @@ export function ProductForm({
         return;
       }
       toast.success(product ? "Actualizado." : "Creado.");
+      if (result.data.warnings?.length) {
+        for (const w of result.data.warnings) {
+          toast.warning(w);
+        }
+      }
       router.refresh();
       if (onSuccess) {
         onSuccess();

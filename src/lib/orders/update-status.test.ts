@@ -36,4 +36,12 @@ describe("isValidTransition", () => {
     expect(isValidTransition("pending", "delivered")).toBe(false);
     expect(isValidTransition("confirmed", "ready")).toBe(false);
   });
+
+  it("allows auto-march: pending → preparing (skip confirmed)", () => {
+    expect(isValidTransition("pending", "preparing")).toBe(true);
+  });
+
+  it("allows salon skip-ready: preparing → delivered", () => {
+    expect(isValidTransition("preparing", "delivered")).toBe(true);
+  });
 });

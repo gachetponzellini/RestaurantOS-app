@@ -172,18 +172,25 @@ export function ProductModal({
           <div className="mt-5 space-y-3 px-5">
             {product.modifier_groups.map((g) => (
               <div key={g.id} className="rounded-2xl border border-zinc-200 p-3">
-                <div className="flex items-center justify-between">
+                <div className="flex items-center justify-between gap-2">
                   <h4 className="text-sm font-bold text-zinc-900">{g.name}</h4>
-                  <span
-                    className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
-                      g.is_required
-                        ? "bg-amber-100 text-amber-800"
-                        : "bg-zinc-100 text-zinc-600"
-                    }`}
-                  >
-                    {g.is_required ? "obligatorio" : "opcional"}
-                    {g.max_selection > 1 ? ` · hasta ${g.max_selection}` : ""}
-                  </span>
+                  <div className="flex items-center gap-1.5">
+                    {g.modifiers.every((m) => m.price_delta_cents === 0) && (
+                      <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-700">
+                        sin cargo
+                      </span>
+                    )}
+                    <span
+                      className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
+                        g.is_required
+                          ? "bg-amber-100 text-amber-800"
+                          : "bg-zinc-100 text-zinc-600"
+                      }`}
+                    >
+                      {g.is_required ? "obligatorio" : "opcional"}
+                      {g.max_selection > 1 ? ` · hasta ${g.max_selection}` : ""}
+                    </span>
+                  </div>
                 </div>
                 <div className="mt-2 space-y-1.5">
                   {g.modifiers.map((m) => {
@@ -234,7 +241,7 @@ export function ProductModal({
           <textarea
             value={notes}
             onChange={(e) => setNotes(e.target.value.slice(0, 200))}
-            placeholder="ej: sin sal, bien hecho"
+            placeholder="ej: sin jamón, sin rúcula, bien cocido"
             className="block w-full rounded-2xl border border-zinc-200 px-3 py-2.5 text-sm focus:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-100"
             rows={2}
           />
