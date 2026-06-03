@@ -405,7 +405,13 @@ export function OrderTracking({
               }}
             >
               <span>{deliveryType === "pickup" ? "Retiro" : "Envío"}</span>
-              <span>{formatCurrency(deliveryFeeCents)}</span>
+              <span>
+                {deliveryType === "pickup"
+                  ? formatCurrency(0)
+                  : deliveryFeeCents === 0
+                    ? "Bonificado"
+                    : formatCurrency(deliveryFeeCents)}
+              </span>
             </div>
             <div
               style={{

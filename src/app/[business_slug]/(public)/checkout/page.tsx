@@ -3,6 +3,7 @@ import { notFound, redirect } from "next/navigation";
 import { CheckoutForm } from "@/components/checkout/checkout-form";
 import { listUserAddresses } from "@/lib/customers/addresses";
 import { getCustomerProfile } from "@/lib/customers/profile";
+import { getAssignedCoupon } from "@/lib/promos/assigned-coupon";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { getBusiness } from "@/lib/tenant";
 
@@ -33,6 +34,13 @@ export default async function CheckoutPage({
     business.mp_accepts_payments && business.mp_access_token,
   );
 
+  const assignedCoupon = await getAssignedCoupon(
+    user.id,
+    business.id,
+    0,
+    Number(business.delivery_fee_cents),
+  );
+
   // Prefer the customer row (set on previous orders) over session metadata —
   // the customer row reflects the last name/phone the user actually typed.
   const initialName =
@@ -59,6 +67,15 @@ export default async function CheckoutPage({
       initialName={initialName}
       initialEmail={initialEmail}
       initialPhone={initialPhone}
+      initialPromo={
+        assignedCoupon
+          ? {
+              code: assignedCoupon.code,
+              discount_cents: assignedCoupon.discount_cents,
+              free_shipping: assignedCoupon.free_shipping,
+            }
+          : undefined
+      }
     />
   );
 }

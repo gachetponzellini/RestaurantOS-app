@@ -24,6 +24,7 @@ export function CheckoutForm({
   initialName = "",
   initialEmail = "",
   initialPhone = "",
+  initialPromo,
 }: {
   slug: string;
   businessName: string;
@@ -35,6 +36,11 @@ export function CheckoutForm({
   initialName?: string;
   initialEmail?: string;
   initialPhone?: string;
+  initialPromo?: {
+    code: string;
+    discount_cents: number;
+    free_shipping: boolean;
+  };
 }) {
   const router = useRouter();
   const items = useCart(slug, (s) => s.items);
@@ -60,12 +66,12 @@ export function CheckoutForm({
   // The customer types a code, presses "Aplicar" → server validates and
   // returns the discount preview. The `applied` value is what we send to
   // createOrder; the server re-validates atomically on submit.
-  const [promoInput, setPromoInput] = useState("");
+  const [promoInput, setPromoInput] = useState(initialPromo?.code ?? "");
   const [appliedPromo, setAppliedPromo] = useState<{
     code: string;
     discount_cents: number;
     free_shipping: boolean;
-  } | null>(null);
+  } | null>(initialPromo ?? null);
   const [promoChecking, setPromoChecking] = useState(false);
   const [promoError, setPromoError] = useState<string | null>(null);
 
@@ -458,7 +464,9 @@ export function CheckoutForm({
                 ? "Gratis"
                 : appliedPromo?.free_shipping
                   ? "Gratis"
-                  : formatCurrency(deliveryFee)
+                  : deliveryFee === 0
+                    ? "Bonificado"
+                    : formatCurrency(deliveryFee)
             }
             muted
           />
