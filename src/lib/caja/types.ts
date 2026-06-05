@@ -64,3 +64,34 @@ export type PaymentMethodConfig = {
   is_active: boolean;
   sort_order: number;
 };
+
+export type MozoRendicion = {
+  id: string;
+  business_id: string;
+  mozo_id: string;
+  registered_by: string;
+  expected_cash_cents: number;
+  delivered_cash_cents: number;
+  difference_cents: number;
+  notes: string | null;
+  por_metodo: Record<PaymentMethod, number>;
+  created_at: string;
+};
+
+export type RendicionMozoPendiente = {
+  mozo_id: string;
+  mozo_name: string;
+  efectivo_cents: number;
+  tickets_cents: number;
+  por_metodo: Record<PaymentMethod, number>;
+  total_propinas_cents: number;
+  pagos_count: number;
+};
+
+export type CajaUserAssignment = {
+  id: string;
+  business_id: string;
+  caja_id: string;
+  user_id: string;
+  created_at: string;
+};

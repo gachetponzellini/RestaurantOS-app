@@ -11,9 +11,9 @@ export const ORDER_STATUSES = [
 export type OrderStatus = (typeof ORDER_STATUSES)[number];
 
 const FORWARD: Record<OrderStatus, OrderStatus[]> = {
-  pending: ["confirmed", "cancelled"],
+  pending: ["confirmed", "preparing", "cancelled"],
   confirmed: ["preparing", "cancelled"],
-  preparing: ["ready", "cancelled"],
+  preparing: ["ready", "delivered", "cancelled"],
   ready: ["on_the_way", "delivered", "cancelled"],
   on_the_way: ["delivered", "cancelled"],
   delivered: [],

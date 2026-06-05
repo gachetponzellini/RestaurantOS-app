@@ -10,7 +10,12 @@ import { ensureAdminAccess } from "@/lib/admin/context";
 import { getFloorPlansForBusiness } from "@/lib/admin/floor-plan/queries";
 import { getActiveComandas, getStationsForLocal } from "@/lib/admin/local-query";
 import { getTodayOrders } from "@/lib/admin/orders-query";
-import { getCajasConEstado } from "@/lib/caja/queries";
+import {
+  getCajasConEstado,
+  getCajaUserAssignments,
+  getRendicionesPendientesTodosLosMozos,
+  getRendicionesHistorial,
+} from "@/lib/caja/queries";
 import { getMozosByBusiness } from "@/lib/mozo/queries";
 import { getCurrentPresent } from "@/lib/rrhh/clock-actions";
 import { getTodaySummary } from "@/lib/rrhh/clock-queries";
@@ -52,6 +57,10 @@ export default async function LocalEnVivoPage({
     { data: reservations },
     mozos,
     cajas,
+    rendicionPendientes,
+    rendicionHistorial,
+    cajaAssignments,
+    { data: businessMembersRaw },
     initialPresent,
     todaySummary,
   ] = await Promise.all([
@@ -79,6 +88,14 @@ export default async function LocalEnVivoPage({
       .order("starts_at", { ascending: true }),
     getMozosByBusiness(business.id),
     getCajasConEstado(business.id),
+    getRendicionesPendientesTodosLosMozos(business.id),
+    getRendicionesHistorial(business.id),
+    getCajaUserAssignments(business.id),
+    service
+      .from("business_users")
+      .select("user_id, full_name")
+      .eq("business_id", business.id)
+      .is("disabled_at", null),
     getCurrentPresent(business_slug),
     getTodaySummary(business.id),
   ]);
@@ -168,6 +185,10 @@ export default async function LocalEnVivoPage({
         currentUserId={ctx.user.id}
         role={ctx.isPlatformAdmin ? "admin" : (ctx.role ?? "admin")}
         cajas={cajas}
+        rendicionPendientes={rendicionPendientes}
+        rendicionHistorial={rendicionHistorial}
+        cajaAssignments={cajaAssignments}
+        businessMembers={(businessMembersRaw ?? []) as { user_id: string; full_name: string | null }[]}
         initialPresent={initialPresent}
         todaySummary={todaySummary}
       />

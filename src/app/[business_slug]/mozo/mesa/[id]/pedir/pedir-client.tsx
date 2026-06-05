@@ -40,9 +40,9 @@ import { toast } from "sonner";
 
 import type { BusinessRole } from "@/lib/admin/context";
 import {
-  advanceComandaStatus,
   cancelarItem,
   enviarComanda,
+  marcarComandaEntregada,
   type EnviarComandaItem,
   type EnviarComandaDailyMenuItem,
 } from "@/lib/comandas/actions";
@@ -175,19 +175,19 @@ type Tab = {
 };
 
 const STATUS_LABEL: Record<ComandaStatus, string> = {
-  pendiente: "Pendiente",
-  en_preparacion: "En preparación",
-  entregado: "Entregado",
+  pendiente: "Activa",
+  en_preparacion: "Activa",
+  entregado: "Cerrada",
 };
 
 const STATUS_PILL: Record<ComandaStatus, string> = {
-  pendiente: "bg-amber-100 text-amber-800",
+  pendiente: "bg-sky-100 text-sky-800",
   en_preparacion: "bg-sky-100 text-sky-800",
   entregado: "bg-emerald-100 text-emerald-800",
 };
 
 const STATUS_DOT: Record<ComandaStatus, string> = {
-  pendiente: "bg-amber-500",
+  pendiente: "bg-sky-500",
   en_preparacion: "bg-sky-500",
   entregado: "bg-emerald-500",
 };
@@ -512,12 +512,12 @@ export function MozoPedirClient({
 
   const handleAdvance = (comandaId: string) => {
     startTransition(async () => {
-      const r = await advanceComandaStatus(comandaId, slug);
+      const r = await marcarComandaEntregada(comandaId, slug);
       if (!r.ok) {
         toast.error(r.error);
         return;
       }
-      toast.success(`Comanda · ${STATUS_LABEL[r.data.status]}`);
+      toast.success("Comanda entregada");
       router.refresh();
     });
   };
@@ -1642,9 +1642,7 @@ function ResumenStep({
                         className="flex h-10 w-full items-center justify-center gap-1.5 rounded-xl bg-emerald-50 text-sm font-semibold text-emerald-700 ring-1 ring-emerald-200 active:scale-[0.98] disabled:opacity-60"
                       >
                         <Check className="h-4 w-4" />
-                        {c.status === "pendiente"
-                          ? "Marcar en preparación"
-                          : "Marcar entregada"}
+                        Entregar
                       </button>
                     </div>
                   )}

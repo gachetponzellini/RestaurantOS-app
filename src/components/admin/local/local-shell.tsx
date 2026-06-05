@@ -6,22 +6,23 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { CajaAdminBoard } from "@/components/admin/local/caja-admin-board";
 import { ComandasKanban } from "@/components/admin/local/comandas-kanban";
 import { FichajeTab } from "@/components/admin/local/fichaje-tab";
+import { RendicionMozosTab } from "@/components/admin/local/rendicion-mozos-tab";
 import { SalonDesktop, type SalonOrderRef, type SalonReservationRef } from "@/components/admin/local/salon-desktop";
 import { OrdersRealtimeBoard } from "@/components/admin/orders-realtime-board";
 import type { LocalComanda, LocalStation } from "@/lib/admin/local-query";
 import type { AdminOrder } from "@/lib/admin/orders-query";
 import type { BusinessRole } from "@/lib/admin/context";
 import type { FloorPlanWithTables } from "@/lib/admin/floor-plan/queries";
-import type { Caja, CajaConEstado } from "@/lib/caja/types";
+import type { Caja, CajaConEstado, CajaUserAssignment, MozoRendicion, RendicionMozoPendiente } from "@/lib/caja/types";
 import type { MozoMember } from "@/lib/mozo/queries";
 import type { PresentEmployee } from "@/lib/rrhh/clock-actions";
 import type { TodaySummary } from "@/lib/rrhh/clock-queries";
 import { cn } from "@/lib/utils";
 
-type Tab = "pedidos" | "comandas" | "salon" | "caja" | "fichaje";
+type Tab = "pedidos" | "comandas" | "salon" | "caja" | "rendicion" | "fichaje";
 
 function isTab(v: string | null | undefined): v is Tab {
-  return v === "pedidos" || v === "comandas" || v === "salon" || v === "caja" || v === "fichaje";
+  return v === "pedidos" || v === "comandas" || v === "salon" || v === "caja" || v === "rendicion" || v === "fichaje";
 }
 
 function TabsInner({
@@ -38,6 +39,10 @@ function TabsInner({
   currentUserId,
   role,
   cajas,
+  rendicionPendientes,
+  rendicionHistorial,
+  cajaAssignments,
+  businessMembers,
   initialPresent,
   todaySummary,
 }: {
@@ -54,6 +59,10 @@ function TabsInner({
   currentUserId: string;
   role: BusinessRole;
   cajas: CajaConEstado[];
+  rendicionPendientes: RendicionMozoPendiente[];
+  rendicionHistorial: (MozoRendicion & { mozo_name: string; registered_by_name: string | null })[];
+  cajaAssignments: (CajaUserAssignment & { user_name: string | null; caja_name: string })[];
+  businessMembers: { user_id: string; full_name: string | null }[];
   initialPresent: PresentEmployee[];
   todaySummary?: TodaySummary;
 }) {
@@ -110,9 +119,10 @@ function TabsInner({
       comandas: comandasActivas,
       salon: salonOcupadas,
       caja: cajas.length,
+      rendicion: rendicionPendientes.filter((p) => p.pagos_count > 0).length,
       fichaje: initialPresent.length,
     };
-  }, [initialOrders, initialComandas, allActiveTables, cajas.length, initialPresent.length]);
+  }, [initialOrders, initialComandas, allActiveTables, cajas.length, rendicionPendientes, initialPresent.length]);
 
   const tabsBar = (
     <nav
@@ -146,6 +156,13 @@ function TabsInner({
         count={counts.caja}
       >
         Caja
+      </TabButton>
+      <TabButton
+        active={active === "rendicion"}
+        onClick={() => setTab("rendicion")}
+        count={counts.rendicion}
+      >
+        Rendición
       </TabButton>
       <TabButton
         active={active === "fichaje"}
@@ -209,6 +226,17 @@ function TabsInner({
           <CajaAdminBoard
             slug={slug}
             cajas={cajas}
+          />
+        )}
+        {active === "rendicion" && (
+          <RendicionMozosTab
+            slug={slug}
+            initialPendientes={rendicionPendientes}
+            initialHistorial={rendicionHistorial}
+            cajas={cajas}
+            cajaAssignments={cajaAssignments}
+            members={businessMembers}
+            showAssignments={role === "admin"}
           />
         )}
         {active === "fichaje" && (
@@ -277,6 +305,10 @@ export function LocalShell(props: {
   currentUserId: string;
   role: BusinessRole;
   cajas: CajaConEstado[];
+  rendicionPendientes: RendicionMozoPendiente[];
+  rendicionHistorial: (MozoRendicion & { mozo_name: string; registered_by_name: string | null })[];
+  cajaAssignments: (CajaUserAssignment & { user_name: string | null; caja_name: string })[];
+  businessMembers: { user_id: string; full_name: string | null }[];
   initialPresent: PresentEmployee[];
   todaySummary?: TodaySummary;
 }) {

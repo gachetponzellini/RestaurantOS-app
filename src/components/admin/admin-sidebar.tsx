@@ -21,6 +21,7 @@ import {
   ShoppingBag,
   Receipt,
   // Tag,
+  Truck,
   Users,
   Wallet,
 } from "lucide-react";
@@ -123,6 +124,12 @@ function buildNav(slug: string, showBusinessTools: boolean): NavItem[] {
   ];
   if (showBusinessTools) {
     items.push(
+      {
+        href: `${adminBase}/proveedores`,
+        label: "Proveedores",
+        icon: <Truck className="size-5" strokeWidth={1.75} />,
+        match: (p) => p.startsWith(`${adminBase}/proveedores`),
+      },
       {
         href: `${adminBase}/cajas`,
         label: "Cajas",

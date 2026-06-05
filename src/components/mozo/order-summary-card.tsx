@@ -2,13 +2,10 @@
 
 import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Check, ChefHat, Play, Receipt } from "lucide-react";
+import { Check, ChefHat, Receipt } from "lucide-react";
 import { toast } from "sonner";
 
-import {
-  advanceComandaStatus,
-  marcarComandaEntregada,
-} from "@/lib/comandas/actions";
+import { marcarComandaEntregada } from "@/lib/comandas/actions";
 import { formatCurrency } from "@/lib/currency";
 import { cn } from "@/lib/utils";
 
@@ -29,23 +26,22 @@ export type OrderSummaryData = {
   comandas: ComandaSummary[];
 };
 
+type ComandaDisplayStatus = "activa" | "cerrada";
+
+function getComandaDisplayStatus(status: ComandaSummary["status"]): ComandaDisplayStatus {
+  return status === "entregado" ? "cerrada" : "activa";
+}
+
 /**
  * Card compartida entre la vista mozo y la vista admin del salón.
  * Muestra el resumen del pedido (items + total) y las comandas por sector
- * con su estado. Si una comanda está en `en_preparacion`, sale el botón
- * "Entregar" para que el mozo / admin la marque al levantar el plato.
+ * con su estado operativo (activa / cerrada).
  *
- * `pendiente` = todavía no se imprimió (cocina no la recibió). No se puede
- * entregar algo que cocina ni siquiera empezó. La transición pendiente →
- * en_preparacion la disparará la impresora térmica (Bloque 4b).
+ * Un solo gesto: "Entregar" marca la comanda como cerrada (spec-05).
  */
 export function OrderSummaryCard({
   order,
   slug,
-  /** Cuando true, si TODAS las comandas están entregadas, el bloque entero
-   *  de comandas se omite — útil para mesas que pidieron la cuenta, donde
-   *  cocina ya no tiene nada pendiente y la lista ocupa espacio sin valor.
-   *  Default false (siempre se ve el bloque mientras haya comandas). */
   hideComandasIfAllDelivered = false,
 }: {
   order: OrderSummaryData;
@@ -59,14 +55,6 @@ export function OrderSummaryCard({
   const cancelled = order.items.filter((it) => it.cancelled_at !== null);
   const totalQty = active.reduce((acc, it) => acc + it.quantity, 0);
 
-  const handleEmpezar = (comandaId: string) => {
-    startTransition(async () => {
-      const r = await advanceComandaStatus(comandaId, slug);
-      if (!r.ok) toast.error(r.error);
-      else router.refresh();
-    });
-  };
-
   const handleMarcarEntregada = (comandaId: string) => {
     startTransition(async () => {
       const r = await marcarComandaEntregada(comandaId, slug);
@@ -75,13 +63,10 @@ export function OrderSummaryCard({
     });
   };
 
-  // Cantidad de activas (no entregadas) para el header.
   const activeComandasCount = order.comandas.filter(
-    (c) => c.status !== "entregado",
+    (c) => getComandaDisplayStatus(c.status) === "activa",
   ).length;
 
-  // Si la mesa pidió cuenta Y cocina ya entregó todo, el bloque comandas
-  // no aporta — lo escondemos para que la card sea más limpia.
   const allComandasDelivered =
     order.comandas.length > 0 &&
     order.comandas.every((c) => c.status === "entregado");
@@ -152,7 +137,7 @@ export function OrderSummaryCard({
             <p className="text-[10px] font-semibold tabular-nums text-zinc-500">
               {activeComandasCount > 0
                 ? `${activeComandasCount} activa${activeComandasCount === 1 ? "" : "s"} · ${order.comandas.length} total`
-                : `${order.comandas.length} entregada${order.comandas.length === 1 ? "" : "s"}`}
+                : `${order.comandas.length} cerrada${order.comandas.length === 1 ? "" : "s"}`}
             </p>
           </div>
           <ul className="mt-3 space-y-2">
@@ -168,7 +153,6 @@ export function OrderSummaryCard({
                   key={c.id}
                   comanda={c}
                   isPending={isPending}
-                  onEmpezar={() => handleEmpezar(c.id)}
                   onMarcarEntregada={() => handleMarcarEntregada(c.id)}
                 />
               ))}
@@ -198,46 +182,41 @@ function formatElapsed(min: number): string {
   return m === 0 ? `${h}h` : `${h}h${m}m`;
 }
 
+const DISPLAY_LABEL: Record<ComandaDisplayStatus, string> = {
+  activa: "Activa",
+  cerrada: "Cerrada",
+};
+const DISPLAY_CLASS: Record<ComandaDisplayStatus, string> = {
+  activa: "bg-sky-100 text-sky-800",
+  cerrada: "bg-emerald-100 text-emerald-800",
+};
+const DISPLAY_DOT: Record<ComandaDisplayStatus, string> = {
+  activa: "bg-sky-500",
+  cerrada: "bg-emerald-500",
+};
+
 function ComandaRow({
   comanda,
   isPending,
-  onEmpezar,
   onMarcarEntregada,
 }: {
   comanda: ComandaSummary;
   isPending: boolean;
-  onEmpezar: () => void;
   onMarcarEntregada: () => void;
 }) {
-  // Cuánto hace que está en su estado actual. Para entregadas usamos
-  // delivered_at; para el resto, emitted_at (cuánto hace que viene esperando).
+  const displayStatus = getComandaDisplayStatus(comanda.status);
+
   const referenceIso =
     comanda.status === "entregado" ? comanda.delivered_at : comanda.emitted_at;
   const elapsed = useElapsedMinutes(referenceIso);
-  const isUrgent = comanda.status !== "entregado" && elapsed >= 15;
-  const isLate = comanda.status !== "entregado" && elapsed >= 8 && elapsed < 15;
-
-  const statusLabel: Record<ComandaSummary["status"], string> = {
-    pendiente: "Pendiente",
-    en_preparacion: "En preparación",
-    entregado: "Entregada",
-  };
-  const statusClass: Record<ComandaSummary["status"], string> = {
-    pendiente: "bg-amber-100 text-amber-800",
-    en_preparacion: "bg-sky-100 text-sky-800",
-    entregado: "bg-emerald-100 text-emerald-800",
-  };
-  const dotClass: Record<ComandaSummary["status"], string> = {
-    pendiente: "bg-amber-500",
-    en_preparacion: "bg-sky-500",
-    entregado: "bg-emerald-500",
-  };
+  const isUrgent = displayStatus === "activa" && elapsed >= 15;
+  const isLate = displayStatus === "activa" && elapsed >= 8 && elapsed < 15;
 
   return (
     <li
       className={cn(
         "overflow-hidden rounded-xl ring-1 transition",
-        comanda.status === "entregado"
+        displayStatus === "cerrada"
           ? "bg-zinc-50 ring-zinc-200"
           : "bg-white ring-zinc-200",
         isUrgent && "ring-rose-300",
@@ -250,7 +229,7 @@ function ComandaRow({
           <span
             className={cn(
               "size-2 shrink-0 rounded-full",
-              dotClass[comanda.status],
+              DISPLAY_DOT[displayStatus],
             )}
           />
           <span className="truncate text-sm font-bold text-zinc-900">
@@ -267,7 +246,7 @@ function ComandaRow({
           )}
         >
           {formatElapsed(elapsed)}
-          {comanda.status === "entregado" && " atrás"}
+          {displayStatus === "cerrada" && " atrás"}
         </span>
       </div>
 
@@ -276,7 +255,7 @@ function ComandaRow({
         <ul
           className={cn(
             "mt-2 space-y-0.5 px-3 pb-2 text-xs",
-            comanda.status === "entregado" ? "text-zinc-500" : "text-zinc-700",
+            displayStatus === "cerrada" ? "text-zinc-500" : "text-zinc-700",
           )}
         >
           {comanda.items.slice(0, 4).map((it, i) => (
@@ -285,13 +264,13 @@ function ComandaRow({
               className="flex items-baseline gap-1.5"
             >
               <span className="shrink-0 font-semibold tabular-nums text-zinc-500">
-                {it.quantity}×
+                {it.quantity}x
               </span>
               <span className="truncate font-medium">{it.product_name}</span>
             </li>
           ))}
           {comanda.items.length > 4 && (
-            <li className="text-zinc-400">+{comanda.items.length - 4} más</li>
+            <li className="text-zinc-400">+{comanda.items.length - 4} mas</li>
           )}
         </ul>
       )}
@@ -300,7 +279,7 @@ function ComandaRow({
       <div
         className={cn(
           "flex items-center justify-between gap-2 border-t px-3 py-2",
-          comanda.status === "entregado"
+          displayStatus === "cerrada"
             ? "border-zinc-200/70 bg-zinc-50"
             : "border-zinc-100 bg-zinc-50/50",
         )}
@@ -308,25 +287,14 @@ function ComandaRow({
         <span
           className={cn(
             "inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide",
-            statusClass[comanda.status],
+            DISPLAY_CLASS[displayStatus],
           )}
         >
-          <span className={cn("size-1.5 rounded-full", dotClass[comanda.status])} />
-          {statusLabel[comanda.status]}
+          <span className={cn("size-1.5 rounded-full", DISPLAY_DOT[displayStatus])} />
+          {DISPLAY_LABEL[displayStatus]}
         </span>
 
-        {comanda.status === "pendiente" && (
-          <button
-            type="button"
-            onClick={onEmpezar}
-            disabled={isPending}
-            className="inline-flex items-center gap-1 rounded-full bg-sky-600 px-3 py-1.5 text-xs font-bold text-white transition hover:bg-sky-700 active:translate-y-px disabled:opacity-50"
-          >
-            <Play className="size-3.5" strokeWidth={2.5} />
-            Empezar
-          </button>
-        )}
-        {comanda.status === "en_preparacion" && (
+        {displayStatus === "activa" && (
           <button
             type="button"
             onClick={onMarcarEntregada}
@@ -337,7 +305,6 @@ function ComandaRow({
             Entregar
           </button>
         )}
-        {/* entregado: sin botón, solo el chip */}
       </div>
     </li>
   );

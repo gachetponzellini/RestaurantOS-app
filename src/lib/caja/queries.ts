@@ -5,14 +5,18 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 
 import { calculateExpectedCash } from "./expected-cash";
+import { calcularRendicionMozo } from "./liquidacion-mozo";
 import type {
   Caja,
   CajaConEstado,
   CajaCorte,
   CajaLiveStats,
   CajaMovimiento,
+  CajaUserAssignment,
+  MozoRendicion,
   PaymentMethod,
   PaymentMethodConfig,
+  RendicionMozoPendiente,
 } from "./types";
 
 // Post-migration types not yet regenerated; cast to bypass strict table checks.
@@ -381,6 +385,170 @@ export async function getCortesHoy(
       ...r,
       caja_name: cajaName,
       encargado_name: nameById.get(r.encargado_id) ?? null,
+    };
+  });
+}
+
+// ── Rendición de mozos ──────────────────────────────────────────
+
+async function getUltimaRendicionMozo(
+  mozoId: string,
+  businessId: string,
+): Promise<MozoRendicion | null> {
+  const service = db();
+  const { data } = await service
+    .from("mozo_rendiciones")
+    .select("*")
+    .eq("business_id", businessId)
+    .eq("mozo_id", mozoId)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  return data as MozoRendicion | null;
+}
+
+export async function getRendicionPendienteMozo(
+  mozoId: string,
+  businessId: string,
+  mozoName: string,
+): Promise<RendicionMozoPendiente> {
+  const ultima = await getUltimaRendicionMozo(mozoId, businessId);
+  const service = db();
+
+  let query = service
+    .from("payments")
+    .select("method, amount_cents, tip_cents")
+    .eq("attributed_mozo_id", mozoId)
+    .eq("payment_status", "paid");
+
+  if (ultima) {
+    query = query.gt("created_at", ultima.created_at);
+  }
+
+  const { data } = await query;
+  const payments = (data ?? []) as Array<{
+    method: PaymentMethod;
+    amount_cents: number;
+    tip_cents: number;
+  }>;
+
+  const rendicion = calcularRendicionMozo(payments);
+
+  return {
+    mozo_id: mozoId,
+    mozo_name: mozoName,
+    efectivo_cents: rendicion.efectivo_cents,
+    tickets_cents: rendicion.tickets_cents,
+    por_metodo: rendicion.por_metodo,
+    total_propinas_cents: rendicion.total_propinas_cents,
+    pagos_count: payments.length,
+  };
+}
+
+export async function getRendicionesPendientesTodosLosMozos(
+  businessId: string,
+): Promise<RendicionMozoPendiente[]> {
+  const service = db();
+
+  const { data: mozos } = await service
+    .from("business_users")
+    .select("user_id, full_name, role")
+    .eq("business_id", businessId)
+    .in("role", ["mozo", "encargado"]);
+
+  if (!mozos || mozos.length === 0) return [];
+
+  const results: RendicionMozoPendiente[] = [];
+  for (const m of mozos as Array<{ user_id: string; full_name: string | null; role: string }>) {
+    const pendiente = await getRendicionPendienteMozo(
+      m.user_id,
+      businessId,
+      m.full_name ?? "Sin nombre",
+    );
+    results.push(pendiente);
+  }
+
+  return results;
+}
+
+export async function getRendicionesHistorial(
+  businessId: string,
+  limit = 20,
+): Promise<(MozoRendicion & { mozo_name: string; registered_by_name: string | null })[]> {
+  const service = db();
+  const { data } = await service
+    .from("mozo_rendiciones")
+    .select("*")
+    .eq("business_id", businessId)
+    .order("created_at", { ascending: false })
+    .limit(limit);
+
+  if (!data || data.length === 0) return [];
+
+  const rows = data as MozoRendicion[];
+  const userIds = Array.from(
+    new Set([...rows.map((r) => r.mozo_id), ...rows.map((r) => r.registered_by)]),
+  );
+  const { data: users } = await service
+    .from("business_users")
+    .select("user_id, full_name")
+    .eq("business_id", businessId)
+    .in("user_id", userIds);
+  const nameById = new Map(
+    (users ?? []).map((u) => [
+      (u as { user_id: string }).user_id,
+      (u as { full_name: string | null }).full_name,
+    ]),
+  );
+
+  return rows.map((r) => ({
+    ...r,
+    mozo_name: nameById.get(r.mozo_id) ?? "Sin nombre",
+    registered_by_name: nameById.get(r.registered_by) ?? null,
+  }));
+}
+
+// ── Asignación caja↔usuario ─────────────────────────────────────
+
+export async function getCajaUserAssignments(
+  businessId: string,
+): Promise<(CajaUserAssignment & { user_name: string | null; caja_name: string })[]> {
+  const service = db();
+  const { data } = await service
+    .from("caja_user_assignments")
+    .select("*, cajas!inner(name)")
+    .eq("business_id", businessId)
+    .order("created_at", { ascending: true });
+
+  if (!data || data.length === 0) return [];
+
+  const rows = data as unknown as (CajaUserAssignment & {
+    cajas: { name: string } | { name: string }[];
+  })[];
+
+  const userIds = Array.from(new Set(rows.map((r) => r.user_id)));
+  const { data: users } = await service
+    .from("business_users")
+    .select("user_id, full_name")
+    .eq("business_id", businessId)
+    .in("user_id", userIds);
+  const nameById = new Map(
+    (users ?? []).map((u) => [
+      (u as { user_id: string }).user_id,
+      (u as { full_name: string | null }).full_name,
+    ]),
+  );
+
+  return rows.map((r) => {
+    const cajaName = Array.isArray(r.cajas) ? r.cajas[0].name : r.cajas.name;
+    return {
+      id: r.id,
+      business_id: r.business_id,
+      caja_id: r.caja_id,
+      user_id: r.user_id,
+      created_at: r.created_at,
+      user_name: nameById.get(r.user_id) ?? null,
+      caja_name: cajaName,
     };
   });
 }

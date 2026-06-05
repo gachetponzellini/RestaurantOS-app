@@ -12,6 +12,7 @@ import {
   canManageCajas,
   canMarkRotura,
   canModifyPostEnvio,
+  canRendirMozo,
 } from "./can";
 
 describe("permissions / canModifyPostEnvio", () => {
@@ -131,5 +132,13 @@ describe("permissions / canMakeSangria", () => {
     expect(canMakeSangria("admin")).toBe(true);
     expect(canMakeSangria("encargado")).toBe(true);
     expect(canMakeSangria("mozo")).toBe(false);
+  });
+});
+
+describe("permissions / canRendirMozo", () => {
+  it("admin y encargado pueden, mozo no", () => {
+    expect(canRendirMozo("admin")).toBe(true);
+    expect(canRendirMozo("encargado")).toBe(true);
+    expect(canRendirMozo("mozo")).toBe(false);
   });
 });

@@ -7,6 +7,7 @@ import { createPreference } from "@/lib/payments/mercadopago";
 import { validatePromoCode } from "@/lib/promos/validate";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 
+import { routeOrderToCocina } from "./route-to-cocina";
 import type { CreateOrderInput } from "./schema";
 
 export type CreateOrderResult = {
@@ -621,6 +622,16 @@ export async function persistOrder(
       totalCents,
     },
   });
+
+  // Auto-march (spec-05): pedidos cash van directo a cocina al crearse.
+  // Pedidos MP esperan el webhook de pago aprobado.
+  if (paymentMethod === "cash") {
+    try {
+      await routeOrderToCocina(order.id, business.id);
+    } catch (e) {
+      console.error("auto-march failed (cash)", e);
+    }
+  }
 
   return actionOk({
     order_id: order.id,

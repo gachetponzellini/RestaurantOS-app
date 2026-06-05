@@ -500,11 +500,8 @@ export async function enviarComanda(
  * Marca una comanda como `entregado` cuando el mozo levanta el plato.
  * Cualquier rol que opera salón puede hacerlo (mozo+).
  *
- * **Pre**: la comanda tiene que estar en `en_preparacion`. Una comanda
- * `pendiente` significa "todavía no se imprimió en cocina", no se puede
- * entregar algo que cocina ni siquiera empezó. La transición
- * `pendiente → en_preparacion` la dispara la impresora térmica
- * (Bloque 4b, pendiente). Si está `entregado`, no-op.
+ * Acepta como origen `pendiente` o `en_preparacion` (spec-05: un solo
+ * gesto operativo). Si ya está `entregado`, no-op.
  */
 export async function marcarComandaEntregada(
   comandaId: string,
@@ -530,10 +527,8 @@ export async function marcarComandaEntregada(
   }
   const current = (row as { status: ComandaStatus }).status;
   if (current === "entregado") return actionOk(undefined);
-  if (current !== "en_preparacion") {
-    return actionError(
-      "La comanda todavía no está en preparación. Cocina tiene que recibirla primero.",
-    );
+  if (current !== "en_preparacion" && current !== "pendiente") {
+    return actionError("Estado inesperado de comanda.");
   }
 
   const nowIso = new Date().toISOString();

@@ -325,6 +325,45 @@ export type Database = {
           },
         ]
       }
+      caja_user_assignments: {
+        Row: {
+          business_id: string
+          caja_id: string
+          created_at: string
+          id: string
+          user_id: string
+        }
+        Insert: {
+          business_id: string
+          caja_id: string
+          created_at?: string
+          id?: string
+          user_id: string
+        }
+        Update: {
+          business_id?: string
+          caja_id?: string
+          created_at?: string
+          id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "caja_user_assignments_business_id_fkey"
+            columns: ["business_id"]
+            isOneToOne: false
+            referencedRelation: "businesses"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "caja_user_assignments_caja_id_fkey"
+            columns: ["caja_id"]
+            isOneToOne: false
+            referencedRelation: "cajas"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       cajas: {
         Row: {
           business_id: string
@@ -1074,6 +1113,61 @@ export type Database = {
           },
         ]
       }
+      ingredient_consumptions: {
+        Row: {
+          business_id: string
+          cost_cents_snapshot: number
+          created_at: string
+          id: string
+          ingredient_id: string
+          kind: string
+          order_item_id: string | null
+          quantity: number
+        }
+        Insert: {
+          business_id: string
+          cost_cents_snapshot?: number
+          created_at?: string
+          id?: string
+          ingredient_id: string
+          kind?: string
+          order_item_id?: string | null
+          quantity: number
+        }
+        Update: {
+          business_id?: string
+          cost_cents_snapshot?: number
+          created_at?: string
+          id?: string
+          ingredient_id?: string
+          kind?: string
+          order_item_id?: string | null
+          quantity?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ingredient_consumptions_business_id_fkey"
+            columns: ["business_id"]
+            isOneToOne: false
+            referencedRelation: "businesses"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ingredient_consumptions_ingredient_id_fkey"
+            columns: ["ingredient_id"]
+            isOneToOne: false
+            referencedRelation: "ingredients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ingredient_consumptions_order_item_id_fkey"
+            columns: ["order_item_id"]
+            isOneToOne: false
+            referencedRelation: "order_items"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       ingredient_presentations: {
         Row: {
           cost_cents: number
@@ -1157,94 +1251,39 @@ export type Database = {
           },
         ]
       }
-      ingredient_consumptions: {
-        Row: {
-          id: string
-          business_id: string
-          ingredient_id: string
-          order_item_id: string | null
-          quantity: number
-          cost_cents_snapshot: number
-          kind: string
-          created_at: string
-        }
-        Insert: {
-          id?: string
-          business_id: string
-          ingredient_id: string
-          order_item_id?: string | null
-          quantity: number
-          cost_cents_snapshot?: number
-          kind?: string
-          created_at?: string
-        }
-        Update: {
-          id?: string
-          business_id?: string
-          ingredient_id?: string
-          order_item_id?: string | null
-          quantity?: number
-          cost_cents_snapshot?: number
-          kind?: string
-          created_at?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "ingredient_consumptions_business_id_fkey"
-            columns: ["business_id"]
-            isOneToOne: false
-            referencedRelation: "businesses"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "ingredient_consumptions_ingredient_id_fkey"
-            columns: ["ingredient_id"]
-            isOneToOne: false
-            referencedRelation: "ingredients"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "ingredient_consumptions_order_item_id_fkey"
-            columns: ["order_item_id"]
-            isOneToOne: false
-            referencedRelation: "order_items"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
       ingredient_recipes: {
         Row: {
-          id: string
-          parent_ingredient_id: string
           child_ingredient_id: string
-          quantity: number
+          id: string
           notes: string | null
+          parent_ingredient_id: string
+          quantity: number
         }
         Insert: {
-          id?: string
-          parent_ingredient_id: string
           child_ingredient_id: string
-          quantity: number
+          id?: string
           notes?: string | null
+          parent_ingredient_id: string
+          quantity: number
         }
         Update: {
-          id?: string
-          parent_ingredient_id?: string
           child_ingredient_id?: string
-          quantity?: number
+          id?: string
           notes?: string | null
+          parent_ingredient_id?: string
+          quantity?: number
         }
         Relationships: [
-          {
-            foreignKeyName: "ingredient_recipes_parent_ingredient_id_fkey"
-            columns: ["parent_ingredient_id"]
-            isOneToOne: false
-            referencedRelation: "ingredients"
-            referencedColumns: ["id"]
-          },
           {
             foreignKeyName: "ingredient_recipes_child_ingredient_id_fkey"
             columns: ["child_ingredient_id"]
+            isOneToOne: false
+            referencedRelation: "ingredients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ingredient_recipes_parent_ingredient_id_fkey"
+            columns: ["parent_ingredient_id"]
             isOneToOne: false
             referencedRelation: "ingredients"
             referencedColumns: ["id"]
@@ -1474,6 +1513,53 @@ export type Database = {
             columns: ["group_id"]
             isOneToOne: false
             referencedRelation: "modifier_groups"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      mozo_rendiciones: {
+        Row: {
+          business_id: string
+          created_at: string
+          delivered_cash_cents: number
+          difference_cents: number
+          expected_cash_cents: number
+          id: string
+          mozo_id: string
+          notes: string | null
+          por_metodo: Json
+          registered_by: string
+        }
+        Insert: {
+          business_id: string
+          created_at?: string
+          delivered_cash_cents?: number
+          difference_cents?: number
+          expected_cash_cents?: number
+          id?: string
+          mozo_id: string
+          notes?: string | null
+          por_metodo?: Json
+          registered_by: string
+        }
+        Update: {
+          business_id?: string
+          created_at?: string
+          delivered_cash_cents?: number
+          difference_cents?: number
+          expected_cash_cents?: number
+          id?: string
+          mozo_id?: string
+          notes?: string | null
+          por_metodo?: Json
+          registered_by?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "mozo_rendiciones_business_id_fkey"
+            columns: ["business_id"]
+            isOneToOne: false
+            referencedRelation: "businesses"
             referencedColumns: ["id"]
           },
         ]
@@ -2586,6 +2672,153 @@ export type Database = {
           },
         ]
       }
+      supplier_ingredients: {
+        Row: {
+          business_id: string
+          created_at: string
+          ingredient_id: string
+          supplier_id: string
+        }
+        Insert: {
+          business_id: string
+          created_at?: string
+          ingredient_id: string
+          supplier_id: string
+        }
+        Update: {
+          business_id?: string
+          created_at?: string
+          ingredient_id?: string
+          supplier_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "supplier_ingredients_business_id_fkey"
+            columns: ["business_id"]
+            isOneToOne: false
+            referencedRelation: "businesses"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "supplier_ingredients_ingredient_id_fkey"
+            columns: ["ingredient_id"]
+            isOneToOne: false
+            referencedRelation: "ingredients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "supplier_ingredients_supplier_id_fkey"
+            columns: ["supplier_id"]
+            isOneToOne: false
+            referencedRelation: "suppliers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      supplier_invoices: {
+        Row: {
+          business_id: string
+          created_at: string
+          created_by: string | null
+          id: string
+          invoice_date: string
+          invoice_number: string | null
+          notes: string | null
+          photo_url: string | null
+          supplier_id: string
+          total_cents: number
+        }
+        Insert: {
+          business_id: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          invoice_date: string
+          invoice_number?: string | null
+          notes?: string | null
+          photo_url?: string | null
+          supplier_id: string
+          total_cents: number
+        }
+        Update: {
+          business_id?: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          invoice_date?: string
+          invoice_number?: string | null
+          notes?: string | null
+          photo_url?: string | null
+          supplier_id?: string
+          total_cents?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "supplier_invoices_business_id_fkey"
+            columns: ["business_id"]
+            isOneToOne: false
+            referencedRelation: "businesses"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "supplier_invoices_supplier_id_fkey"
+            columns: ["supplier_id"]
+            isOneToOne: false
+            referencedRelation: "suppliers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      suppliers: {
+        Row: {
+          business_id: string
+          contact: string | null
+          created_at: string
+          cuit: string | null
+          email: string | null
+          id: string
+          is_active: boolean
+          name: string
+          notes: string | null
+          phone: string | null
+          updated_at: string
+        }
+        Insert: {
+          business_id: string
+          contact?: string | null
+          created_at?: string
+          cuit?: string | null
+          email?: string | null
+          id?: string
+          is_active?: boolean
+          name: string
+          notes?: string | null
+          phone?: string | null
+          updated_at?: string
+        }
+        Update: {
+          business_id?: string
+          contact?: string | null
+          created_at?: string
+          cuit?: string | null
+          email?: string | null
+          id?: string
+          is_active?: boolean
+          name?: string
+          notes?: string | null
+          phone?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "suppliers_business_id_fkey"
+            columns: ["business_id"]
+            isOneToOne: false
+            referencedRelation: "businesses"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       tables: {
         Row: {
           created_at: string
@@ -2752,6 +2985,18 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      fn_explode_ingredient: {
+        Args: { p_ingredient_id: string; p_quantity: number }
+        Returns: {
+          leaf_cost_per_unit: number
+          leaf_ingredient_id: string
+          leaf_quantity: number
+        }[]
+      }
+      fn_ingredient_cost_per_unit: {
+        Args: { p_ingredient_id: string }
+        Returns: number
+      }
       increment_promo_use: {
         Args: { p_business_id: string; p_promo_id: string }
         Returns: boolean

@@ -16,6 +16,7 @@ export function ImageUploader({
   pathPrefix,
   variant = "avatar-square",
   layout = "auto",
+  returnPath = false,
 }: {
   businessId: string;
   value: string | null;
@@ -24,6 +25,7 @@ export function ImageUploader({
   pathPrefix?: string;
   variant?: "avatar-square" | "avatar-circle" | "cover";
   layout?: "auto" | "stacked";
+  returnPath?: boolean;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
@@ -51,8 +53,12 @@ export function ImageUploader({
         toast.error("No pudimos subir la imagen.");
         return;
       }
-      const { data } = supabase.storage.from(bucket).getPublicUrl(path);
-      onChange(data.publicUrl);
+      if (returnPath) {
+        onChange(path);
+      } else {
+        const { data } = supabase.storage.from(bucket).getPublicUrl(path);
+        onChange(data.publicUrl);
+      }
     } finally {
       setUploading(false);
       if (inputRef.current) inputRef.current.value = "";
@@ -77,7 +83,7 @@ export function ImageUploader({
   return (
     <div className={wrapperClass}>
       <div className={previewClass}>
-        {value ? (
+        {value && !returnPath ? (
           <Image
             src={value}
             alt="Imagen"
@@ -85,6 +91,10 @@ export function ImageUploader({
             sizes={sizes}
             className="object-cover"
           />
+        ) : value && returnPath ? (
+          <div className="text-muted-foreground flex size-full items-center justify-center text-xs">
+            <ImagePlus className={isCover ? "size-8" : "size-6"} />
+          </div>
         ) : (
           <div className="text-muted-foreground flex size-full items-center justify-center">
             <ImagePlus className={isCover ? "size-8" : "size-6"} />

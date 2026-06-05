@@ -96,6 +96,10 @@ export function canMakeSangria(role: BusinessRole): boolean {
   return role === "admin" || role === "encargado";
 }
 
+export function canRendirMozo(role: BusinessRole): boolean {
+  return role === "admin" || role === "encargado";
+}
+
 // ── Estados de mesa (CU-07 + CU-11) ─────────────────────────────
 
 /**
@@ -142,5 +146,11 @@ export function canTransferTable(
  * puede asignar mesas a otros — solo se auto-asigna por walk-in (CU-09 R2).
  */
 export function canAssignMozo(role: BusinessRole): boolean {
+  return role === "admin" || role === "encargado";
+}
+
+// ── Proveedores ────────────────────────────────────────────────
+
+export function canManageProveedores(role: BusinessRole): boolean {
   return role === "admin" || role === "encargado";
 }

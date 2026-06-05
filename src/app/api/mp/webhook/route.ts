@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { closeOrderIfFullyPaid } from "@/lib/billing/cobro-actions";
+import { routeOrderToCocina } from "@/lib/orders/route-to-cocina";
 import { fetchPayment, verifySignature } from "@/lib/payments/mercadopago";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 
@@ -245,6 +246,15 @@ export async function POST(req: Request) {
   if (updErr) {
     console.error("MP webhook: update failed", updErr);
     return NextResponse.json({ error: "update failed" }, { status: 500 });
+  }
+
+  // Auto-march (spec-05): pago aprobado → rutear a cocina.
+  if (nextPaymentStatus === "paid") {
+    try {
+      await routeOrderToCocina(order.id, order.business_id);
+    } catch (e) {
+      console.error("MP webhook: auto-march failed", e);
+    }
   }
 
   return NextResponse.json({ ok: true, payment_status: nextPaymentStatus });

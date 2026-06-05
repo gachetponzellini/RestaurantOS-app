@@ -12,12 +12,13 @@ import {
   canHacerCorte,
   canMakeSangria,
   canManageCajas,
+  canRendirMozo,
 } from "@/lib/permissions/can";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 import { getBusiness } from "@/lib/tenant";
 
-import { getCajaLiveStats } from "./queries";
-import type { CajaCorte, PaymentMethod } from "./types";
+import { getCajaLiveStats, getRendicionPendienteMozo } from "./queries";
+import type { CajaCorte, MozoRendicion, PaymentMethod } from "./types";
 
 type GenericClient = SupabaseClient;
 
@@ -359,6 +360,155 @@ export async function upsertPaymentMethodConfig(
   revalidatePath(`/${businessSlug}/admin/configuracion`);
   revalidatePath(`/${businessSlug}/mozo`);
   revalidatePath(`/${businessSlug}/admin/local`);
+  return actionOk(undefined);
+}
+
+// ── Rendición de mozos ──────────────────────────────────────────
+
+export async function registrarRendicionMozo(
+  mozoId: string,
+  delivered_cash_cents: number,
+  notes: string | null,
+  businessSlug: string,
+): Promise<ActionResult<{ rendicion: MozoRendicion }>> {
+  const business = await getBusiness(businessSlug);
+  if (!business) return actionError("Negocio no encontrado.");
+
+  const ctxResult = await requireMozoActionContext(business.id);
+  if (!ctxResult.ok) return ctxResult;
+  const ctx = ctxResult.data;
+
+  if (!canRendirMozo(ctx.role)) {
+    return actionError("Solo encargado o admin pueden registrar una rendición.");
+  }
+  if (delivered_cash_cents < 0) {
+    return actionError("El monto entregado no puede ser negativo.");
+  }
+
+  const service = createSupabaseServiceClient() as unknown as GenericClient;
+
+  const { data: mozoUser } = await service
+    .from("business_users")
+    .select("user_id, full_name")
+    .eq("business_id", business.id)
+    .eq("user_id", mozoId)
+    .maybeSingle();
+  if (!mozoUser) return actionError("El mozo no pertenece a este negocio.");
+
+  const pendiente = await getRendicionPendienteMozo(
+    mozoId,
+    business.id,
+    (mozoUser as { full_name: string | null }).full_name ?? "Sin nombre",
+  );
+
+  const expected_cash_cents = pendiente.efectivo_cents;
+  const difference_cents = delivered_cash_cents - expected_cash_cents;
+
+  if (difference_cents !== 0 && (!notes || notes.trim() === "")) {
+    return actionError(
+      "Hay diferencia entre lo esperado y lo entregado. Registrá el motivo.",
+    );
+  }
+
+  const { data: inserted, error } = await service
+    .from("mozo_rendiciones")
+    .insert({
+      business_id: business.id,
+      mozo_id: mozoId,
+      registered_by: ctx.userId,
+      expected_cash_cents,
+      delivered_cash_cents,
+      difference_cents,
+      notes: notes?.trim() || null,
+      por_metodo: pendiente.por_metodo,
+    })
+    .select("*")
+    .single();
+
+  if (error) return actionError(`No se pudo registrar la rendición: ${error.message}`);
+
+  revalidatePath(`/${businessSlug}/admin/local`);
+  return actionOk({ rendicion: inserted as MozoRendicion });
+}
+
+// ── Asignación caja↔usuario ─────────────────────────────────────
+
+export async function asignarCajaUsuario(
+  cajaId: string,
+  userId: string,
+  businessSlug: string,
+): Promise<ActionResult<void>> {
+  const business = await getBusiness(businessSlug);
+  if (!business) return actionError("Negocio no encontrado.");
+
+  const ctxResult = await requireMozoActionContext(business.id);
+  if (!ctxResult.ok) return ctxResult;
+  const ctx = ctxResult.data;
+
+  if (!canManageCajas(ctx.role)) {
+    return actionError("Solo admin puede asignar cajas a usuarios.");
+  }
+
+  const service = createSupabaseServiceClient() as unknown as GenericClient;
+
+  const caja = await loadCajaForBusiness(service, cajaId, business.id);
+  if (!caja) return actionError("Caja no encontrada en este negocio.");
+
+  const { data: bu } = await service
+    .from("business_users")
+    .select("user_id")
+    .eq("business_id", business.id)
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (!bu) return actionError("El usuario no pertenece a este negocio.");
+
+  const { error } = await service
+    .from("caja_user_assignments")
+    .upsert(
+      {
+        business_id: business.id,
+        caja_id: cajaId,
+        user_id: userId,
+      },
+      { onConflict: "business_id,caja_id,user_id" },
+    );
+
+  if (error) return actionError(`No se pudo asignar la caja: ${error.message}`);
+
+  revalidatePath(`/${businessSlug}/admin/local`);
+  revalidatePath(`/${businessSlug}/admin/cajas`);
+  return actionOk(undefined);
+}
+
+export async function desasignarCajaUsuario(
+  cajaId: string,
+  userId: string,
+  businessSlug: string,
+): Promise<ActionResult<void>> {
+  const business = await getBusiness(businessSlug);
+  if (!business) return actionError("Negocio no encontrado.");
+
+  const ctxResult = await requireMozoActionContext(business.id);
+  if (!ctxResult.ok) return ctxResult;
+  const ctx = ctxResult.data;
+
+  if (!canManageCajas(ctx.role)) {
+    return actionError("Solo admin puede desasignar cajas.");
+  }
+
+  const service = createSupabaseServiceClient() as unknown as GenericClient;
+
+  const { error } = await service
+    .from("caja_user_assignments")
+    .delete()
+    .eq("business_id", business.id)
+    .eq("caja_id", cajaId)
+    .eq("user_id", userId);
+
+  if (error) return actionError(`No se pudo desasignar: ${error.message}`);
+
+  revalidatePath(`/${businessSlug}/admin/local`);
+  revalidatePath(`/${businessSlug}/admin/cajas`);
   return actionOk(undefined);
 }
 
