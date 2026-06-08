@@ -1,0 +1,30 @@
+name: CI
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Detect Node project
+        id: d
+        run: |
+          if [ -f package.json ]; then echo "node=yes" >> "$GITHUB_OUTPUT"; else echo "node=no" >> "$GITHUB_OUTPUT"; fi
+      - uses: actions/setup-node@v4
+        if: steps.d.outputs.node == 'yes'
+        with:
+          node-version: '20'
+      - name: Install
+        if: steps.d.outputs.node == 'yes'
+        run: npm ci || npm install
+      - name: Lint
+        if: steps.d.outputs.node == 'yes'
+        run: npm run lint --if-present
+      - name: Build
+        if: steps.d.outputs.node == 'yes'
+        run: npm run build --if-present
+      - name: Test
+        if: steps.d.outputs.node == 'yes'
+        run: npm test --if-present
