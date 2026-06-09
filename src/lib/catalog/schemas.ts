@@ -22,6 +22,9 @@ export const StationInput = z.object({
   name: z.string().min(1, "Requerido.").max(60),
   sort_order: z.number().int().min(0),
   is_active: z.boolean(),
+  // Caja de bar (spec 08): si el sector expide a comanda. La barra marca
+  // bebidas/kiosco en `false`; el resto queda en `true` (default de la columna).
+  routes_to_comanda: z.boolean(),
 });
 export type StationInput = z.infer<typeof StationInput>;
 

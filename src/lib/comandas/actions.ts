@@ -11,6 +11,7 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 import { getBusiness } from "@/lib/tenant";
 
+import { itemGeneraComanda } from "./bar-routing";
 import { createComandasForItems } from "./route-items";
 import { resolveStation } from "./routing";
 import type { ComandaStatus, KitchenItemStatus } from "./types";
@@ -90,7 +91,7 @@ export async function enviarComanda(
   // Cross-tenant: la mesa debe pertenecer a un floor_plan de este business.
   const { data: table } = await service
     .from("tables")
-    .select("id, operational_status, opened_at, floor_plans!inner(business_id)")
+    .select("id, operational_status, opened_at, is_bar, floor_plans!inner(business_id)")
     .eq("id", input.tableId)
     .maybeSingle();
   const tableBusinessId =
@@ -249,6 +250,25 @@ export async function enviarComanda(
     orderId = (created as { id: string }).id;
   }
 
+  // Caja de bar (spec 08): si la mesa es de barra, los items NO generan
+  // comanda salvo los de sectores que expiden (sanguchería/tostados/tocaditos,
+  // `stations.routes_to_comanda = true`). Para el salón normal `tableIsBar` es
+  // false y el ruteo a sectores queda idéntico al actual.
+  const tableIsBar = (table as { is_bar?: boolean }).is_bar === true;
+  const stationExpideById = new Map<string, boolean>();
+  if (tableIsBar) {
+    const { data: stationRows } = await service
+      .from("stations")
+      .select("id, routes_to_comanda")
+      .eq("business_id", business.id);
+    for (const s of (stationRows ?? []) as {
+      id: string;
+      routes_to_comanda: boolean;
+    }[]) {
+      stationExpideById.set(s.id, s.routes_to_comanda);
+    }
+  }
+
   // Insertamos order_items con station_id resuelto + snapshots de modifiers.
   // Items sin station resoluble (ej: bebidas en negocios sin sector "Barra")
   // se insertan con `station_id=null` y NO generan comanda — el mozo los
@@ -318,8 +338,17 @@ export async function enviarComanda(
       }
     }
 
-    // Solo agregar a la comanda si no es item de stock (bebidas skip cocina).
-    if (stationId && !isStockItem) {
+    // Solo agregar a la comanda si no es item de stock (bebidas skip cocina) y,
+    // en mesa de bar, si el sector expide a comanda (spec 08). Default `true`:
+    // un sector del negocio sin la marca cargada se trata como expide (imprime).
+    const stationExpide = stationId
+      ? stationExpideById.get(stationId) ?? true
+      : false;
+    if (
+      stationId &&
+      !isStockItem &&
+      itemGeneraComanda({ tableIsBar, stationExpide })
+    ) {
       const bucket = itemsByStation.get(stationId) ?? [];
       bucket.push((itemRow as { id: string }).id);
       itemsByStation.set(stationId, bucket);
@@ -436,9 +465,12 @@ export async function enviarComanda(
           .single();
 
         if (childRow && childStation) {
-          const bucket = itemsByStation.get(childStation) ?? [];
-          bucket.push((childRow as { id: string }).id);
-          itemsByStation.set(childStation, bucket);
+          const childExpide = stationExpideById.get(childStation) ?? true;
+          if (itemGeneraComanda({ tableIsBar, stationExpide: childExpide })) {
+            const bucket = itemsByStation.get(childStation) ?? [];
+            bucket.push((childRow as { id: string }).id);
+            itemsByStation.set(childStation, bucket);
+          }
         }
       }
     }

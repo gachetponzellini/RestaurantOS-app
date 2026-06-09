@@ -291,6 +291,7 @@ export function FloorPlanEditor({ businessSlug, businessId, plan, tables }: Prop
           height: t.height,
           rotation: t.rotation,
           status: t.status,
+          is_bar: t.is_bar,
         })),
       });
       if (result.ok) {
@@ -771,6 +772,37 @@ export function FloorPlanEditor({ businessSlug, businessId, plan, tables }: Prop
               Las deshabilitadas no se ofrecen en el motor de reservas pero conservan
               el historial.
             </p>
+
+            {/* Barra: venta directa sin mozo (spec 08) */}
+            <div className="flex items-center justify-between rounded-lg border bg-muted/30 p-3">
+              <div className="pr-3">
+                <Label htmlFor="fp-isbar" className="cursor-pointer">
+                  Barra (venta directa)
+                </Label>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  Vende y cobra sin mozo. No manda a comanda, salvo los sectores
+                  marcados &quot;Sale a comanda&quot;. Queda fuera de reservas.
+                </p>
+              </div>
+              <button
+                id="fp-isbar"
+                type="button"
+                onClick={() => updateSelected({ is_bar: !selected.is_bar })}
+                role="switch"
+                aria-checked={selected.is_bar}
+                className={cn(
+                  "relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition",
+                  selected.is_bar ? "bg-emerald-600" : "bg-muted-foreground/30",
+                )}
+              >
+                <span
+                  className={cn(
+                    "inline-block h-5 w-5 transform rounded-full bg-white shadow transition",
+                    selected.is_bar ? "translate-x-5" : "translate-x-0.5",
+                  )}
+                />
+              </button>
+            </div>
           </div>
         ) : (
           <div className="rounded-xl border border-dashed bg-card/50 p-6 text-center">

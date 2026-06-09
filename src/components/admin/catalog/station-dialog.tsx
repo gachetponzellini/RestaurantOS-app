@@ -56,15 +56,18 @@ export function StationDialog({
           name: station.name,
           sort_order: station.sort_order,
           is_active: station.is_active,
+          routes_to_comanda: station.routes_to_comanda,
         }
       : {
           name: "",
           sort_order: defaultSortOrder,
           is_active: true,
+          routes_to_comanda: true,
         },
   });
 
   const isActive = form.watch("is_active");
+  const routesToComanda = form.watch("routes_to_comanda");
 
   const onSubmit = async (values: StationInput) => {
     setSubmitting(true);
@@ -165,6 +168,45 @@ export function StationDialog({
                       <span
                         className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition ${
                           isActive ? "translate-x-5" : "translate-x-0.5"
+                        }`}
+                      />
+                    </button>
+                  </div>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            {/* routes_to_comanda toggle (caja de bar — spec 08) */}
+            <FormField
+              control={form.control}
+              name="routes_to_comanda"
+              render={({ field }) => (
+                <FormItem>
+                  <div className="flex items-center justify-between rounded-2xl bg-zinc-50 p-3 ring-1 ring-zinc-100">
+                    <div>
+                      <FormLabel className="cursor-pointer">
+                        Sale a comanda
+                      </FormLabel>
+                      <p className="mt-0.5 text-xs text-zinc-500">
+                        En la barra (venta directa), solo los sectores con esto
+                        activo imprimen comanda — ej. sanguchería/tostados.
+                        Bebidas y kiosco se venden sin mandar a cocina. En el
+                        salón normal no cambia nada.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => field.onChange(!field.value)}
+                      role="switch"
+                      aria-checked={routesToComanda}
+                      className={`relative ml-3 inline-flex h-6 w-11 shrink-0 items-center rounded-full transition ${
+                        routesToComanda ? "bg-emerald-600" : "bg-zinc-300"
+                      }`}
+                    >
+                      <span
+                        className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition ${
+                          routesToComanda ? "translate-x-5" : "translate-x-0.5"
                         }`}
                       />
                     </button>

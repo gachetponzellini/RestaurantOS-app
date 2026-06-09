@@ -21,6 +21,7 @@ export type EditorTable = {
   height: number;
   rotation: number;
   status: TableStatus;
+  is_bar: boolean;
 };
 
 type Tool = "select" | "add-circle" | "add-square" | "add-rect";
@@ -104,6 +105,7 @@ export const useFloorPlanStore = create<State & Actions>((set, get) => ({
         height: t.height,
         rotation: t.rotation,
         status: t.status,
+        is_bar: t.is_bar ?? false,
       })),
       selectedLocalId: null,
       dirty: false,
@@ -135,6 +137,7 @@ export const useFloorPlanStore = create<State & Actions>((set, get) => ({
       height: def.height,
       rotation: 0,
       status: "active",
+      is_bar: false,
     };
     set({ tables: [...tables, next], selectedLocalId: localId, dirty: true, tool: "select" });
   },

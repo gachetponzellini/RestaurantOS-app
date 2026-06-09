@@ -40,6 +40,9 @@ export type FloorTable = {
   opened_at?: string | null;
   // Added in migration 0029 (CU-09) — mozo asignado actualmente.
   mozo_id?: string | null;
+  // Added in migration 0055 (spec 08) — mesa de barra: venta directa, fuera
+  // del motor de reservas. Opcional para compilar sin la columna.
+  is_bar?: boolean;
 };
 
 /**

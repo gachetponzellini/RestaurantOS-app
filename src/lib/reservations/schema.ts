@@ -16,6 +16,8 @@ export const FloorTableInputSchema = z.object({
   height: z.coerce.number().int().min(20),
   rotation: z.coerce.number().int().min(-360).max(360).default(0),
   status: TableStatusSchema.default("active"),
+  // Mesa de barra (spec 08): venta directa, fuera del motor de reservas.
+  is_bar: z.boolean().default(false),
 });
 
 export const SaveFloorPlanInputSchema = z.object({

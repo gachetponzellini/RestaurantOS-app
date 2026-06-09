@@ -173,6 +173,7 @@ export async function saveFloorPlan(input: unknown): Promise<ActionResult<{ id: 
         height: t.height,
         rotation: t.rotation,
         status: t.status,
+        is_bar: t.is_bar,
       })
       .eq("id", t.id)
       .eq("floor_plan_id", planId);
@@ -196,6 +197,7 @@ export async function saveFloorPlan(input: unknown): Promise<ActionResult<{ id: 
       height: t.height,
       rotation: t.rotation,
       status: t.status,
+      is_bar: t.is_bar,
     }));
   if (newRows.length > 0) {
     const { error } = await service.from("tables").insert(newRows);

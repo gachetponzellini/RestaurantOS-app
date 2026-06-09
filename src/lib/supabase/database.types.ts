@@ -2487,6 +2487,7 @@ export type Database = {
           id: string
           is_active: boolean
           name: string
+          routes_to_comanda: boolean
           sort_order: number
         }
         Insert: {
@@ -2495,6 +2496,7 @@ export type Database = {
           id?: string
           is_active?: boolean
           name: string
+          routes_to_comanda?: boolean
           sort_order?: number
         }
         Update: {
@@ -2503,6 +2505,7 @@ export type Database = {
           id?: string
           is_active?: boolean
           name?: string
+          routes_to_comanda?: boolean
           sort_order?: number
         }
         Relationships: [
@@ -2826,6 +2829,7 @@ export type Database = {
           floor_plan_id: string
           height: number
           id: string
+          is_bar: boolean
           label: string
           mozo_id: string | null
           opened_at: string | null
@@ -2844,6 +2848,7 @@ export type Database = {
           floor_plan_id: string
           height: number
           id?: string
+          is_bar?: boolean
           label: string
           mozo_id?: string | null
           opened_at?: string | null
@@ -2862,6 +2867,7 @@ export type Database = {
           floor_plan_id?: string
           height?: number
           id?: string
+          is_bar?: boolean
           label?: string
           mozo_id?: string | null
           opened_at?: string | null

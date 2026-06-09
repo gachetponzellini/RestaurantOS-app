@@ -61,6 +61,7 @@ export type AdminStation = {
   name: string;
   sort_order: number;
   is_active: boolean;
+  routes_to_comanda: boolean;
 };
 
 export async function getAdminCatalog(businessId: string) {
@@ -78,7 +79,7 @@ export async function getAdminCatalog(businessId: string) {
       .order("sort_order"),
     supabase
       .from("stations")
-      .select("id, name, sort_order, is_active")
+      .select("id, name, sort_order, is_active, routes_to_comanda")
       .eq("business_id", businessId)
       .order("sort_order"),
     supabase
