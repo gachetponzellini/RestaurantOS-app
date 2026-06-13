@@ -151,6 +151,7 @@ export async function checkAvailabilityForChatbot(
   const tables = await getBusinessTables(businessId, {
     useService: true,
     floorPlanId: floorPlanId ?? null,
+    excludeBar: true,
   });
 
   // Reservations across the whole day (in TZ). We pad by 1 day on each side
@@ -325,6 +326,7 @@ export async function createReservationIntent(input: {
   const tables = await getBusinessTables(input.businessId, {
     useService: true,
     floorPlanId: input.floorPlanId ?? null,
+    excludeBar: true,
   });
   const dayStart = fromZonedTime(`${input.date}T00:00:00`, business.timezone);
   const dayEnd = new Date(dayStart.getTime() + 24 * 60 * 60 * 1000);

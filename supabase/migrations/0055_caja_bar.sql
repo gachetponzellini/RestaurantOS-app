@@ -1,24 +1,20 @@
--- 0055: Caja de bar — venta directa sin mozo + excepción de ruteo a comanda (spec 08)
+-- 0055: Caja de bar — mesa de venta directa, fuera del motor de reservas (spec 08)
 
--- Mesa de barra: vende directo, abre/cierra rápido y queda fuera del motor de
--- reservas. Ortogonal a `status` (active/disabled): una barra puede estar
--- activa y, aun así, no ofrecerse para reservar.
+-- Mesa de barra: vende directo (sin mozo, abre/cierra rápido) y queda FUERA del
+-- motor de reservas (no se auto-asigna ni se ofrece para reservar — ver
+-- getBusinessTables con `excludeBar`). Ortogonal a `status` (active/disabled).
+--
+-- El ruteo de comandas NO se toca: un item genera comanda según su sector/stock
+-- como siempre, sea barra o salón. Los productos de barra (kiosco sin sector,
+-- bebidas con track_stock) ya no imprimen; la sanguchería/tostados tienen sector
+-- y sí imprimen. No hace falta un flag por sector.
 alter table public.tables
   add column if not exists is_bar boolean not null default false;
 
--- Sector que expide a comanda. Default `true` = comportamiento actual (todos
--- los sectores imprimen su comanda). En la barra, bebidas/kiosco se marcan en
--- `false`; sanguchería/tostados/tocaditos quedan en `true` y sí salen a su
--- sector. La regla solo se aplica cuando la mesa es de bar (ver bar-routing.ts).
-alter table public.stations
-  add column if not exists routes_to_comanda boolean not null default true;
-
--- Lookup de mesas de barra por plano. Índice parcial: solo indexa las pocas
--- mesas con is_bar = true.
+-- Lookup de mesas de barra por plano. Índice parcial: solo indexa is_bar = true.
 create index if not exists idx_tables_bar
   on public.tables (floor_plan_id)
   where is_bar;
 
--- RLS: `tables` (scope vía floor_plans.business_id) y `stations` (business_id
--- directo) ya tienen policies que cubren estas columnas nuevas. No hace falta
--- policy nueva — las columnas heredan el scope de su fila.
+-- RLS: `tables` ya tiene policies por business_id (vía floor_plans). La columna
+-- nueva hereda ese scope; no hace falta policy nueva.

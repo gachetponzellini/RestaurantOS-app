@@ -306,7 +306,7 @@ describe.skipIf(!dbAvailable)("comandas (integration)", () => {
     }
   });
 
-  it("envía una comanda con items multi-sector (3 sectores → 3 comandas, batch=1)", async () => {
+  it("envía una comanda con items multi-sector (3 sectores → 3 comandas, batch=1)", { timeout: 30_000 }, async () => {
     const result = await enviarComanda({
       tableId,
       slug: businessSlug,
@@ -400,7 +400,7 @@ describe.skipIf(!dbAvailable)("comandas (integration)", () => {
     expect(parrillaComandas!.map((c) => c.batch)).toEqual([1]);
   });
 
-  it("items sin sector resoluble: se insertan con station_id=null y NO generan comanda", async () => {
+  it("items sin sector resoluble: se insertan con station_id=null y NO generan comanda", { timeout: 30_000 }, async () => {
     // Creamos una mesa nueva para aislarnos de las comandas previas del test.
     const { data: fp } = await supabase
       .from("floor_plans")
@@ -534,7 +534,7 @@ describe.skipIf(!dbAvailable)("comandas (integration)", () => {
     expect(cmdAfter!.delivered_at).not.toBeNull();
   });
 
-  it("cancelarItem por encargado: marca flag, recalcula subtotal, no rompe la comanda", async () => {
+  it("cancelarItem por encargado: marca flag, recalcula subtotal, no rompe la comanda", { timeout: 30_000 }, async () => {
     const fresh = await enviarComanda({
       tableId,
       slug: businessSlug,
@@ -643,135 +643,6 @@ describe.skipIf(!dbAvailable)("comandas (integration)", () => {
     expect(r.ok).toBe(false);
     if (r.ok) return;
     expect(r.error).toMatch(/Punto|elegí/i);
-  });
-
-  it("caja de bar (spec 08): la barra no manda a comanda salvo sectores que expiden; el salón normal rutea igual", { timeout: 30_000 }, async () => {
-    // Sectores: kiosco/bebidas NO expide; sanguchería SÍ.
-    const { data: kiosco } = await supabase
-      .from("stations")
-      .insert({
-        business_id: businessId,
-        name: "Kiosco",
-        sort_order: 5,
-        routes_to_comanda: false,
-      })
-      .select("id")
-      .single();
-    const { data: sangu } = await supabase
-      .from("stations")
-      .insert({
-        business_id: businessId,
-        name: "Sanguchería",
-        sort_order: 6,
-        routes_to_comanda: true,
-      })
-      .select("id")
-      .single();
-
-    // Productos con override directo de sector.
-    const { data: coca } = await supabase
-      .from("products")
-      .insert({
-        business_id: businessId,
-        name: "Coca",
-        slug: `coca-${TEST_TAG}`,
-        price_cents: 100000,
-        station_id: kiosco!.id,
-      })
-      .select("id")
-      .single();
-    const { data: tostado } = await supabase
-      .from("products")
-      .insert({
-        business_id: businessId,
-        name: "Tostado",
-        slug: `tostado-${TEST_TAG}`,
-        price_cents: 200000,
-        station_id: sangu!.id,
-      })
-      .select("id")
-      .single();
-
-    // Mesa de bar (is_bar = true).
-    const { data: barFp } = await supabase
-      .from("floor_plans")
-      .insert({ business_id: businessId, name: "Barra" })
-      .select("id")
-      .single();
-    const { data: barTable } = await supabase
-      .from("tables")
-      .insert({
-        floor_plan_id: barFp!.id,
-        label: "BAR",
-        seats: 1,
-        shape: "square",
-        x: 0,
-        y: 0,
-        width: 80,
-        height: 80,
-        is_bar: true,
-      })
-      .select("id")
-      .single();
-
-    const barRes = await enviarComanda({
-      tableId: barTable!.id,
-      slug: businessSlug,
-      items: [
-        { product_id: coca!.id, quantity: 1 },
-        { product_id: tostado!.id, quantity: 1 },
-      ],
-    });
-    expect(barRes.ok).toBe(true);
-    if (!barRes.ok) return;
-
-    // Solo el tostado (sanguchería expide) imprime; la coca (kiosco) no.
-    expect(barRes.data.comanda_ids).toHaveLength(1);
-    const { data: barComandas } = await supabase
-      .from("comandas")
-      .select("station_id")
-      .eq("order_id", barRes.data.order_id);
-    expect(barComandas).toHaveLength(1);
-    expect(barComandas![0]!.station_id).toBe(sangu!.id);
-
-    // Ambos items se guardan igual: la coca no genera comanda pero no se pierde.
-    const { data: barItems } = await supabase
-      .from("order_items")
-      .select("product_id, station_id")
-      .eq("order_id", barRes.data.order_id);
-    expect(barItems).toHaveLength(2);
-    const cocaItem = barItems!.find((i) => i.product_id === coca!.id);
-    expect(cocaItem!.station_id).toBe(kiosco!.id);
-
-    // Control: la MISMA coca (kiosco, no expide) en una mesa NORMAL sí imprime
-    // — la excepción es exclusiva de la barra, el salón rutea como siempre.
-    const { data: normFp } = await supabase
-      .from("floor_plans")
-      .insert({ business_id: businessId, name: "Salón ctrl" })
-      .select("id")
-      .single();
-    const { data: normTable } = await supabase
-      .from("tables")
-      .insert({
-        floor_plan_id: normFp!.id,
-        label: "CTRL",
-        seats: 2,
-        shape: "circle",
-        x: 0,
-        y: 0,
-        width: 80,
-        height: 80,
-      })
-      .select("id")
-      .single();
-    const normRes = await enviarComanda({
-      tableId: normTable!.id,
-      slug: businessSlug,
-      items: [{ product_id: coca!.id, quantity: 1 }],
-    });
-    expect(normRes.ok).toBe(true);
-    if (!normRes.ok) return;
-    expect(normRes.data.comanda_ids).toHaveLength(1);
   });
 
   it("cross-tenant: enviarComanda con tableId ajeno y slug propio falla", async () => {

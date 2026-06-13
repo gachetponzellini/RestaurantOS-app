@@ -50,6 +50,7 @@ export async function fetchAvailability(
   const tables = await getBusinessTables(b.id, {
     useService: true,
     floorPlanId: parsed.data.floor_plan_id ?? null,
+    excludeBar: true,
   });
 
   // Pull reservations covering the full day (in business timezone) plus one

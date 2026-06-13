@@ -55,7 +55,11 @@ export async function getReservationSettings(
  */
 export async function getBusinessTables(
   businessId: string,
-  options: { useService?: boolean; floorPlanId?: string | null } = {},
+  options: {
+    useService?: boolean;
+    floorPlanId?: string | null;
+    excludeBar?: boolean;
+  } = {},
 ): Promise<FloorTable[]> {
   const supabase = options.useService
     ? (createSupabaseServiceClient() as unknown as GenericClient)
@@ -84,10 +88,14 @@ export async function getBusinessTables(
     planId = (plan as { id: string }).id;
   }
 
-  const { data: tables } = await supabase
+  let tablesQuery = supabase
     .from("tables")
     .select("*")
     .eq("floor_plan_id", planId);
+  // Las mesas de barra (is_bar) quedan fuera del motor de reservas: no se
+  // auto-asignan, no se ofrecen ni cuentan para disponibilidad (spec 08).
+  if (options.excludeBar) tablesQuery = tablesQuery.eq("is_bar", false);
+  const { data: tables } = await tablesQuery;
   return (tables ?? []) as FloorTable[];
 }
 

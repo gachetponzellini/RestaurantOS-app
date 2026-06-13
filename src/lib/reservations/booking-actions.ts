@@ -116,6 +116,7 @@ async function createReservationCommon(
   const tables = await getBusinessTables(ctx.businessId, {
     useService: true,
     floorPlanId: ctx.floorPlanId ?? null,
+    excludeBar: true,
   });
   const bufferMs = settings.buffer_min * 60_000;
 
