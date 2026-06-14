@@ -1,3 +1,4 @@
+import { formatInTimeZone } from "date-fns-tz";
 import { notFound } from "next/navigation";
 
 import { CatalogShell } from "@/components/admin/catalog/catalog-shell";
@@ -9,8 +10,13 @@ import {
   getCosteoOverview,
   getIngredients,
   getKitchenStockFull,
+  getMermaReport,
 } from "@/lib/ingredients/queries";
-import { getStockOverview } from "@/lib/stock/queries";
+import {
+  getAllProductsForConfig,
+  getBarStockOverview,
+  getStockOverview,
+} from "@/lib/stock/queries";
 import { getBusiness } from "@/lib/tenant";
 
 export default async function CatalogPage({
@@ -22,6 +28,11 @@ export default async function CatalogPage({
   const business = await getBusiness(business_slug);
   if (!business) notFound();
 
+  // Rango por defecto del reporte de merma: mes en curso (timezone del negocio).
+  const today = formatInTimeZone(new Date(), business.timezone, "yyyy-MM-dd");
+  const mermaFrom = `${today.slice(0, 8)}01`;
+  const mermaTo = today;
+
   const [
     { superCategories, stations, categories, products },
     menus,
@@ -29,6 +40,9 @@ export default async function CatalogPage({
     costeo,
     stockBebidas,
     stockCocina,
+    stockBar,
+    productsForConfig,
+    merma,
   ] = await Promise.all([
     getAdminCatalog(business.id),
     getAdminDailyMenus(business.id),
@@ -36,8 +50,16 @@ export default async function CatalogPage({
     getCosteoOverview(business.id),
     getStockOverview(business.id),
     getKitchenStockFull(business.id),
+    getBarStockOverview(business.id),
+    getAllProductsForConfig(business.id),
+    getMermaReport(business.id, mermaFrom, mermaTo, business.timezone),
   ]);
   const todayDow = currentDayOfWeek(business.timezone);
+
+  // Candidatos a stock de bar: productos activos que todavía no son de bar.
+  const barCandidates = productsForConfig
+    .filter((p) => !p.isBarStock)
+    .map((p) => ({ id: p.id, name: p.name, categoryName: p.categoryName }));
 
   return (
     <PageShell width="default">
@@ -54,6 +76,11 @@ export default async function CatalogPage({
         costeo={costeo}
         stockBebidas={stockBebidas}
         stockCocina={stockCocina}
+        stockBar={stockBar}
+        barCandidates={barCandidates}
+        merma={merma}
+        mermaFrom={mermaFrom}
+        mermaTo={mermaTo}
       />
     </PageShell>
   );

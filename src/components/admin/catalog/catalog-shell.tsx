@@ -12,6 +12,7 @@ import { SectoresTab } from "@/components/admin/catalog/sectores-tab";
 import { DailyMenuList } from "@/components/admin/daily-menus/daily-menu-list";
 import { BrandButton } from "@/components/admin/shell/brand-button";
 import { PageHeader } from "@/components/admin/shell/page-shell";
+import type { BarStockCandidate } from "@/components/admin/stock/stock-bar-tab";
 import { StockTab } from "@/components/admin/stock/stock-tab";
 import type {
   AdminCategory,
@@ -21,6 +22,7 @@ import type {
 } from "@/lib/admin/catalog-query";
 import type { AdminDailyMenu } from "@/lib/admin/daily-menu-query";
 import type { KitchenStockFull } from "@/lib/ingredients/queries";
+import type { MermaReportItem } from "@/lib/ingredients/merma";
 import type { IngredientOverview, ProductCosteo } from "@/lib/ingredients/types";
 import type { StockOverviewItem } from "@/lib/stock/queries";
 import { cn } from "@/lib/utils";
@@ -59,6 +61,11 @@ function TabsInner({
   costeo,
   stockBebidas,
   stockCocina,
+  stockBar,
+  barCandidates,
+  merma,
+  mermaFrom,
+  mermaTo,
 }: {
   slug: string;
   businessId: string;
@@ -72,6 +79,11 @@ function TabsInner({
   costeo: ProductCosteo[];
   stockBebidas: StockOverviewItem[];
   stockCocina: KitchenStockFull[];
+  stockBar: StockOverviewItem[];
+  barCandidates: BarStockCandidate[];
+  merma: MermaReportItem[];
+  mermaFrom: string;
+  mermaTo: string;
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -94,7 +106,7 @@ function TabsInner({
       menuDelDia: menus.length,
       insumos: ingredients.length,
       costeo: costeo.filter((c) => c.hasRecipe).length,
-      stock: stockBebidas.length + stockCocina.length,
+      stock: stockBebidas.length + stockCocina.length + stockBar.length,
     }),
     [
       products.length,
@@ -106,8 +118,18 @@ function TabsInner({
       costeo,
       stockBebidas.length,
       stockCocina.length,
+      stockBar.length,
     ],
   );
+
+  // Costo de mercadería por producto (centavos), sólo productos con receta.
+  const costByProduct = useMemo(() => {
+    const map: Record<string, number> = {};
+    for (const c of costeo) {
+      if (c.hasRecipe) map[c.productId] = c.foodCostCents;
+    }
+    return map;
+  }, [costeo]);
 
   const action =
     active === "productos" ? (
@@ -227,7 +249,17 @@ function TabsInner({
         )}
         {active === "costeo" && <CosteoTab items={costeo} />}
         {active === "stock" && (
-          <StockTab slug={slug} bebidas={stockBebidas} cocina={stockCocina} />
+          <StockTab
+            slug={slug}
+            bebidas={stockBebidas}
+            cocina={stockCocina}
+            bar={stockBar}
+            barCandidates={barCandidates}
+            costByProduct={costByProduct}
+            merma={merma}
+            mermaFrom={mermaFrom}
+            mermaTo={mermaTo}
+          />
         )}
       </div>
     </>
@@ -283,6 +315,11 @@ export function CatalogShell(props: {
   costeo: ProductCosteo[];
   stockBebidas: StockOverviewItem[];
   stockCocina: KitchenStockFull[];
+  stockBar: StockOverviewItem[];
+  barCandidates: BarStockCandidate[];
+  merma: MermaReportItem[];
+  mermaFrom: string;
+  mermaTo: string;
 }) {
   return (
     <Suspense fallback={null}>

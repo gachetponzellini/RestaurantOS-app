@@ -3,10 +3,16 @@
 import { revalidatePath } from "next/cache";
 
 import { actionError, actionOk, type ActionResult } from "@/lib/actions";
+import { requireMozoActionContext } from "@/lib/mozo/auth";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
+import { getBusiness } from "@/lib/tenant";
+
+import { getMermaReport } from "./queries";
+import type { MermaReportItem } from "./merma";
 
 import {
+  IngredientImportRow,
   IngredientInput,
   IngredientRecipeLineInput,
   PresentationInput,
@@ -483,6 +489,139 @@ export async function ajustarStockCocina(
 
   revalidatePath(`/${businessSlug}/admin/catalogo`);
   return actionOk(null);
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// IMPORT MASIVO DE INSUMOS (spec 10)
+// ═══════════════════════════════════════════════════════════════════
+
+export type ImportError = { row: number; name: string; reason: string };
+export type ImportResult = { imported: number; errors: ImportError[] };
+
+/**
+ * Importa un lote de insumos (ya parseados del Excel/CSV de MaxiRest en el
+ * cliente). Valida cada fila con Zod, hace upsert por (business_id, name) y
+ * reporta filas OK y filas con error SIN abortar el lote completo.
+ */
+export async function importIngredients(
+  businessSlug: string,
+  rows: unknown[],
+): Promise<ActionResult<ImportResult>> {
+  const businessId = await getBusinessIdBySlug(businessSlug);
+  if (!businessId) return actionError("Negocio no encontrado.");
+
+  const ctxResult = await requireMozoActionContext(businessId);
+  if (!ctxResult.ok) return ctxResult;
+  if (ctxResult.data.role !== "admin" && ctxResult.data.role !== "encargado") {
+    return actionError("Solo admin o encargado pueden importar insumos.");
+  }
+
+  if (!Array.isArray(rows) || rows.length === 0) {
+    return actionError("El lote está vacío.");
+  }
+
+  const service = db();
+  const errors: ImportError[] = [];
+  let imported = 0;
+
+  for (let i = 0; i < rows.length; i++) {
+    const parsed = IngredientImportRow.safeParse(rows[i]);
+    if (!parsed.success) {
+      const raw = rows[i] as { name?: unknown };
+      const name = typeof raw?.name === "string" ? raw.name : `Fila ${i + 1}`;
+      errors.push({
+        row: i + 1,
+        name,
+        reason: parsed.error.issues[0]?.message ?? "Datos inválidos.",
+      });
+      continue;
+    }
+
+    const r = parsed.data;
+    try {
+      // Upsert del insumo por (business_id, name)
+      const { data: ing, error: ingErr } = await service
+        .from("ingredients")
+        .upsert(
+          {
+            business_id: businessId,
+            name: r.name,
+            unit: r.unit,
+            waste_percent: r.waste_percent,
+            stock_quantity: r.stock_initial,
+            is_active: true,
+          },
+          { onConflict: "business_id,name" },
+        )
+        .select("id")
+        .single();
+
+      if (ingErr || !ing) {
+        errors.push({ row: i + 1, name: r.name, reason: "No se pudo guardar el insumo." });
+        continue;
+      }
+
+      // Upsert de la presentación default (una sola por insumo).
+      const { data: existingDefault } = await service
+        .from("ingredient_presentations")
+        .select("id")
+        .eq("ingredient_id", ing.id)
+        .eq("is_default", true)
+        .maybeSingle();
+
+      if (existingDefault) {
+        await service
+          .from("ingredient_presentations")
+          .update({
+            name: r.presentation_name,
+            net_quantity: r.net_quantity,
+            cost_cents: r.cost_cents,
+          })
+          .eq("id", existingDefault.id);
+      } else {
+        await service.from("ingredient_presentations").insert({
+          ingredient_id: ing.id,
+          name: r.presentation_name,
+          net_quantity: r.net_quantity,
+          cost_cents: r.cost_cents,
+          is_default: true,
+        });
+      }
+
+      imported++;
+    } catch (e) {
+      console.error("importIngredients row", i + 1, e);
+      errors.push({ row: i + 1, name: r.name, reason: "Error al importar la fila." });
+    }
+  }
+
+  revalidatePath(`/${businessSlug}/admin/catalogo`);
+  return actionOk({ imported, errors });
+}
+
+// ── fetchMermaReport (reporte de merma por rango, callable desde cliente) ──
+
+export async function fetchMermaReport(
+  slug: string,
+  fromDate: string,
+  toDate: string,
+): Promise<ActionResult<MermaReportItem[]>> {
+  const business = await getBusiness(slug);
+  if (!business) return actionError("Negocio no encontrado.");
+
+  const ctxResult = await requireMozoActionContext(business.id);
+  if (!ctxResult.ok) return ctxResult;
+  if (ctxResult.data.role !== "admin" && ctxResult.data.role !== "encargado") {
+    return actionError("Solo admin o encargado pueden ver el reporte de merma.");
+  }
+
+  const report = await getMermaReport(
+    business.id,
+    fromDate,
+    toDate,
+    business.timezone,
+  );
+  return actionOk(report);
 }
 
 // ═══════════════════════════════════════════════════════════════════

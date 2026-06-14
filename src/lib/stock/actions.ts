@@ -63,6 +63,74 @@ export async function toggleTrackStock(
   return actionOk(undefined);
 }
 
+// ── setBarStock ──────────────────────────────────────────────────
+// Marca/quita un producto del stock de bar (spec 10). Es ortogonal al
+// stock de cocina: usa la rama track_stock (bebidas/contables) del descargo.
+// Quitar es baja lógica: track_stock = false conserva el stock_item y todos
+// sus stock_movimientos (histórico), y puede reactivarse más adelante.
+
+export async function setBarStock(
+  productId: string,
+  enabled: boolean,
+  slug: string,
+): Promise<ActionResult<void>> {
+  const business = await getBusiness(slug);
+  if (!business) return actionError("Negocio no encontrado.");
+
+  const ctxResult = await requireMozoActionContext(business.id);
+  if (!ctxResult.ok) return ctxResult;
+  const ctx = ctxResult.data;
+
+  if (ctx.role !== "admin" && ctx.role !== "encargado") {
+    return actionError("Solo admin o encargado pueden gestionar stock.");
+  }
+
+  const service = createSupabaseServiceClient();
+
+  const { data: product } = await service
+    .from("products")
+    .select("id, business_id")
+    .eq("id", productId)
+    .maybeSingle();
+  if (!product || product.business_id !== business.id) {
+    return actionError("Producto no encontrado.");
+  }
+
+  if (enabled) {
+    // Alta: marca de bar + tracking, y asegura el stock_item.
+    await service
+      .from("products")
+      .update({ is_bar_stock: true, track_stock: true })
+      .eq("id", productId);
+
+    const { data: existing } = await service
+      .from("stock_items")
+      .select("id")
+      .eq("product_id", productId)
+      .eq("business_id", business.id)
+      .maybeSingle();
+
+    if (!existing) {
+      await service.from("stock_items").insert({
+        business_id: business.id,
+        product_id: productId,
+        current_qty: 0,
+        min_qty: 0,
+      });
+    }
+  } else {
+    // Baja lógica: deja de trackearse y deja de listarse en "Stock de bar".
+    // No se borran stock_item ni stock_movimientos (se conserva el histórico).
+    await service
+      .from("products")
+      .update({ is_bar_stock: false, track_stock: false })
+      .eq("id", productId);
+  }
+
+  revalidatePath(`/${slug}/admin/catalogo`);
+  return actionOk(undefined);
+}
+
 // ── setStockLevels ───────────────────────────────────────────────
 
 export async function setStockLevels(

@@ -27,32 +27,56 @@ export type StockMovimiento = {
 };
 
 // ── getStockOverview ─────────────────────────────────────────────
+// `scope` segmenta la vista: "bebidas" excluye productos marcados como stock
+// de bar; "bar" devuelve sólo los de bar. Ambos comparten el mismo mapeo.
 
-export async function getStockOverview(
+async function loadStockOverview(
   businessId: string,
+  scope: "bebidas" | "bar",
 ): Promise<StockOverviewItem[]> {
   const service = createSupabaseServiceClient();
 
   const { data } = await service
     .from("stock_items")
     .select(
-      "id, product_id, current_qty, min_qty, unit, updated_at, products(name, category_id, categories(name))",
+      "id, product_id, current_qty, min_qty, unit, updated_at, products(name, category_id, is_bar_stock, categories(name))",
     )
     .eq("business_id", businessId)
     .order("updated_at", { ascending: false });
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return (data ?? []).map((row: any) => ({
-    stockItemId: row.id,
-    productId: row.product_id,
-    productName: row.products?.name ?? "—",
-    categoryName: row.products?.categories?.name ?? null,
-    currentQty: row.current_qty,
-    minQty: row.min_qty,
-    unit: row.unit,
-    isLow: row.current_qty <= row.min_qty,
-    updatedAt: row.updated_at,
-  }));
+  return (data ?? [])
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    .filter((row: any) =>
+      scope === "bar"
+        ? row.products?.is_bar_stock === true
+        : row.products?.is_bar_stock !== true,
+    )
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    .map((row: any) => ({
+      stockItemId: row.id,
+      productId: row.product_id,
+      productName: row.products?.name ?? "—",
+      categoryName: row.products?.categories?.name ?? null,
+      currentQty: row.current_qty,
+      minQty: row.min_qty,
+      unit: row.unit,
+      isLow: row.current_qty <= row.min_qty,
+      updatedAt: row.updated_at,
+    }));
+}
+
+export async function getStockOverview(
+  businessId: string,
+): Promise<StockOverviewItem[]> {
+  return loadStockOverview(businessId, "bebidas");
+}
+
+// ── getBarStockOverview (stock de bar, spec 10) ──────────────────
+
+export async function getBarStockOverview(
+  businessId: string,
+): Promise<StockOverviewItem[]> {
+  return loadStockOverview(businessId, "bar");
 }
 
 // ── getStockMovimientos ──────────────────────────────────────────
@@ -114,6 +138,7 @@ export type ProductForStockConfig = {
   name: string;
   categoryName: string | null;
   trackStock: boolean;
+  isBarStock: boolean;
   currentQty: number | null;
   minQty: number | null;
 };
@@ -125,7 +150,7 @@ export async function getAllProductsForConfig(
 
   const { data: products } = await service
     .from("products")
-    .select("id, name, track_stock, category_id, categories(name)")
+    .select("id, name, track_stock, is_bar_stock, category_id, categories(name)")
     .eq("business_id", businessId)
     .eq("is_active", true)
     .order("name");
@@ -148,6 +173,7 @@ export async function getAllProductsForConfig(
       name: p.name,
       categoryName: p.categories?.name ?? null,
       trackStock: p.track_stock,
+      isBarStock: p.is_bar_stock ?? false,
       currentQty: stock?.current_qty ?? null,
       minQty: stock?.min_qty ?? null,
     };

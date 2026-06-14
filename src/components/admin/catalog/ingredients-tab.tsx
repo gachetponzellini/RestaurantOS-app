@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 
 import { IngredientDialog } from "@/components/admin/catalog/ingredient-dialog";
+import { IngredientImportDialog } from "@/components/admin/catalog/ingredient-import-dialog";
 import { BrandButton } from "@/components/admin/shell/brand-button";
 import { Input } from "@/components/ui/input";
 import type { IngredientOverview, IngredientWithPresentations } from "@/lib/ingredients/types";
@@ -55,15 +56,18 @@ export function IngredientsTab({ slug, ingredients }: Props) {
             {ingredients.length}
           </span>
         </div>
-        <IngredientDialog
-          slug={slug}
-          ingredientOptions={ingredientOptions}
-          trigger={
-            <BrandButton size="md" leadingIcon={<Plus />}>
-              Nuevo insumo
-            </BrandButton>
-          }
-        />
+        <div className="flex items-center gap-2">
+          <IngredientImportDialog slug={slug} />
+          <IngredientDialog
+            slug={slug}
+            ingredientOptions={ingredientOptions}
+            trigger={
+              <BrandButton size="md" leadingIcon={<Plus />}>
+                Nuevo insumo
+              </BrandButton>
+            }
+          />
+        </div>
       </header>
 
       <p className="text-xs text-zinc-500">

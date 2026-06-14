@@ -602,6 +602,7 @@ export type Database = {
       chatbot_configs: {
         Row: {
           business_id: string
+          chatbot_enabled: boolean
           enabled_tools: string[] | null
           system_prompt: string
           tool_overrides: Json
@@ -609,6 +610,7 @@ export type Database = {
         }
         Insert: {
           business_id: string
+          chatbot_enabled?: boolean
           enabled_tools?: string[] | null
           system_prompt?: string
           tool_overrides?: Json
@@ -616,6 +618,7 @@ export type Database = {
         }
         Update: {
           business_id?: string
+          chatbot_enabled?: boolean
           enabled_tools?: string[] | null
           system_prompt?: string
           tool_overrides?: Json
@@ -1062,6 +1065,44 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "daily_menus_business_id_fkey"
+            columns: ["business_id"]
+            isOneToOne: false
+            referencedRelation: "businesses"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      delivery_message_templates: {
+        Row: {
+          body: string
+          business_id: string
+          created_at: string
+          enabled: boolean
+          id: string
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          body: string
+          business_id: string
+          created_at?: string
+          enabled?: boolean
+          id?: string
+          status: string
+          updated_at?: string
+        }
+        Update: {
+          body?: string
+          business_id?: string
+          created_at?: string
+          enabled?: boolean
+          id?: string
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "delivery_message_templates_business_id_fkey"
             columns: ["business_id"]
             isOneToOne: false
             referencedRelation: "businesses"
@@ -1560,6 +1601,57 @@ export type Database = {
             columns: ["business_id"]
             isOneToOne: false
             referencedRelation: "businesses"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      notification_preferences: {
+        Row: {
+          business_id: string
+          channel: string
+          created_at: string
+          enabled: boolean
+          event_type: string
+          id: string
+          target_role: string | null
+          target_user_id: string | null
+          updated_at: string
+        }
+        Insert: {
+          business_id: string
+          channel: string
+          created_at?: string
+          enabled?: boolean
+          event_type: string
+          id?: string
+          target_role?: string | null
+          target_user_id?: string | null
+          updated_at?: string
+        }
+        Update: {
+          business_id?: string
+          channel?: string
+          created_at?: string
+          enabled?: boolean
+          event_type?: string
+          id?: string
+          target_role?: string | null
+          target_user_id?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "notification_preferences_business_id_fkey"
+            columns: ["business_id"]
+            isOneToOne: false
+            referencedRelation: "businesses"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "notification_preferences_target_user_id_fkey"
+            columns: ["target_user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
             referencedColumns: ["id"]
           },
         ]
@@ -2196,6 +2288,7 @@ export type Database = {
           image_url: string | null
           is_active: boolean
           is_available: boolean
+          is_bar_stock: boolean
           name: string
           prep_time_minutes: number | null
           price_cents: number
@@ -2213,6 +2306,7 @@ export type Database = {
           image_url?: string | null
           is_active?: boolean
           is_available?: boolean
+          is_bar_stock?: boolean
           name: string
           prep_time_minutes?: number | null
           price_cents: number
@@ -2230,6 +2324,7 @@ export type Database = {
           image_url?: string | null
           is_active?: boolean
           is_available?: boolean
+          is_bar_stock?: boolean
           name?: string
           prep_time_minutes?: number | null
           price_cents?: number
@@ -2487,7 +2582,6 @@ export type Database = {
           id: string
           is_active: boolean
           name: string
-          routes_to_comanda: boolean
           sort_order: number
         }
         Insert: {
@@ -2496,7 +2590,6 @@ export type Database = {
           id?: string
           is_active?: boolean
           name: string
-          routes_to_comanda?: boolean
           sort_order?: number
         }
         Update: {
@@ -2505,7 +2598,6 @@ export type Database = {
           id?: string
           is_active?: boolean
           name?: string
-          routes_to_comanda?: boolean
           sort_order?: number
         }
         Relationships: [
@@ -2985,6 +3077,53 @@ export type Database = {
           is_platform_admin?: boolean
         }
         Relationships: []
+      }
+      whatsapp_outbox: {
+        Row: {
+          body: string
+          business_id: string
+          created_at: string
+          error: string | null
+          id: string
+          kind: string
+          ref_id: string | null
+          sent_at: string | null
+          status: string
+          to_phone: string | null
+        }
+        Insert: {
+          body: string
+          business_id: string
+          created_at?: string
+          error?: string | null
+          id?: string
+          kind: string
+          ref_id?: string | null
+          sent_at?: string | null
+          status?: string
+          to_phone?: string | null
+        }
+        Update: {
+          body?: string
+          business_id?: string
+          created_at?: string
+          error?: string | null
+          id?: string
+          kind?: string
+          ref_id?: string | null
+          sent_at?: string | null
+          status?: string
+          to_phone?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "whatsapp_outbox_business_id_fkey"
+            columns: ["business_id"]
+            isOneToOne: false
+            referencedRelation: "businesses"
+            referencedColumns: ["id"]
+          },
+        ]
       }
     }
     Views: {

@@ -56,6 +56,31 @@ export const StockAjusteInput = z.object({
 });
 export type StockAjusteInput = z.infer<typeof StockAjusteInput>;
 
+// ── Import masivo de insumos (spec 10) ───────────────────────────
+// Una fila ya parseada del Excel/CSV de MaxiRest. El parseo del archivo se
+// hace en el cliente; la action recibe filas y valida cada una con Zod.
+
+export const IngredientImportRow = z.object({
+  name: z.string().trim().min(1, "Nombre requerido.").max(100),
+  unit: z.enum(["kg", "lt", "un", "g", "ml"], {
+    message: "Unidad inválida (kg, lt, un, g, ml).",
+  }),
+  waste_percent: z
+    .number()
+    .min(0, "No puede ser negativo.")
+    .max(99.99, "Debe ser menor a 100.")
+    .default(0),
+  /** Nombre de la presentación default (ej. "Bolsa 5kg"). */
+  presentation_name: z.string().trim().min(1).max(100).default("Default"),
+  /** Cantidad neta de la presentación, en unidad base. */
+  net_quantity: z.number().positive("Debe ser mayor a 0."),
+  /** Costo de la presentación en centavos. */
+  cost_cents: z.number().int("Debe ser entero.").min(0, "No puede ser negativo."),
+  /** Stock inicial en unidad base. */
+  stock_initial: z.number().min(0, "No puede ser negativo.").default(0),
+});
+export type IngredientImportRow = z.infer<typeof IngredientImportRow>;
+
 // ── Sub-recipe line (ingrediente compuesto → sub-ingrediente) ───
 
 export const IngredientRecipeLineInput = z.object({

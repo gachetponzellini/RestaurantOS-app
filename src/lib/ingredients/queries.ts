@@ -1,6 +1,10 @@
 import "server-only";
 
+import { fromZonedTime } from "date-fns-tz";
+
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
+
+import { computeMermaReport, type MermaConsumptionRow, type MermaReportItem } from "./merma";
 
 function db() {
   return createSupabaseServiceClient();
@@ -649,4 +653,41 @@ export async function getConsumptionSummary(
   }
 
   return [...map.values()].sort((a, b) => b.totalCostCents - a.totalCostCents);
+}
+
+// ── getMermaReport (merma estimativa por período, spec 10) ───────
+// `fromDate`/`toDate` son fechas locales 'yyyy-MM-dd' en timezone del negocio.
+// Se convierten a límites UTC con date-fns-tz para filtrar created_at.
+
+export async function getMermaReport(
+  businessId: string,
+  fromDate: string,
+  toDate: string,
+  timezone = "America/Argentina/Buenos_Aires",
+): Promise<MermaReportItem[]> {
+  const service = db();
+
+  const startUtc = fromZonedTime(`${fromDate}T00:00:00`, timezone).toISOString();
+  const endUtc = fromZonedTime(`${toDate}T23:59:59.999`, timezone).toISOString();
+
+  const { data } = await service
+    .from("ingredient_consumptions")
+    .select(
+      "ingredient_id, quantity, kind, created_at, ingredients(name, unit, waste_percent)",
+    )
+    .eq("business_id", businessId)
+    .gte("created_at", startUtc)
+    .lte("created_at", endUtc);
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const rows: MermaConsumptionRow[] = (data ?? []).map((r: any) => ({
+    ingredientId: r.ingredient_id,
+    ingredientName: r.ingredients?.name ?? "—",
+    ingredientUnit: (r.ingredients?.unit ?? "un") as IngredientUnit,
+    wastePercent: Number(r.ingredients?.waste_percent ?? 0),
+    kind: r.kind as ConsumptionKind,
+    quantity: Number(r.quantity),
+  }));
+
+  return computeMermaReport(rows);
 }

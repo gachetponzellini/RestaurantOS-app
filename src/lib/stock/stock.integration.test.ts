@@ -34,9 +34,9 @@ vi.mock("next/cache", () => ({
   revalidateTag: vi.fn(),
 }));
 
-const { toggleTrackStock, setStockLevels, ingresarStock, ajustarStock } =
+const { toggleTrackStock, setStockLevels, ingresarStock, ajustarStock, setBarStock } =
   await import("./actions");
-const { getStockOverview, getStockMovimientos, getLowStockCount } =
+const { getStockOverview, getBarStockOverview, getStockMovimientos, getLowStockCount } =
   await import("./queries");
 
 describe.skipIf(!dbAvailable)("stock de bebidas (integration)", () => {
@@ -292,5 +292,91 @@ describe.skipIf(!dbAvailable)("stock de bebidas (integration)", () => {
 
     // Restore
     await setStockLevels(productId, 10, 5, businessSlug);
+  });
+
+  // ── Stock de bar (spec 10) ──────────────────────────────────────
+
+  const seedBarProduct = async (label: string) => {
+    const { data: prod } = await supabase
+      .from("products")
+      .insert({
+        business_id: businessId,
+        category_id: categoryId,
+        name: `${label} ${TEST_TAG}`,
+        slug: `${label}-${TEST_TAG}`.toLowerCase(),
+        price_cents: 80000,
+        is_active: true,
+        is_available: true,
+        sort_order: 0,
+      })
+      .select("id")
+      .single();
+    return prod!.id as string;
+  };
+
+  it("marcar un producto como stock de bar lo separa de bebidas", async () => {
+    CURRENT_USER_ID = encargadoId;
+    const alfajorId = await seedBarProduct("Alfajor");
+
+    const r = await setBarStock(alfajorId, true, businessSlug);
+    expect(r.ok).toBe(true);
+
+    const { data: prod } = await supabase
+      .from("products")
+      .select("is_bar_stock, track_stock")
+      .eq("id", alfajorId)
+      .single();
+    expect(prod!.is_bar_stock).toBe(true);
+    expect(prod!.track_stock).toBe(true);
+
+    const bar = await getBarStockOverview(businessId);
+    expect(bar.find((i) => i.productId === alfajorId)).toBeDefined();
+
+    // No aparece en el stock de bebidas
+    const bebidas = await getStockOverview(businessId);
+    expect(bebidas.find((i) => i.productId === alfajorId)).toBeUndefined();
+  });
+
+  it("quitar del bar es baja lógica: conserva movimientos", async () => {
+    CURRENT_USER_ID = encargadoId;
+    const turronId = await seedBarProduct("Turron");
+
+    await setBarStock(turronId, true, businessSlug);
+    const ing = await ingresarStock(turronId, 24, businessSlug, "Compra inicial");
+    expect(ing.ok).toBe(true);
+
+    const { data: si } = await supabase
+      .from("stock_items")
+      .select("id")
+      .eq("product_id", turronId)
+      .single();
+
+    const r = await setBarStock(turronId, false, businessSlug);
+    expect(r.ok).toBe(true);
+
+    const { data: prod } = await supabase
+      .from("products")
+      .select("is_bar_stock, track_stock")
+      .eq("id", turronId)
+      .single();
+    expect(prod!.is_bar_stock).toBe(false);
+    expect(prod!.track_stock).toBe(false);
+
+    // Deja de listarse en el bar…
+    const bar = await getBarStockOverview(businessId);
+    expect(bar.find((i) => i.productId === turronId)).toBeUndefined();
+
+    // …pero el histórico de movimientos se conserva
+    const movs = await getStockMovimientos(si!.id);
+    expect(movs.items.find((m) => m.kind === "ingreso" && m.qty === 24)).toBeDefined();
+  }, 20_000);
+
+  it("mozo NO puede marcar stock de bar", async () => {
+    CURRENT_USER_ID = mozoId;
+    const helado = await seedBarProduct("Helado");
+
+    const r = await setBarStock(helado, true, businessSlug);
+    expect(r.ok).toBe(false);
+    expect(r.ok === false && r.error).toContain("admin o encargado");
   });
 });
