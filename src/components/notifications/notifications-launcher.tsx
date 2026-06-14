@@ -81,7 +81,7 @@ export function NotificationsLauncher({
     setOpen(false);
     // Deep-link según tipo. Mantener sincronizado con `viewForNotification`.
     if (n.type === "order.pending") {
-      router.push(`/${businessSlug}/admin/local?tab=pedidos`);
+      router.push(`/${businessSlug}/admin/operacion?tab=pedidos`);
       return;
     }
     router.refresh();
@@ -90,7 +90,7 @@ export function NotificationsLauncher({
   const handleToastClick = (n: Notification) => {
     void markOne(n);
     if (n.type === "order.pending") {
-      router.push(`/${businessSlug}/admin/local?tab=pedidos`);
+      router.push(`/${businessSlug}/admin/operacion?tab=pedidos`);
       return;
     }
     setOpen(true);

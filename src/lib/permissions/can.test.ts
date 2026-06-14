@@ -5,8 +5,10 @@ import {
   DESCUENTO_MEDIO_PCT,
   DIFERENCIA_CAJA_OK_CENTS,
   canAcceptCajaDifference,
+  canAnularFactura,
   canApplyDiscount,
   canCancelItem,
+  canCrearPedidoFlash,
   canHacerCorte,
   canMakeSangria,
   canManageCajas,
@@ -140,5 +142,23 @@ describe("permissions / canRendirMozo", () => {
     expect(canRendirMozo("admin")).toBe(true);
     expect(canRendirMozo("encargado")).toBe(true);
     expect(canRendirMozo("mozo")).toBe(false);
+  });
+});
+
+describe("permissions / canAnularFactura", () => {
+  it("admin y encargado pueden anular, mozo y personal no", () => {
+    expect(canAnularFactura("admin")).toBe(true);
+    expect(canAnularFactura("encargado")).toBe(true);
+    expect(canAnularFactura("mozo")).toBe(false);
+    expect(canAnularFactura("personal")).toBe(false);
+  });
+});
+
+describe("permissions / canCrearPedidoFlash", () => {
+  it("admin y encargado (mostrador) pueden, mozo y personal no", () => {
+    expect(canCrearPedidoFlash("admin")).toBe(true);
+    expect(canCrearPedidoFlash("encargado")).toBe(true);
+    expect(canCrearPedidoFlash("mozo")).toBe(false);
+    expect(canCrearPedidoFlash("personal")).toBe(false);
   });
 });

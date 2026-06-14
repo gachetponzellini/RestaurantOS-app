@@ -377,7 +377,7 @@ export function MenuClient({
             </span>
             <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
               {I.moto("var(--ink-3)", 14)}{" "}
-              {fee > 0 ? `Envío ${formatCurrency(fee)}` : "Envío gratis"}
+              {fee > 0 ? `Envío ${formatCurrency(fee)}` : "Envío bonificado"}
             </span>
             {min > 0 && (
               <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>

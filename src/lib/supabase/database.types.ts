@@ -124,7 +124,12 @@ export type Database = {
           address: string | null
           afip_cuit: string | null
           afip_default_tipo: string | null
+          afip_enabled: boolean
+          afip_mode: string
           afip_provider: string | null
+          afip_provider_api_key: string | null
+          afip_provider_api_token: string | null
+          afip_provider_user_token: string | null
           afip_punto_venta: number | null
           cover_image_url: string | null
           created_at: string
@@ -148,12 +153,18 @@ export type Database = {
           settings: Json
           slug: string
           timezone: string
+          whatsapp_connected: boolean
         }
         Insert: {
           address?: string | null
           afip_cuit?: string | null
           afip_default_tipo?: string | null
+          afip_enabled?: boolean
+          afip_mode?: string
           afip_provider?: string | null
+          afip_provider_api_key?: string | null
+          afip_provider_api_token?: string | null
+          afip_provider_user_token?: string | null
           afip_punto_venta?: number | null
           cover_image_url?: string | null
           created_at?: string
@@ -177,12 +188,18 @@ export type Database = {
           settings?: Json
           slug: string
           timezone?: string
+          whatsapp_connected?: boolean
         }
         Update: {
           address?: string | null
           afip_cuit?: string | null
           afip_default_tipo?: string | null
+          afip_enabled?: boolean
+          afip_mode?: string
           afip_provider?: string | null
+          afip_provider_api_key?: string | null
+          afip_provider_api_token?: string | null
+          afip_provider_user_token?: string | null
           afip_punto_venta?: number | null
           cover_image_url?: string | null
           created_at?: string
@@ -206,6 +223,7 @@ export type Database = {
           settings?: Json
           slug?: string
           timezone?: string
+          whatsapp_connected?: boolean
         }
         Relationships: []
       }
@@ -758,6 +776,73 @@ export type Database = {
           },
         ]
       }
+      clock_allowed_origins: {
+        Row: {
+          business_id: string
+          cidr: string
+          created_at: string
+          created_by: string | null
+          id: string
+          label: string | null
+        }
+        Insert: {
+          business_id: string
+          cidr: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          label?: string | null
+        }
+        Update: {
+          business_id?: string
+          cidr?: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          label?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "clock_allowed_origins_business_id_fkey"
+            columns: ["business_id"]
+            isOneToOne: false
+            referencedRelation: "businesses"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      clock_blocked_attempts: {
+        Row: {
+          attempted_at: string
+          business_id: string
+          id: string
+          ip: string | null
+          pin_masked: string | null
+        }
+        Insert: {
+          attempted_at?: string
+          business_id: string
+          id?: string
+          ip?: string | null
+          pin_masked?: string | null
+        }
+        Update: {
+          attempted_at?: string
+          business_id?: string
+          id?: string
+          ip?: string | null
+          pin_masked?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "clock_blocked_attempts_business_id_fkey"
+            columns: ["business_id"]
+            isOneToOne: false
+            referencedRelation: "businesses"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       clock_entries: {
         Row: {
           business_id: string
@@ -1080,6 +1165,9 @@ export type Database = {
           enabled: boolean
           id: string
           status: string
+          template_lang: string
+          template_name: string | null
+          template_params: Json | null
           updated_at: string
         }
         Insert: {
@@ -1089,6 +1177,9 @@ export type Database = {
           enabled?: boolean
           id?: string
           status: string
+          template_lang?: string
+          template_name?: string | null
+          template_params?: Json | null
           updated_at?: string
         }
         Update: {
@@ -1098,6 +1189,9 @@ export type Database = {
           enabled?: boolean
           id?: string
           status?: string
+          template_lang?: string
+          template_name?: string | null
+          template_params?: Json | null
           updated_at?: string
         }
         Relationships: [
@@ -1386,14 +1480,17 @@ export type Database = {
           business_id: string
           cae: string | null
           cae_vencimiento: string | null
+          cancelled_reason: string | null
+          cancels_invoice_id: string | null
           created_at: string
           cuit_receptor: string | null
           error_message: string | null
           id: string
+          idempotency_key: string | null
           iva_cents: number
           iva_rate: number
           neto_cents: number
-          numero: number
+          numero: number | null
           order_id: string | null
           payment_id: string | null
           pdf_url: string | null
@@ -1409,14 +1506,17 @@ export type Database = {
           business_id: string
           cae?: string | null
           cae_vencimiento?: string | null
+          cancelled_reason?: string | null
+          cancels_invoice_id?: string | null
           created_at?: string
           cuit_receptor?: string | null
           error_message?: string | null
           id?: string
+          idempotency_key?: string | null
           iva_cents: number
           iva_rate?: number
           neto_cents: number
-          numero: number
+          numero?: number | null
           order_id?: string | null
           payment_id?: string | null
           pdf_url?: string | null
@@ -1432,14 +1532,17 @@ export type Database = {
           business_id?: string
           cae?: string | null
           cae_vencimiento?: string | null
+          cancelled_reason?: string | null
+          cancels_invoice_id?: string | null
           created_at?: string
           cuit_receptor?: string | null
           error_message?: string | null
           id?: string
+          idempotency_key?: string | null
           iva_cents?: number
           iva_rate?: number
           neto_cents?: number
-          numero?: number
+          numero?: number | null
           order_id?: string | null
           payment_id?: string | null
           pdf_url?: string | null
@@ -1457,6 +1560,13 @@ export type Database = {
             columns: ["business_id"]
             isOneToOne: false
             referencedRelation: "businesses"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "invoices_cancels_invoice_id_fkey"
+            columns: ["cancels_invoice_id"]
+            isOneToOne: false
+            referencedRelation: "invoices"
             referencedColumns: ["id"]
           },
           {
@@ -3078,6 +3188,44 @@ export type Database = {
         }
         Relationships: []
       }
+      whatsapp_credentials: {
+        Row: {
+          api_key: string | null
+          business_id: string
+          channel_id: string | null
+          created_at: string
+          from_phone: string | null
+          provider: string
+          updated_at: string
+        }
+        Insert: {
+          api_key?: string | null
+          business_id: string
+          channel_id?: string | null
+          created_at?: string
+          from_phone?: string | null
+          provider?: string
+          updated_at?: string
+        }
+        Update: {
+          api_key?: string | null
+          business_id?: string
+          channel_id?: string | null
+          created_at?: string
+          from_phone?: string | null
+          provider?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "whatsapp_credentials_business_id_fkey"
+            columns: ["business_id"]
+            isOneToOne: true
+            referencedRelation: "businesses"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       whatsapp_outbox: {
         Row: {
           body: string
@@ -3086,6 +3234,7 @@ export type Database = {
           error: string | null
           id: string
           kind: string
+          provider_message_id: string | null
           ref_id: string | null
           sent_at: string | null
           status: string
@@ -3098,6 +3247,7 @@ export type Database = {
           error?: string | null
           id?: string
           kind: string
+          provider_message_id?: string | null
           ref_id?: string | null
           sent_at?: string | null
           status?: string
@@ -3110,6 +3260,7 @@ export type Database = {
           error?: string | null
           id?: string
           kind?: string
+          provider_message_id?: string | null
           ref_id?: string | null
           sent_at?: string | null
           status?: string

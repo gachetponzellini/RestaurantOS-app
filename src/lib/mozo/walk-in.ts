@@ -130,6 +130,7 @@ export async function sentarWalkIn(
   if (!openResult.ok) return openResult;
 
   revalidatePath(`/${input.slug}/mozo`);
+  revalidatePath(`/${input.slug}/admin/operacion`);
   return actionOk({
     customerId,
     autoAssignedMozo: openResult.data.autoAssignedMozo,

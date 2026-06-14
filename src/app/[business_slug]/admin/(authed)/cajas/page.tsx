@@ -19,9 +19,9 @@ export default async function CajasPage({
   if (!business) notFound();
 
   const ctx = await ensureAdminAccess(business.id, business_slug);
-  // Solo admin: el encargado opera desde /admin/local, no configura cajas.
+  // Solo admin: el encargado opera desde /admin/operacion, no configura cajas.
   if (!canManageBusiness(ctx)) {
-    redirect(`/${business_slug}/admin/local?tab=caja`);
+    redirect(`/${business_slug}/admin/operacion?tab=caja`);
   }
 
   const cajas = await getAllCajasForBusiness(business.id);

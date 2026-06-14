@@ -12,6 +12,7 @@ import { RangeSelector } from "@/components/admin/reports/range-selector";
 import { ReservationFunnelSection } from "@/components/admin/reports/reservation-funnel";
 import { RevenueChart } from "@/components/admin/reports/revenue-chart";
 import { StationTimingsSection } from "@/components/admin/reports/station-timings";
+import { SupplierOutflowSection } from "@/components/admin/reports/supplier-outflow";
 import { SummaryCards } from "@/components/admin/reports/summary-cards";
 import { TopProducts } from "@/components/admin/reports/top-products";
 import { PageHeader, PageShell } from "@/components/admin/shell/page-shell";
@@ -26,8 +27,10 @@ import {
   getReportData,
   REPORT_RANGES,
   type ReportRange,
+  type ReportRangeInput,
 } from "@/lib/admin/reports-query";
 import { getMozoPerformance } from "@/lib/admin/staff-query";
+import { getSupplierProductOutflow } from "@/lib/proveedores/queries";
 import { getBusiness } from "@/lib/tenant";
 
 export default async function ReportesPage({
@@ -35,23 +38,34 @@ export default async function ReportesPage({
   searchParams,
 }: {
   params: Promise<{ business_slug: string }>;
-  searchParams: Promise<{ range?: string }>;
+  searchParams: Promise<{ range?: string; start?: string; end?: string }>;
 }) {
   const { business_slug } = await params;
-  const { range: rawRange } = await searchParams;
+  const { range: rawRange, start: startParam, end: endParam } =
+    await searchParams;
   const business = await getBusiness(business_slug);
   if (!business) notFound();
 
-  const range: ReportRange = (REPORT_RANGES as readonly string[]).includes(
-    rawRange ?? "",
-  )
-    ? (rawRange as ReportRange)
-    : "7d";
+  let rangeInput: ReportRangeInput;
+  let activeRange: ReportRange | "custom";
 
-  const data = await getReportData(business.id, business.timezone, range);
+  if (startParam && endParam) {
+    rangeInput = { start: startParam, end: endParam };
+    activeRange = "custom";
+  } else {
+    const preset: ReportRange = (REPORT_RANGES as readonly string[]).includes(
+      rawRange ?? "",
+    )
+      ? (rawRange as ReportRange)
+      : "7d";
+    rangeInput = preset;
+    activeRange = preset;
+  }
+
+  const data = await getReportData(business.id, business.timezone, rangeInput);
   const { startIso, endIso } = data.summary;
 
-  const [menuEng, mozos, cash, fiscal, marketing, stations] =
+  const [menuEng, mozos, cash, fiscal, marketing, stations, supplierOutflow] =
     await Promise.all([
       getMenuEngineering(business.id, startIso, endIso),
       getMozoPerformance(business.id, startIso, endIso),
@@ -59,6 +73,7 @@ export default async function ReportesPage({
       getFiscalSummary(business.id, startIso, endIso),
       getMarketingSummary(business.id, startIso, endIso),
       getStationTimings(business.id, startIso, endIso),
+      getSupplierProductOutflow(business.id, startIso, endIso),
     ]);
 
   const isEmpty =
@@ -70,7 +85,14 @@ export default async function ReportesPage({
         eyebrow="Analítica"
         title="Reportes"
         description="Cómo viene el negocio: ingresos, clientes, catálogo y reservas con comparación contra el período anterior."
-        action={<RangeSelector slug={business_slug} active={range} />}
+        action={
+          <RangeSelector
+            slug={business_slug}
+            active={activeRange}
+            customStart={startParam}
+            customEnd={endParam}
+          />
+        }
       />
 
       <SummaryCards summary={data.summary} comparison={data.comparison} />
@@ -100,6 +122,8 @@ export default async function ReportesPage({
           </div>
 
           <StationTimingsSection data={stations} />
+
+          <SupplierOutflowSection data={supplierOutflow} />
 
           <div className="grid gap-5 lg:grid-cols-2">
             <FiscalSummarySection data={fiscal} />

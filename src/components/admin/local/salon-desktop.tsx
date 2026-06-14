@@ -174,6 +174,12 @@ export function SalonDesktop({
   } | null>(null);
   const [anularReason, setAnularReason] = useState("");
   const [showNewReservation, setShowNewReservation] = useState(false);
+  // Overlay optimista de apertura de mesa: tableId → ocupada + opened_at.
+  // Da feedback inmediato al abrir (walk-in/reserva) sin esperar el refetch
+  // del server. Se reconcilia abajo cuando llega el dato real.
+  const [optimisticStatus, setOptimisticStatus] = useState<
+    Record<string, { operational_status: OperationalStatus; opened_at: string }>
+  >({});
 
   // ── Multi-salón ──
   // Selección persistida por business. Si el id guardado ya no existe (plano
@@ -216,17 +222,54 @@ export function SalonDesktop({
   // Plano + mesas del salón activo.
   const active = floorPlans.find((p) => p.plan.id === activePlanId) ?? floorPlans[0];
   const plan = active?.plan;
-  const tables = active?.tables ?? [];
+
+  // Aplica el overlay optimista de apertura sobre una mesa (no muta el server).
+  const withOverlay = (t: FloorTable): FloorTable => {
+    const ov = optimisticStatus[t.id];
+    return ov
+      ? { ...t, operational_status: ov.operational_status, opened_at: ov.opened_at }
+      : t;
+  };
+
+  const tables = useMemo(
+    () => (active?.tables ?? []).map(withOverlay),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [active, optimisticStatus],
+  );
   const activeTables = useMemo(
     () => tables.filter((t) => t.status === "active"),
     [tables],
   );
 
-  // Todas las tables (de todos los salones) para stats globales.
+  // Todas las tables (de todos los salones) para stats globales — con el
+  // mismo overlay para que el contador "Ocupada" salte al instante.
   const allActiveTables = useMemo(
-    () => floorPlans.flatMap((fp) => fp.tables.filter((t) => t.status === "active")),
-    [floorPlans],
+    () =>
+      floorPlans
+        .flatMap((fp) => fp.tables.filter((t) => t.status === "active"))
+        .map(withOverlay),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [floorPlans, optimisticStatus],
   );
+
+  // Reconciliación: cuando el server ya refleja la apertura (mesa != libre),
+  // soltamos el override y volvemos a la fuente de verdad.
+  useEffect(() => {
+    setOptimisticStatus((prev) => {
+      if (Object.keys(prev).length === 0) return prev;
+      let changed = false;
+      const next = { ...prev };
+      for (const fp of floorPlans) {
+        for (const t of fp.tables) {
+          if (next[t.id] && (t.operational_status ?? "libre") !== "libre") {
+            delete next[t.id];
+            changed = true;
+          }
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [floorPlans]);
 
   // Stats globales (todos los salones del local). Da panorámica completa
   // independiente del salón que esté mirando el encargado.
@@ -292,6 +335,12 @@ export function SalonDesktop({
         return;
       }
       toast.success("Mesa anulada.");
+      setOptimisticStatus((prev) => {
+        if (!prev[anularPrompt.tableId]) return prev;
+        const next = { ...prev };
+        delete next[anularPrompt.tableId];
+        return next;
+      });
       setAnularPrompt(null);
       setAnularReason("");
       router.refresh();
@@ -299,7 +348,15 @@ export function SalonDesktop({
   }, [anularPrompt, anularReason, slug, router]);
 
   const handleSentarReserva = useCallback(
-    (reservationId: string) => {
+    (reservationId: string, tableId: string) => {
+      // Optimista: marcamos ocupada YA; el server reconcilia en el refresh.
+      setOptimisticStatus((prev) => ({
+        ...prev,
+        [tableId]: {
+          operational_status: "ocupada",
+          opened_at: new Date().toISOString(),
+        },
+      }));
       startTransition(async () => {
         const r = await sentarReserva({
           business_slug: slug,
@@ -307,6 +364,12 @@ export function SalonDesktop({
         });
         if (!r.ok) {
           toast.error(r.error);
+          // Rollback del overlay si el server rechazó la apertura.
+          setOptimisticStatus((prev) => {
+            const next = { ...prev };
+            delete next[tableId];
+            return next;
+          });
           return;
         }
         toast.success("Mesa abierta con reserva.");
@@ -532,7 +595,7 @@ export function SalonDesktop({
               onWalkIn={() => setWalkInTableId(selected.id)}
               onSentarReserva={() => {
                 const res = reservationByTable[selected.id];
-                if (res) handleSentarReserva(res.id);
+                if (res) handleSentarReserva(res.id, selected.id);
               }}
               onTransfer={() => setTransferTableId(selected.id)}
               onAnular={() =>
@@ -576,6 +639,16 @@ export function SalonDesktop({
           businessSlug={slug}
           onClose={() => setWalkInTableId(null)}
           onSuccess={() => {
+            // Optimista: la mesa que abrimos pasa a ocupada en el acto.
+            if (walkInTableId) {
+              setOptimisticStatus((prev) => ({
+                ...prev,
+                [walkInTableId]: {
+                  operational_status: "ocupada",
+                  opened_at: new Date().toISOString(),
+                },
+              }));
+            }
             setWalkInTableId(null);
             router.refresh();
           }}

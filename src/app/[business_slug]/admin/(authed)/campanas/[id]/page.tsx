@@ -7,6 +7,7 @@ import { PageShell } from "@/components/admin/shell/page-shell";
 import { ensureAdminAccess } from "@/lib/admin/context";
 import {
   getCampaign,
+  getCampaignRedemptionAmount,
   listCampaignMessages,
   resolveAudience,
 } from "@/lib/admin/campaigns-query";
@@ -27,16 +28,20 @@ export default async function CampaignDetailPage({
   const campaign = await getCampaign(business.id, id);
   if (!campaign) notFound();
 
-  // Drafts: show audience preview (count). Sent: show actual messages.
   const isDraft = campaign.status === "draft";
-  const messages = isDraft ? [] : await listCampaignMessages(campaign.id);
-  const audiencePreview = isDraft
-    ? await resolveAudience(business.id, {
-        type: campaign.audience_type,
-        segment: campaign.audience_segment,
-        customer_ids: campaign.audience_customer_ids,
-      })
-    : [];
+  const [messages, audiencePreview, redemptionAmountCents] = await Promise.all([
+    isDraft ? Promise.resolve([]) : listCampaignMessages(campaign.id),
+    isDraft
+      ? resolveAudience(business.id, {
+          type: campaign.audience_type,
+          segment: campaign.audience_segment,
+          customer_ids: campaign.audience_customer_ids,
+        })
+      : Promise.resolve([]),
+    isDraft
+      ? Promise.resolve(0)
+      : getCampaignRedemptionAmount(campaign.id),
+  ]);
 
   return (
     <PageShell width="wide" className="space-y-6">
@@ -55,6 +60,7 @@ export default async function CampaignDetailPage({
         campaign={campaign}
         messages={messages}
         audiencePreview={audiencePreview}
+        redemptionAmountCents={redemptionAmountCents}
       />
     </PageShell>
   );

@@ -8,7 +8,7 @@ import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 /**
  * Suscripción realtime a cambios en `tables` para un business — cualquier
  * UPDATE invalida la página vía `router.refresh()`. Reemplaza el polling de
- * 10 s que tenían las vistas `/mozo` y `/admin/local`.
+ * 10 s que tenían las vistas `/mozo` y `/admin/operacion`.
  *
  * `tables` no tiene business_id directo (viaja via floor_plans), así que el
  * filter del canal es por floor_plan_id si lo pasás; sino traemos todos los

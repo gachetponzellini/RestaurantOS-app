@@ -39,7 +39,7 @@ type Props = {
  *  - Re-habilitar una pausada (botón "Habilitar").
  *
  * El día a día (sangrías, cortes, etc.) vive en
- * `/admin/local?tab=caja`. Acá solo se administra el catálogo.
+ * `/admin/operacion?tab=caja`. Acá solo se administra el catálogo.
  */
 export function CajasClient({ slug, cajas }: Props) {
   const router = useRouter();

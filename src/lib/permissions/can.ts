@@ -154,3 +154,41 @@ export function canAssignMozo(role: BusinessRole): boolean {
 export function canManageProveedores(role: BusinessRole): boolean {
   return role === "admin" || role === "encargado";
 }
+
+// ── Campañas ──────────────────────────────────────────────────────
+
+export function canManageCampaigns(role: BusinessRole): boolean {
+  return role === "admin" || role === "encargado";
+}
+
+// ── Facturación (spec 09) ───────────────────────────────────────
+
+/**
+ * Anular un comprobante AFIP autorizado (emitiendo la nota de crédito) con
+ * motivo obligatorio. Es del mostrador: encargado/admin. El mozo cobra pero
+ * NO anula comprobantes — coherente con "anular es del mostrador" (§6).
+ */
+export function canAnularFactura(role: BusinessRole): boolean {
+  return role === "admin" || role === "encargado";
+}
+
+/**
+ * Crear un "pedido flash" — orden de un único renglón por monto y concepto
+ * libre, para facturar un evento sin desglose (ej: "Lunch torneo Banco Macro").
+ * Operación de mostrador: encargado/admin. El mozo no genera facturación por
+ * monto.
+ */
+export function canCrearPedidoFlash(role: BusinessRole): boolean {
+  return role === "admin" || role === "encargado";
+}
+
+// ── Notificaciones / chatbot (spec 15) ──────────────────────────
+
+/**
+ * Configurar preferencias de notificación (quién recibe qué y por qué canal) y
+ * las plantillas de mensajes de delivery. Es config del negocio: admin/encargado.
+ * El mozo no toca la config de notificaciones del local.
+ */
+export function canManageNotificationPrefs(role: BusinessRole): boolean {
+  return role === "admin" || role === "encargado";
+}

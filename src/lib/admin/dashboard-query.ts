@@ -82,7 +82,7 @@ export async function getDashboardOverview(
   const [ordersRes, todayItemsRes, customersRes] = await Promise.all([
     supabase
       .from("orders")
-      .select("created_at, total_cents, status, delivery_type")
+      .select("created_at, total_cents, tip_cents, status, delivery_type")
       .eq("business_id", businessId)
       .gte("created_at", startMonth.toISOString()),
     supabase
@@ -108,7 +108,7 @@ export async function getDashboardOverview(
   };
   const orders: OrderRow[] = (ordersRes.data ?? []).map((r) => ({
     created_at: r.created_at,
-    total_cents: Number(r.total_cents),
+    total_cents: Number(r.total_cents) - (Number(r.tip_cents) || 0),
     status: r.status as string,
     delivery_type: (r.delivery_type as string) ?? "delivery",
   }));
@@ -363,7 +363,6 @@ export type PaymentMix = {
   totalCents: number;
   cashCents: number;
   digitalCents: number;
-  tipsCents: number;
 };
 
 const EMPTY_MIX: Record<PaymentMethodKey, { count: number; amountCents: number }> =
@@ -385,7 +384,7 @@ export async function getPaymentMix(
 
   const { data } = await supabase
     .from("payments")
-    .select("method, amount_cents, tip_cents")
+    .select("method, amount_cents")
     .eq("business_id", businessId)
     .eq("payment_status", "paid")
     .gte("created_at", start.toISOString());
@@ -395,10 +394,9 @@ export async function getPaymentMix(
     { count: number; amountCents: number }
   > = JSON.parse(JSON.stringify(EMPTY_MIX));
   let totalCents = 0;
-  let tipsCents = 0;
 
   for (const p of data ?? []) {
-    const row = p as { method: string; amount_cents: number; tip_cents: number };
+    const row = p as { method: string; amount_cents: number };
     const key = (row.method as PaymentMethodKey) in byMethod
       ? (row.method as PaymentMethodKey)
       : "other";
@@ -406,36 +404,12 @@ export async function getPaymentMix(
     byMethod[key].count += 1;
     byMethod[key].amountCents += amount;
     totalCents += amount;
-    tipsCents += Number(row.tip_cents) || 0;
   }
 
   const cashCents = byMethod.cash.amountCents;
   const digitalCents = totalCents - cashCents;
 
-  return { byMethod, totalCents, cashCents, digitalCents, tipsCents };
-}
-
-// ── Propinas de hoy ───────────────────────────────────────────────
-
-export async function getTipsToday(
-  businessId: string,
-  timezone: string,
-): Promise<number> {
-  const supabase = await createSupabaseServerClient();
-  const start = startOfDayUtc(timezone, 0);
-
-  const { data } = await supabase
-    .from("payments")
-    .select("tip_cents")
-    .eq("business_id", businessId)
-    .eq("payment_status", "paid")
-    .gte("created_at", start.toISOString());
-
-  let tips = 0;
-  for (const p of data ?? []) {
-    tips += Number((p as { tip_cents: number }).tip_cents) || 0;
-  }
-  return tips;
+  return { byMethod, totalCents, cashCents, digitalCents };
 }
 
 // ── Control de caja (por rango) ───────────────────────────────────

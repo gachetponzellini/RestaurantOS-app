@@ -40,10 +40,10 @@ export default async function AdminCobrarPage({
           eyebrow="Cobro"
           title="No hay cuenta para cobrar"
           description="Esta mesa no tiene un pedido activo. Cargá items primero desde la pantalla de pedido."
-          back={{ href: `/${business_slug}/admin/local`, label: "Volver al salón" }}
+          back={{ href: `/${business_slug}/admin/operacion`, label: "Volver al salón" }}
         />
         <Link
-          href={`/${business_slug}/admin/local`}
+          href={`/${business_slug}/admin/operacion`}
           className="inline-flex items-center rounded-full bg-zinc-900 px-4 py-2 text-sm font-semibold text-white"
         >
           Volver al salón
@@ -60,10 +60,10 @@ export default async function AdminCobrarPage({
           eyebrow="Cobro"
           title="No se puede cobrar"
           description={init.error}
-          back={{ href: `/${business_slug}/admin/local`, label: "Volver al salón" }}
+          back={{ href: `/${business_slug}/admin/operacion`, label: "Volver al salón" }}
         />
         <Link
-          href={`/${business_slug}/admin/local?tab=caja`}
+          href={`/${business_slug}/admin/operacion?tab=caja`}
           className="text-sm font-semibold text-zinc-900 underline"
         >
           Ir a caja →

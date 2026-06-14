@@ -437,7 +437,7 @@ export async function sentarReserva(
   if (resErr) console.error("sentarReserva status update", resErr);
 
   const slug = parsed.data.business_slug;
-  revalidatePath(`/${slug}/admin/local`);
+  revalidatePath(`/${slug}/admin/operacion`);
   revalidatePath(`/${slug}/admin/reservas`);
   revalidatePath(`/${slug}/mozo`);
   return actionOk({ orderId: openResult.data.orderId });

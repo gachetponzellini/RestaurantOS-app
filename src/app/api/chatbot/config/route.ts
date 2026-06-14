@@ -2,6 +2,10 @@ import { NextResponse } from "next/server";
 
 import { ensureAdminAccess } from "@/lib/admin/context";
 import { DEFAULT_SYSTEM_PROMPT } from "@/lib/chatbot/agent";
+import {
+  isAnthropicKeyConfigured,
+  resolveChatbotState,
+} from "@/lib/chatbot/config-state";
 import { TOOL_METADATA } from "@/lib/chatbot/tools-metadata";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 import { getBusiness } from "@/lib/tenant";
@@ -26,11 +30,19 @@ export async function GET(req: Request) {
   await ensureAdminAccess(business.id, businessSlug);
 
   const service = createSupabaseServiceClient();
-  const { data } = await service
+  // Cast a cliente genérico: `chatbot_enabled` es columna nueva (0056) y los
+  // tipos generados aún no la incluyen.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data } = await (service as any)
     .from("chatbot_configs")
-    .select("system_prompt, enabled_tools, tool_overrides")
+    .select("system_prompt, enabled_tools, tool_overrides, chatbot_enabled")
     .eq("business_id", business.id)
     .maybeSingle();
+
+  const chatbotEnabled = Boolean(data?.chatbot_enabled);
+  // Sólo la PRESENCIA de la key (booleano), nunca el valor.
+  const hasApiKey = isAnthropicKeyConfigured();
+  const state = resolveChatbotState({ hasApiKey, enabled: chatbotEnabled });
 
   return NextResponse.json({
     systemPrompt: data?.system_prompt ?? "",
@@ -44,6 +56,11 @@ export async function GET(req: Request) {
     toolDefaults: Object.fromEntries(
       TOOL_METADATA.map((t) => [t.name, { promptSection: t.promptSection }]),
     ),
+    // Estado de configuración del bot (sin exponer la key).
+    chatbotEnabled,
+    hasApiKey,
+    chatbotReady: state.ready,
+    notReadyReason: state.ready ? null : state.reason,
   });
 }
 
@@ -53,13 +70,15 @@ export async function PUT(req: Request) {
     systemPrompt?: string;
     enabledTools?: string[] | null;
     toolOverrides?: Record<string, { promptSection?: string }>;
+    chatbotEnabled?: boolean;
   };
   try {
     body = await req.json();
   } catch {
     return NextResponse.json({ error: "invalid json" }, { status: 400 });
   }
-  const { businessSlug, systemPrompt, enabledTools, toolOverrides } = body;
+  const { businessSlug, systemPrompt, enabledTools, toolOverrides, chatbotEnabled } =
+    body;
   if (!businessSlug) {
     return NextResponse.json(
       { error: "businessSlug required" },
@@ -79,10 +98,13 @@ export async function PUT(req: Request) {
     system_prompt?: string;
     enabled_tools?: string[] | null;
     tool_overrides?: Record<string, { promptSection?: string }>;
+    chatbot_enabled?: boolean;
   } = {
     business_id: business.id,
     updated_at: new Date().toISOString(),
   };
+  if (typeof chatbotEnabled === "boolean")
+    update.chatbot_enabled = chatbotEnabled;
   if (typeof systemPrompt === "string") update.system_prompt = systemPrompt;
   if (enabledTools !== undefined) {
     if (enabledTools === null) {
@@ -118,7 +140,12 @@ export async function PUT(req: Request) {
   }
 
   const service = createSupabaseServiceClient();
-  const { error } = await service.from("chatbot_configs").upsert(update);
+  // Cast a cliente genérico: `chatbot_enabled` es columna nueva (0056) aún no
+  // reflejada en los tipos generados.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { error } = await (service as any)
+    .from("chatbot_configs")
+    .upsert(update);
   if (error) {
     console.error("chatbot config upsert failed", error);
     return NextResponse.json({ error: error.message }, { status: 500 });

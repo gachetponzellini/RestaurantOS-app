@@ -81,7 +81,7 @@ function TabsInner({
     router.replace(qs ? `?${qs}` : `?`, { scroll: false });
   };
 
-  // Como todo /admin/local ahora es fullscreen, colapsamos el sidebar al
+  // Como todo /admin/operacion ahora es fullscreen, colapsamos el sidebar al
   // entrar a la pantalla (no solo al activar la tab Salón). Antes este
   // dispatch vivía dentro de SalonDesktop.
   useEffect(() => {
@@ -181,7 +181,7 @@ function TabsInner({
   return (
     <div
       className="fixed inset-0 z-30 flex flex-col bg-zinc-50 transition-[left] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)]"
-      style={{ left: "var(--admin-sidebar-width, 72px)" }}
+      style={{ left: "var(--admin-sidebar-width, 60px)" }}
     >
       <div className="border-border/60 flex items-center justify-between gap-3 border-b bg-white/95 px-4 py-3 backdrop-blur">
         {tabsBar}

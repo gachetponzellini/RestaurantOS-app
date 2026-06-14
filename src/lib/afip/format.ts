@@ -1,6 +1,11 @@
 import type { InvoiceStatus, TipoComprobante } from "./types";
 
-export function formatInvoiceNumber(pv: number, numero: number): string {
+export function formatInvoiceNumber(
+  pv: number,
+  numero: number | null,
+): string {
+  // Los comprobantes pending/failed todavía no tienen número fiscal asignado.
+  if (numero == null) return `${String(pv).padStart(4, "0")}-—`;
   return `${String(pv).padStart(4, "0")}-${String(numero).padStart(8, "0")}`;
 }
 

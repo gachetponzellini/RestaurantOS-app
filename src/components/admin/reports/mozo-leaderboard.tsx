@@ -38,10 +38,10 @@ export function MozoLeaderboard({ data }: { data: StaffPerformance }) {
         </div>
         <div className="text-right">
           <p className="text-[0.65rem] font-semibold uppercase tracking-[0.14em] text-zinc-500">
-            Propinas totales
+            Mozos activos
           </p>
           <p className="text-2xl font-semibold tabular-nums text-zinc-900">
-            {formatCurrency(data.totalTipsCents)}
+            {data.mozos.length}
           </p>
         </div>
       </header>
@@ -75,12 +75,6 @@ export function MozoLeaderboard({ data }: { data: StaffPerformance }) {
               <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[0.7rem] text-zinc-500">
                 <span>
                   {m.paymentCount} cobros · ticket {formatCurrency(avgTicket)}
-                </span>
-                <span>
-                  Propina {formatCurrency(m.tipsCents)}
-                  <span className="ml-1 font-semibold text-emerald-600">
-                    {m.tipRatePct.toFixed(1)}%
-                  </span>
                 </span>
               </div>
             </div>

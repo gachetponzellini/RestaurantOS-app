@@ -108,7 +108,7 @@ export function CobrarDesktopClient({
         title="Cobrar mesa"
         description="Registrá pagos por sub-cuenta o cobro completo. Cada confirmación queda asentada en la caja seleccionada."
         size="compact"
-        back={{ href: `/${slug}/admin/local`, label: "Volver al salón" }}
+        back={{ href: `/${slug}/admin/operacion`, label: "Volver al salón" }}
       />
 
       <div className="grid gap-4 lg:grid-cols-[1fr_minmax(0,420px)]">
@@ -193,7 +193,7 @@ export function CobrarDesktopClient({
             <AnularCobroSection
               orderId={cuenta.order.id}
               slug={slug}
-              onDone={() => router.push(`/${slug}/admin/local`)}
+              onDone={() => router.push(`/${slug}/admin/operacion`)}
             />
           )}
 
@@ -212,7 +212,7 @@ export function CobrarDesktopClient({
               </div>
               <button
                 type="button"
-                onClick={() => router.push(`/${slug}/admin/local`)}
+                onClick={() => router.push(`/${slug}/admin/operacion`)}
                 className="inline-flex items-center gap-1 rounded-full bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-emerald-700"
               >
                 Volver al salón
@@ -236,7 +236,7 @@ export function CobrarDesktopClient({
               onPaid={({ orderClosed }) => {
                 if (orderClosed) {
                   toast.success("Mesa cobrada");
-                  router.push(`/${slug}/admin/local`);
+                  router.push(`/${slug}/admin/operacion`);
                   return;
                 }
                 setActiveSplitId(null);

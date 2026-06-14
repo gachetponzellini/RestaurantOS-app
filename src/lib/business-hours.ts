@@ -11,6 +11,11 @@ function timeToSeconds(t: string): number {
   return (h ?? 0) * 3600 + (m ?? 0) * 60 + (s ?? 0);
 }
 
+function effectiveClose(t: string): number {
+  const secs = timeToSeconds(t);
+  return secs === 0 ? 86400 : secs;
+}
+
 export function computeIsOpen(
   hours: BusinessHour[],
   timezone: string,
@@ -26,6 +31,6 @@ export function computeIsOpen(
     .some(
       (h) =>
         secondsNow >= timeToSeconds(h.opens_at) &&
-        secondsNow < timeToSeconds(h.closes_at),
+        secondsNow < effectiveClose(h.closes_at),
     );
 }

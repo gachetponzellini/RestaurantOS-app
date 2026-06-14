@@ -47,3 +47,10 @@ export type SupplierStats = {
   invoiceCount: number;
   lastInvoiceDate: string | null;
 };
+
+export type SupplierOutflowItem = {
+  supplierId: string;
+  supplierName: string;
+  totalCostCents: number;
+  consumptionCount: number;
+};

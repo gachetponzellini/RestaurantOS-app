@@ -33,6 +33,7 @@ import { cn } from "@/lib/utils";
 
 import { InvoiceDetailSheet } from "./invoice-detail-sheet";
 import { InvoiceKpiStrip } from "./invoice-kpi-strip";
+import { PedidoFlashDialog } from "./pedido-flash-dialog";
 
 type RangeKey = "today" | "7d" | "30d" | "all";
 
@@ -125,6 +126,10 @@ export function FacturacionClient({
 
   return (
     <div className="grid gap-6">
+      <div className="flex justify-end">
+        <PedidoFlashDialog slug={slug} />
+      </div>
+
       <InvoiceKpiStrip
         kpis={kpis}
         onFilterFailed={() => updateFilter("status", "failed")}

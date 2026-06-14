@@ -29,6 +29,11 @@ import {
   TOOL_METADATA,
   type ToolOverrides,
 } from "@/lib/chatbot/tools-metadata";
+import {
+  ChatbotNotConfiguredError,
+  isAnthropicKeyConfigured,
+  resolveChatbotState,
+} from "@/lib/chatbot/config-state";
 
 export type ToolTraceEntry = {
   name: string;
@@ -163,10 +168,40 @@ const CHATBOT_MODEL = process.env.CHATBOT_MODEL ?? "claude-opus-4-7";
 // bump this in env via CHATBOT_MAX_TOKENS.
 const CHATBOT_MAX_TOKENS = Number(process.env.CHATBOT_MAX_TOKENS ?? 4096);
 
+/**
+ * Lee el flag `chatbot_enabled` del negocio. Sin fila en `chatbot_configs` →
+ * false (el bot arranca apagado hasta que el dueño lo prende desde el panel).
+ * Cast a cliente genérico porque la columna es nueva (migración 0056) y los
+ * tipos generados todavía no la incluyen.
+ */
+async function loadChatbotEnabled(
+  service: ReturnType<typeof createSupabaseServiceClient>,
+  businessId: string,
+): Promise<boolean> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data } = await (service as any)
+    .from("chatbot_configs")
+    .select("chatbot_enabled")
+    .eq("business_id", businessId)
+    .maybeSingle();
+  return Boolean(data?.chatbot_enabled);
+}
+
 export async function runChatbot(
   input: RunChatbotInput,
 ): Promise<RunChatbotResult> {
   const service = createSupabaseServiceClient();
+
+  // Gate de configuración: el bot sólo corre si la API key está presente en el
+  // entorno y el dueño lo dejó habilitado. Si no, cortamos ANTES de instanciar
+  // el modelo y devolvemos un error tipado que las rutas mapean a un mensaje
+  // legible ("falta API key") en vez de un 500 opaco. Nunca exponemos la key.
+  const enabled = await loadChatbotEnabled(service, input.businessId);
+  const state = resolveChatbotState({
+    hasApiKey: isAnthropicKeyConfigured(),
+    enabled,
+  });
+  if (!state.ready) throw new ChatbotNotConfiguredError(state.reason);
 
   const contactId = await upsertContact(service, input);
   const conversationId = await getOrOpenConversation(

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import { ensureAdminAccess } from "@/lib/admin/context";
 import { closeConversation, runChatbot } from "@/lib/chatbot/agent";
+import { ChatbotNotConfiguredError } from "@/lib/chatbot/config-state";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 import { getBusiness } from "@/lib/tenant";
 
@@ -47,6 +48,15 @@ export async function POST(req: Request) {
     // result already includes { conversationId, assistantMessage, toolTrace }
     return NextResponse.json(result);
   } catch (err) {
+    // El bot no está configurado (falta API key o está deshabilitado): mensaje
+    // accionable + 409, distinguible de un fallo genérico del modelo. Nunca
+    // exponemos la key (el error tipado ya trae un mensaje seguro).
+    if (err instanceof ChatbotNotConfiguredError) {
+      return NextResponse.json(
+        { error: err.message, reason: err.reason, chatbotReady: false },
+        { status: 409 },
+      );
+    }
     console.error("chatbot test POST failed", err);
     const msg = err instanceof Error ? err.message : "chatbot failed";
     return NextResponse.json({ error: msg }, { status: 500 });

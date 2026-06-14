@@ -1,5 +1,9 @@
 import type { AFIPProviderClient } from "./provider";
-import type { InvoiceRequest, InvoiceResponse } from "./types";
+import type {
+  InvoiceRequest,
+  InvoiceResponse,
+  TusfacturasCredentials,
+} from "./types";
 
 const TIPO_MAP: Record<string, number> = {
   factura_a: 1,
@@ -14,28 +18,47 @@ const CONCEPTO_MAP: Record<string, number> = {
   productos_y_servicios: 3,
 };
 
-function getEnv(): { apiKey: string; apiUrl: string } {
-  const apiKey = process.env.TUSFACTURAS_API_KEY;
-  const apiUrl =
-    process.env.TUSFACTURAS_API_URL ?? "https://app.tusfacturas.app/api/v2/";
-  if (!apiKey) throw new Error("TUSFACTURAS_API_KEY no configurada");
-  return { apiKey, apiUrl: apiUrl.replace(/\/$/, "") };
+const DEFAULT_API_URL = "https://app.tusfacturas.app/api/v2";
+
+/**
+ * Cliente de TusFacturas resuelto POR NEGOCIO.
+ *
+ * Recibe las tres credenciales del negocio (apitoken, apikey, usertoken) en vez
+ * de leerlas de env global, de modo que House y Golf (CUIT distintos) facturen
+ * cada uno con su propia cuenta. El CUIT emisor lo determina la credencial: no
+ * se envía en el payload.
+ */
+export function createTusfacturasClient(
+  creds: TusfacturasCredentials,
+): AFIPProviderClient {
+  const apiUrl = (creds.apiUrl ?? DEFAULT_API_URL).replace(/\/$/, "");
+  return {
+    emit: (req) => emit(req, creds, apiUrl),
+    getLastNumber: (tipo, pv) => getLastNumber(tipo, pv, creds, apiUrl),
+  };
 }
 
-export function createTusfacturasClient(): AFIPProviderClient {
-  return { emit, getLastNumber };
+/** Cabecera de autenticación común a todos los requests v2 de TusFacturas. */
+function authHeader(creds: TusfacturasCredentials) {
+  return {
+    apitoken: creds.apiToken,
+    apikey: creds.apiKey,
+    usertoken: creds.userToken,
+  };
 }
 
-async function emit(req: InvoiceRequest): Promise<InvoiceResponse> {
-  const { apiKey, apiUrl } = getEnv();
-
+async function emit(
+  req: InvoiceRequest,
+  creds: TusfacturasCredentials,
+  apiUrl: string,
+): Promise<InvoiceResponse> {
   const totalPesos = req.totalCents / 100;
   const divisor = 1 + 21 / 100;
   const netoPesos = Math.round((totalPesos / divisor) * 100) / 100;
   const ivaPesos = Math.round((totalPesos - netoPesos) * 100) / 100;
 
   const body = {
-    apikey: apiKey,
+    ...authHeader(creds),
     comprobante: {
       tipo: TIPO_MAP[req.tipo] ?? 6,
       operacion: "V",
@@ -99,15 +122,16 @@ async function emit(req: InvoiceRequest): Promise<InvoiceResponse> {
 async function getLastNumber(
   tipoComprobante: string,
   puntoVenta: number,
+  creds: TusfacturasCredentials,
+  apiUrl: string,
 ): Promise<number> {
-  const { apiKey, apiUrl } = getEnv();
   const tipo = TIPO_MAP[tipoComprobante] ?? 6;
 
   const res = await fetch(`${apiUrl}/facturacion/ultimo_comprobante`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      apikey: apiKey,
+      ...authHeader(creds),
       comprobante: { tipo, punto_venta: puntoVenta },
     }),
   });

@@ -11,6 +11,8 @@ import {
   generatePromoCode,
   renderTemplate,
 } from "@/lib/campaigns/template";
+import type { BusinessRole } from "@/lib/admin/context";
+import { canManageCampaigns } from "@/lib/permissions/can";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 const PromoTemplateSchema: z.ZodType<PromoTemplate> = z.object({
@@ -83,8 +85,8 @@ async function assertCanManage(businessSlug: string) {
       .maybeSingle(),
   ]);
   const isPlatformAdmin = profile?.is_platform_admin ?? false;
-  const isAdmin = membership?.role === "admin";
-  if (!isPlatformAdmin && !isAdmin) {
+  const role = membership?.role as BusinessRole | undefined;
+  if (!isPlatformAdmin && (!role || !canManageCampaigns(role))) {
     return { ok: false as const, error: "Permiso denegado." };
   }
   return {

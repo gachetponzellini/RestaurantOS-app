@@ -89,6 +89,37 @@ export async function resolveAudience(
   return result.customers;
 }
 
+export async function getCampaignRedemptionAmount(
+  campaignId: string,
+): Promise<number> {
+  const supabase = (await createSupabaseServerClient()) as unknown as GenericClient;
+
+  const { data: messages } = await supabase
+    .from("campaign_messages")
+    .select("promo_code_id")
+    .eq("campaign_id", campaignId)
+    .not("redeemed_at", "is", null);
+
+  if (!messages?.length) return 0;
+  const promoIds = (messages as { promo_code_id: string }[])
+    .map((m) => m.promo_code_id)
+    .filter(Boolean);
+  if (promoIds.length === 0) return 0;
+
+  const { data: orders } = await supabase
+    .from("orders")
+    .select("total_cents, tip_cents")
+    .in("promo_code_id", promoIds)
+    .neq("status", "cancelled");
+
+  let totalCents = 0;
+  for (const o of orders ?? []) {
+    const row = o as { total_cents: number; tip_cents: number | null };
+    totalCents += Number(row.total_cents) - (Number(row.tip_cents) || 0);
+  }
+  return totalCents;
+}
+
 /**
  * Service-role variant for use inside server actions that need to bypass RLS
  * (the launch action runs in the user's session but uses service for cross-

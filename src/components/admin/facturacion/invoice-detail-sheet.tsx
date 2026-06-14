@@ -2,17 +2,20 @@
 
 import { useState, useTransition } from "react";
 import Link from "next/link";
-import { Check, Copy, ExternalLink, RefreshCw } from "lucide-react";
+import { Ban, Copy, ExternalLink, RefreshCw, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
 import {
   Sheet,
   SheetContent,
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
-import { retryInvoice } from "@/lib/afip/emit-invoice";
+import { Textarea } from "@/components/ui/textarea";
+import { anularFactura, emitInvoice, retryInvoice } from "@/lib/afip/emit-invoice";
+import { classifyProviderError } from "@/lib/afip/error-classification";
 import {
   formatInvoiceNumber,
   INVOICE_STATUS_META,
@@ -38,7 +41,10 @@ export function InvoiceDetailSheet({
   onRetried,
 }: Props) {
   const [retrying, startRetry] = useTransition();
+  const [anulando, startAnular] = useTransition();
+  const [refacturando, startRefacturar] = useTransition();
   const [showRaw, setShowRaw] = useState(false);
+  const [motivo, setMotivo] = useState("");
 
   if (!invoice) return null;
 
@@ -67,6 +73,44 @@ export function InvoiceDetailSheet({
     if (!invoice.cae) return;
     await navigator.clipboard.writeText(invoice.cae);
     toast.success("CAE copiado.");
+  };
+
+  const handleAnular = () => {
+    const motivoTrim = motivo.trim();
+    if (!motivoTrim) {
+      toast.error("Ingresá el motivo de la anulación.");
+      return;
+    }
+    startAnular(async () => {
+      const result = await anularFactura({
+        invoiceId: invoice.id,
+        motivo: motivoTrim,
+        slug,
+      });
+      if (result.ok) {
+        toast.success("Factura anulada. Se emitió la nota de crédito.");
+        setMotivo("");
+        onRetried?.();
+      } else {
+        toast.error(result.error);
+      }
+    });
+  };
+
+  const handleRefacturar = () => {
+    if (!invoice.order_id) return;
+    startRefacturar(async () => {
+      const result = await emitInvoice({
+        orderId: invoice.order_id!,
+        slug,
+      });
+      if (result.ok) {
+        toast.success("Orden re-facturada.");
+        onRetried?.();
+      } else {
+        toast.error(result.error);
+      }
+    });
   };
 
   return (
@@ -179,24 +223,95 @@ export function InvoiceDetailSheet({
             </Row>
           )}
 
-          {invoice.status === "failed" && (
-            <div className="rounded-xl bg-rose-50 p-4 ring-1 ring-rose-200/60">
-              {invoice.error_message && (
-                <p className="mb-3 text-sm text-rose-700">
-                  {invoice.error_message}
-                </p>
-              )}
-              <Button
-                onClick={handleRetry}
-                disabled={retrying}
-                variant="outline"
-                size="sm"
-              >
-                <RefreshCw
-                  className={cn("size-3.5", retrying && "animate-spin")}
+          {invoice.status === "failed" &&
+            (() => {
+              const errorClass = classifyProviderError(invoice.error_message);
+              const isFiscal = errorClass === "fiscal";
+              return (
+                <div className="rounded-xl bg-rose-50 p-4 ring-1 ring-rose-200/60">
+                  {invoice.error_message && (
+                    <p className="mb-2 text-sm text-rose-700">
+                      {invoice.error_message}
+                    </p>
+                  )}
+                  <p className="mb-3 text-xs font-medium text-rose-600">
+                    {isFiscal
+                      ? "Rechazo de datos de ARCA: revisá CUIT / datos del comprobante antes de reintentar."
+                      : "Error temporario de conexión con el provider: podés reintentar tal cual."}
+                  </p>
+                  <Button
+                    onClick={handleRetry}
+                    disabled={retrying}
+                    variant="outline"
+                    size="sm"
+                  >
+                    <RefreshCw
+                      className={cn("size-3.5", retrying && "animate-spin")}
+                    />
+                    {retrying ? "Reintentando…" : "Reintentar"}
+                  </Button>
+                </div>
+              );
+            })()}
+
+          {invoice.status === "authorized" && (
+            <div className="rounded-xl bg-zinc-50 p-4 ring-1 ring-zinc-200/60">
+              <p className="mb-1 text-sm font-medium text-zinc-900">
+                Anular comprobante
+              </p>
+              <p className="mb-3 text-xs text-zinc-500">
+                Se emite la nota de crédito y la factura queda anulada. El motivo
+                es obligatorio.
+              </p>
+              <div className="grid gap-2">
+                <Label htmlFor="anular-motivo" className="sr-only">
+                  Motivo de anulación
+                </Label>
+                <Textarea
+                  id="anular-motivo"
+                  placeholder="Motivo (ej: factura mal hecha al mozo)"
+                  value={motivo}
+                  onChange={(e) => setMotivo(e.target.value)}
+                  disabled={anulando}
+                  className="min-h-14 bg-white text-sm"
                 />
-                {retrying ? "Reintentando…" : "Reintentar"}
-              </Button>
+                <Button
+                  onClick={handleAnular}
+                  disabled={anulando}
+                  variant="outline"
+                  size="sm"
+                  className="justify-self-start text-rose-700 hover:text-rose-800"
+                >
+                  <Ban
+                    className={cn("size-3.5", anulando && "animate-pulse")}
+                  />
+                  {anulando ? "Anulando…" : "Anular y emitir NC"}
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {invoice.status === "cancelled" && (
+            <div className="rounded-xl bg-zinc-50 p-4 ring-1 ring-zinc-200/60">
+              {invoice.cancelled_reason && (
+                <Row label="Motivo anulación">
+                  {invoice.cancelled_reason}
+                </Row>
+              )}
+              {invoice.order_id && (
+                <Button
+                  onClick={handleRefacturar}
+                  disabled={refacturando}
+                  variant="outline"
+                  size="sm"
+                  className="mt-3"
+                >
+                  <RotateCcw
+                    className={cn("size-3.5", refacturando && "animate-spin")}
+                  />
+                  {refacturando ? "Re-facturando…" : "Re-facturar"}
+                </Button>
+              )}
             </div>
           )}
 

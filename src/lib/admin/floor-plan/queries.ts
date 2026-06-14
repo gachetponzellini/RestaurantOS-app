@@ -54,7 +54,7 @@ export async function getOrCreateFloorPlan(businessId: string): Promise<FloorPla
 
 /**
  * Devuelve todos los floor_plans del business con sus tables. Usado por
- * `/admin/salones` (listado) y por la tab Salón de `/admin/local` para
+ * `/admin/salones` (listado) y por la tab Salón de `/admin/operacion` para
  * armar el selector multi-salón.
  */
 export async function getFloorPlansForBusiness(

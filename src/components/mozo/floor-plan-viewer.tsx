@@ -84,6 +84,20 @@ function formatTime(iso: string) {
   });
 }
 
+/**
+ * Tiempo abierto, compacto para el label del plano: "45m", "1h30", "3h", "2d".
+ * Antes mostrábamos siempre minutos ("95m"), poco legible pasada la hora.
+ */
+function formatOpenCompact(minutes: number): string {
+  if (minutes < 60) return `${minutes}m`;
+  const h = Math.floor(minutes / 60);
+  if (h < 24) {
+    const m = minutes % 60;
+    return m === 0 ? `${h}h` : `${h}h${m}`;
+  }
+  return `${Math.floor(h / 24)}d`;
+}
+
 function ViewerTable({
   table,
   extra,
@@ -127,7 +141,7 @@ function ViewerTable({
     if (hasReservation && opStatus === "libre") {
       subLine = `${extra!.reservation!.starts_at ? formatTime(extra!.reservation!.starts_at) : ""} · ${extra!.reservation!.party_size}p`;
     } else if (minutesOpen != null && minutesOpen >= 0) {
-      subLine = `${minutesOpen}m`;
+      subLine = formatOpenCompact(minutesOpen);
     }
   }
 

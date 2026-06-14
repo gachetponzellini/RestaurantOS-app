@@ -5,7 +5,6 @@ import {
   CircleDollarSign,
   Coins,
   Flame,
-  HandCoins,
   Receipt,
   Timer,
   Trash2,
@@ -32,7 +31,6 @@ import {
   getDashboardProfit,
   getHourlyHeatmap,
   getPaymentMix,
-  getTipsToday,
 } from "@/lib/admin/dashboard-query";
 import { getTodayOrders } from "@/lib/admin/orders-query";
 import { getSalonStats } from "@/lib/admin/reports-query";
@@ -69,7 +67,7 @@ export default async function AdminDashboardPage({
 
   const ctx = await ensureAdminAccess(business.id, business_slug);
 
-  const [overview, heatmap, menus, orders, salon, profit, paymentMix, tipsToday] =
+  const [overview, heatmap, menus, orders, salon, profit, paymentMix] =
     await Promise.all([
       getDashboardOverview(business.id, business.timezone),
       getHourlyHeatmap(business.id, business.timezone),
@@ -78,7 +76,6 @@ export default async function AdminDashboardPage({
       getSalonStats(business.id, business.timezone),
       getDashboardProfit(business.id, business.timezone),
       getPaymentMix(business.id, business.timezone),
-      getTipsToday(business.id, business.timezone),
     ]);
 
   const todayDow = currentDayOfWeek(business.timezone);
@@ -155,7 +152,7 @@ export default async function AdminDashboardPage({
         hasCostData={profit.hasCostData}
       />
 
-      <section className="grid gap-4 md:grid-cols-3">
+      <section className="grid gap-4 md:grid-cols-2">
         <StatTile
           eyebrow="CMV · 30 días"
           value={formatCurrency(profit.foodCostCents)}
@@ -167,13 +164,6 @@ export default async function AdminDashboardPage({
           value={formatCurrency(profit.mermaCents)}
           sub="insumos perdidos"
           icon={<Trash2 className="size-4" strokeWidth={1.75} />}
-        />
-        <StatTile
-          eyebrow="Propinas hoy"
-          value={formatCurrency(tipsToday)}
-          sub="cobradas al personal"
-          icon={<HandCoins className="size-4" strokeWidth={1.75} />}
-          accent="dark"
         />
       </section>
 

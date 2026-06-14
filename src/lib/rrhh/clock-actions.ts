@@ -1,9 +1,17 @@
 "use server";
 
+import { headers } from "next/headers";
+
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { actionError, actionOk, type ActionResult } from "@/lib/actions";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
+
+import {
+  clientIpFromForwarded,
+  isOriginAllowed,
+  maskPin,
+} from "./ip-allowlist";
 
 // Post-migration types not yet regenerated; cast to bypass strict table checks.
 // Remove after running `pnpm db:types` against a DB with 0045_rrhh applied.
@@ -34,6 +42,31 @@ export async function clockPunch(
     .eq("slug", businessSlug)
     .maybeSingle();
   if (!business) return actionError("Negocio no encontrado.");
+
+  // ── Enforcement de origen (spec 11) ────────────────────────────────
+  // Si el negocio configuró una allowlist, sólo se ficha desde un origen
+  // autorizado de la LAN del local. Allowlist vacía = sin enforcement
+  // (back-compat). Se evalúa ANTES de buscar el PIN para no permitir que el
+  // endpoint confirme desde afuera si un PIN existe.
+  const { data: origins } = await service
+    .from("clock_allowed_origins")
+    .select("cidr")
+    .eq("business_id", business.id);
+  const cidrs = (origins ?? []).map((o) => o.cidr as string);
+  if (cidrs.length > 0) {
+    const h = await headers();
+    const ip = clientIpFromForwarded(h.get("x-forwarded-for"));
+    if (!isOriginAllowed(ip, cidrs)) {
+      await service.from("clock_blocked_attempts").insert({
+        business_id: business.id,
+        ip: ip ?? "unknown",
+        pin_masked: maskPin(pin),
+      });
+      return actionError(
+        "El fichaje sólo está habilitado desde las computadoras del local.",
+      );
+    }
+  }
 
   const { data: member } = await service
     .from("business_users")

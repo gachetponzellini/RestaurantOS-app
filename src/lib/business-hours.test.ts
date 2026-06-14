@@ -59,4 +59,22 @@ describe("computeIsOpen", () => {
     const now = new Date("2026-04-16T00:00:00Z");
     expect(computeIsOpen(split, TZ, now)).toBe(true);
   });
+
+  it("returns true when closes_at is midnight (00:00)", () => {
+    const midnightClose: BusinessHour[] = [
+      { day_of_week: 3, opens_at: "18:00:00", closes_at: "00:00:00" },
+    ];
+    // 2026-04-15 (Wed) 21:00 ART = 2026-04-16 00:00 UTC
+    const now = new Date("2026-04-16T00:00:00Z");
+    expect(computeIsOpen(midnightClose, TZ, now)).toBe(true);
+  });
+
+  it("returns false before open when closes_at is midnight", () => {
+    const midnightClose: BusinessHour[] = [
+      { day_of_week: 3, opens_at: "18:00:00", closes_at: "00:00:00" },
+    ];
+    // 2026-04-15 (Wed) 15:00 ART = 2026-04-15 18:00 UTC
+    const now = new Date("2026-04-15T18:00:00Z");
+    expect(computeIsOpen(midnightClose, TZ, now)).toBe(false);
+  });
 });

@@ -10,8 +10,11 @@ type GenericClient = SupabaseClient;
 export const REPORT_RANGES = ["today", "yesterday", "7d", "30d"] as const;
 export type ReportRange = (typeof REPORT_RANGES)[number];
 
+export type CustomDateRange = { start: string; end: string };
+export type ReportRangeInput = ReportRange | CustomDateRange;
+
 export type ReportSummary = {
-  range: ReportRange;
+  range: ReportRange | "custom";
   startIso: string;
   endIso: string;
   orderCount: number;
@@ -114,10 +117,21 @@ function startOfDayInTz(date: Date, timezone: string): Date {
 }
 
 function computeRange(
-  range: ReportRange,
+  range: ReportRangeInput,
   timezone: string,
   now: Date = new Date(),
 ): { start: Date; end: Date; days: number } {
+  if (typeof range === "object") {
+    const s = new Date(range.start + "T12:00:00Z");
+    const e = new Date(range.end + "T12:00:00Z");
+    const start = startOfDayInTz(s, timezone);
+    const endMidnight = startOfDayInTz(e, timezone);
+    const oneDayMs = 24 * 60 * 60 * 1000;
+    const end = new Date(endMidnight.getTime() + oneDayMs);
+    const days = Math.round((end.getTime() - start.getTime()) / oneDayMs);
+    return { start, end, days };
+  }
+
   const todayStart = startOfDayInTz(now, timezone);
   const oneDayMs = 24 * 60 * 60 * 1000;
   switch (range) {
@@ -171,6 +185,7 @@ type OrderRowFull = {
   id: string;
   created_at: string;
   total_cents: number | string;
+  tip_cents: number | string | null;
   status: string;
   delivery_type: string;
   customer_id: string | null;
@@ -187,7 +202,7 @@ type OrderRowFull = {
 export async function getReportData(
   businessId: string,
   timezone: string,
-  range: ReportRange,
+  range: ReportRangeInput,
 ): Promise<ReportData> {
   const { start, end, days } = computeRange(range, timezone);
   const prev = previousRange(start, end);
@@ -195,7 +210,7 @@ export async function getReportData(
 
   // 1. Pedidos del rango (con items para top y categorías)
   const ordersSel =
-    "id, created_at, total_cents, status, delivery_type, customer_id, customer_name, customer_phone, order_items(product_id, product_name, quantity, subtotal_cents)";
+    "id, created_at, total_cents, tip_cents, status, delivery_type, customer_id, customer_name, customer_phone, order_items(product_id, product_name, quantity, subtotal_cents)";
 
   const [
     ordersRes,
@@ -215,7 +230,7 @@ export async function getReportData(
       .lt("created_at", end.toISOString()),
     supabase
       .from("orders")
-      .select("id, total_cents, status")
+      .select("id, total_cents, tip_cents, status")
       .eq("business_id", businessId)
       .gte("created_at", prev.start.toISOString())
       .lt("created_at", prev.end.toISOString()),
@@ -250,7 +265,7 @@ export async function getReportData(
       .not("customer_id", "is", null),
     supabase
       .from("orders")
-      .select("customer_id, total_cents, created_at")
+      .select("customer_id, total_cents, tip_cents, created_at")
       .eq("business_id", businessId)
       .neq("status", "cancelled")
       .gte("created_at", start.toISOString())
@@ -283,7 +298,7 @@ export async function getReportData(
       continue;
     }
     orderCount++;
-    const cents = Number(o.total_cents);
+    const cents = Number(o.total_cents) - (Number(o.tip_cents) || 0);
     revenueCents += cents;
     if (o.delivery_type === "delivery") deliveryCount++;
     else if (o.delivery_type === "pickup") pickupCount++;
@@ -309,7 +324,7 @@ export async function getReportData(
   }
 
   const summary: ReportSummary = {
-    range,
+    range: typeof range === "object" ? "custom" : range,
     startIso: start.toISOString(),
     endIso: end.toISOString(),
     orderCount,
@@ -332,7 +347,7 @@ export async function getReportData(
       continue;
     }
     prevOrderCount++;
-    prevRevenue += Number(o.total_cents);
+    prevRevenue += Number(o.total_cents) - (Number(o.tip_cents) || 0);
   }
   const prevAvgTicket =
     prevOrderCount > 0 ? Math.round(prevRevenue / prevOrderCount) : 0;
@@ -408,11 +423,12 @@ export async function getReportData(
   for (const o of (pastCustomerOrdersRes.data ?? []) as Array<{
     customer_id: string | null;
     total_cents: number | string;
+    tip_cents: number | string | null;
     created_at: string;
   }>) {
     if (!o.customer_id) continue;
     const t = new Date(o.created_at).getTime();
-    const cents = Number(o.total_cents);
+    const cents = Number(o.total_cents) - (Number(o.tip_cents) || 0);
     const existing = customerInRange.get(o.customer_id) ?? {
       orderCount: 0,
       revenueCents: 0,
@@ -635,7 +651,7 @@ export async function getSalonStats(
       .eq("floor_plans.business_id", businessId),
     supabase
       .from("orders")
-      .select("id, total_cents, delivery_type, status, table_id, created_at")
+      .select("id, total_cents, tip_cents, delivery_type, status, table_id, created_at")
       .eq("business_id", businessId)
       .gte("created_at", todayStart.toISOString())
       .neq("status", "cancelled"),
@@ -651,6 +667,7 @@ export async function getSalonStats(
   const orders = (ordersRes.data ?? []) as Array<{
     id: string;
     total_cents: number | string;
+    tip_cents: number | string | null;
     delivery_type: string;
     table_id: string | null;
     created_at: string;
@@ -660,16 +677,12 @@ export async function getSalonStats(
     (t) => t.operational_status && t.operational_status !== "libre",
   ).length;
 
+  const rev = (o: (typeof orders)[number]) =>
+    Number(o.total_cents) - (Number(o.tip_cents) || 0);
   const dineInOrders = orders.filter((o) => o.delivery_type === "dine_in");
   const deliveryOrders = orders.filter((o) => o.delivery_type !== "dine_in");
-  const dineInRevenue = dineInOrders.reduce(
-    (s, o) => s + Number(o.total_cents),
-    0,
-  );
-  const deliveryRevenue = deliveryOrders.reduce(
-    (s, o) => s + Number(o.total_cents),
-    0,
-  );
+  const dineInRevenue = dineInOrders.reduce((s, o) => s + rev(o), 0);
+  const deliveryRevenue = deliveryOrders.reduce((s, o) => s + rev(o), 0);
 
   const turnoverMap = new Map<string, number>();
   for (const o of dineInOrders) {

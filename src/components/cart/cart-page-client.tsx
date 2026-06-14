@@ -332,25 +332,23 @@ export function CartPageClient({
                 Resumen
               </div>
               <Row label="Subtotal" value={formatCurrency(subtotal)} />
-              {deliveryFeeCents > 0 && (
-                <>
-                  <Row
-                    label="Envío (delivery)"
-                    value={formatCurrency(deliveryFeeCents)}
-                    muted
-                  />
-                  <div
-                    style={{
-                      fontSize: 11,
-                      color: "var(--ink-3)",
-                      marginTop: 2,
-                      marginBottom: 2,
-                    }}
-                  >
-                    Retiro en local sin cargo. El envío se suma si elegís delivery.
-                  </div>
-                </>
-              )}
+              <Row
+                label="Envío (delivery)"
+                value={deliveryFeeCents > 0 ? formatCurrency(deliveryFeeCents) : "Bonificado"}
+                muted
+              />
+              <div
+                style={{
+                  fontSize: 11,
+                  color: "var(--ink-3)",
+                  marginTop: 2,
+                  marginBottom: 2,
+                }}
+              >
+                {deliveryFeeCents > 0
+                  ? "Retiro en local sin cargo. El envío se suma si elegís delivery."
+                  : "Retiro en local o delivery sin cargo."}
+              </div>
               <div
                 style={{
                   display: "flex",

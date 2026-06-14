@@ -79,7 +79,7 @@ export async function crearCaja(
   }
 
   revalidatePath(`/${businessSlug}/admin/cajas`);
-  revalidatePath(`/${businessSlug}/admin/local`);
+  revalidatePath(`/${businessSlug}/admin/operacion`);
   return actionOk({
     id: (data as { id: string }).id,
     name: (data as { name: string }).name,
@@ -125,7 +125,7 @@ export async function renombrarCaja(
   }
 
   revalidatePath(`/${businessSlug}/admin/cajas`);
-  revalidatePath(`/${businessSlug}/admin/local`);
+  revalidatePath(`/${businessSlug}/admin/operacion`);
   return actionOk({
     id: (data as { id: string }).id,
     name: (data as { name: string }).name,
@@ -160,7 +160,7 @@ export async function setCajaActive(
   if (error) return actionError(`No se pudo actualizar la caja: ${error.message}`);
 
   revalidatePath(`/${businessSlug}/admin/cajas`);
-  revalidatePath(`/${businessSlug}/admin/local`);
+  revalidatePath(`/${businessSlug}/admin/operacion`);
   return actionOk(undefined);
 }
 
@@ -228,7 +228,7 @@ export async function hacerCorte(
 
   if (error) return actionError(`No se pudo registrar el corte: ${error.message}`);
 
-  revalidatePath(`/${businessSlug}/admin/local`);
+  revalidatePath(`/${businessSlug}/admin/operacion`);
   return actionOk({ corte: inserted as CajaCorte });
 }
 
@@ -271,7 +271,7 @@ export async function registrarSangria(
   });
   if (error) return actionError(`No se pudo registrar la sangría: ${error.message}`);
 
-  revalidatePath(`/${businessSlug}/admin/local`);
+  revalidatePath(`/${businessSlug}/admin/operacion`);
   return actionOk(undefined);
 }
 
@@ -309,7 +309,7 @@ export async function registrarIngreso(
   });
   if (error) return actionError(`No se pudo registrar el ingreso: ${error.message}`);
 
-  revalidatePath(`/${businessSlug}/admin/local`);
+  revalidatePath(`/${businessSlug}/admin/operacion`);
   return actionOk(undefined);
 }
 
@@ -359,7 +359,7 @@ export async function upsertPaymentMethodConfig(
 
   revalidatePath(`/${businessSlug}/admin/configuracion`);
   revalidatePath(`/${businessSlug}/mozo`);
-  revalidatePath(`/${businessSlug}/admin/local`);
+  revalidatePath(`/${businessSlug}/admin/operacion`);
   return actionOk(undefined);
 }
 
@@ -427,7 +427,7 @@ export async function registrarRendicionMozo(
 
   if (error) return actionError(`No se pudo registrar la rendición: ${error.message}`);
 
-  revalidatePath(`/${businessSlug}/admin/local`);
+  revalidatePath(`/${businessSlug}/admin/operacion`);
   return actionOk({ rendicion: inserted as MozoRendicion });
 }
 
@@ -475,7 +475,7 @@ export async function asignarCajaUsuario(
 
   if (error) return actionError(`No se pudo asignar la caja: ${error.message}`);
 
-  revalidatePath(`/${businessSlug}/admin/local`);
+  revalidatePath(`/${businessSlug}/admin/operacion`);
   revalidatePath(`/${businessSlug}/admin/cajas`);
   return actionOk(undefined);
 }
@@ -507,7 +507,7 @@ export async function desasignarCajaUsuario(
 
   if (error) return actionError(`No se pudo desasignar: ${error.message}`);
 
-  revalidatePath(`/${businessSlug}/admin/local`);
+  revalidatePath(`/${businessSlug}/admin/operacion`);
   revalidatePath(`/${businessSlug}/admin/cajas`);
   return actionOk(undefined);
 }

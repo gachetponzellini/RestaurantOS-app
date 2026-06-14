@@ -100,7 +100,7 @@ export default async function LocalEnVivoPage({
     getTodaySummary(business.id),
   ]);
 
-  // /admin/local toma full viewport (overlay sobre el sidebar) — sin
+  // /admin/operacion toma full viewport (overlay sobre el sidebar) — sin
   // PageShell/PageHeader: el header con tabs ya vive dentro de LocalShell
   // y el título/subtítulo sumaban ruido a una pantalla densa.
   return (

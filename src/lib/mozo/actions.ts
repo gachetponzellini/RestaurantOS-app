@@ -185,6 +185,7 @@ export async function updateTableOperationalStatus(
   });
 
   revalidatePath(`/${businessSlug}/mozo`);
+  revalidatePath(`/${businessSlug}/admin/operacion`);
   return actionOk(undefined);
 }
 
@@ -261,6 +262,7 @@ export async function pedirCuenta(
   }
 
   revalidatePath(`/${businessSlug}/mozo`);
+  revalidatePath(`/${businessSlug}/admin/operacion`);
   return actionOk(undefined);
 }
 
@@ -319,6 +321,7 @@ export async function volverAPedir(
   }
 
   revalidatePath(`/${businessSlug}/mozo`);
+  revalidatePath(`/${businessSlug}/admin/operacion`);
   return actionOk(undefined);
 }
 
@@ -422,6 +425,7 @@ export async function anularMesa(
   });
 
   revalidatePath(`/${businessSlug}/mozo`);
+  revalidatePath(`/${businessSlug}/admin/operacion`);
   return actionOk(undefined);
 }
 
@@ -492,6 +496,7 @@ export async function assignMozoToTable(
   });
 
   revalidatePath(`/${businessSlug}/mozo`);
+  revalidatePath(`/${businessSlug}/admin/operacion`);
   return actionOk(undefined);
 }
 
@@ -607,6 +612,7 @@ export async function transferTable(
   }
 
   revalidatePath(`/${businessSlug}/mozo`);
+  revalidatePath(`/${businessSlug}/admin/operacion`);
   return actionOk(undefined);
 }
 

@@ -6,6 +6,7 @@ import { createSupabaseServiceClient } from "@/lib/supabase/service";
 import type {
   SupplierIngredientLink,
   SupplierInvoice,
+  SupplierOutflowItem,
   SupplierStats,
   SupplierWithStats,
 } from "./types";
@@ -199,6 +200,72 @@ export async function getSupplierIngredients(
       createdAt: row.created_at,
     };
   });
+}
+
+// ── Supplier product outflow (proveedor ↔ salida) ─────────────
+
+export async function getSupplierProductOutflow(
+  businessId: string,
+  startIso: string,
+  endIso: string,
+): Promise<SupplierOutflowItem[]> {
+  const service = db();
+
+  const [consumptionsRes, linksRes, suppliersRes] = await Promise.all([
+    service
+      .from("ingredient_consumptions")
+      .select("ingredient_id, cost_cents_snapshot")
+      .eq("business_id", businessId)
+      .eq("kind", "venta")
+      .gte("created_at", startIso)
+      .lt("created_at", endIso),
+    service
+      .from("supplier_ingredients")
+      .select("supplier_id, ingredient_id")
+      .eq("business_id", businessId),
+    service
+      .from("suppliers")
+      .select("id, name")
+      .eq("business_id", businessId),
+  ]);
+
+  const consumptions = consumptionsRes.data ?? [];
+  const links = linksRes.data ?? [];
+  const suppliers = suppliersRes.data ?? [];
+
+  if (!consumptions.length || !links.length) return [];
+
+  const ingredientToSuppliers = new Map<string, Set<string>>();
+  for (const link of links) {
+    const set = ingredientToSuppliers.get(link.ingredient_id) ?? new Set();
+    set.add(link.supplier_id);
+    ingredientToSuppliers.set(link.ingredient_id, set);
+  }
+
+  const supplierNames = new Map<string, string>();
+  for (const s of suppliers) supplierNames.set(s.id, s.name);
+
+  const agg = new Map<string, { costCents: number; count: number }>();
+  for (const c of consumptions) {
+    const row = c as { ingredient_id: string; cost_cents_snapshot: number };
+    const sids = ingredientToSuppliers.get(row.ingredient_id);
+    if (!sids) continue;
+    for (const sid of sids) {
+      const entry = agg.get(sid) ?? { costCents: 0, count: 0 };
+      entry.costCents += Math.abs(Number(row.cost_cents_snapshot) || 0);
+      entry.count += 1;
+      agg.set(sid, entry);
+    }
+  }
+
+  return Array.from(agg.entries())
+    .map(([supplierId, v]) => ({
+      supplierId,
+      supplierName: supplierNames.get(supplierId) ?? "—",
+      totalCostCents: v.costCents,
+      consumptionCount: v.count,
+    }))
+    .sort((a, b) => b.totalCostCents - a.totalCostCents);
 }
 
 // ── Ingredients for search (used by link dialog) ────────────────

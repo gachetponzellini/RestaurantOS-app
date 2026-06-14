@@ -22,6 +22,7 @@ import {
 } from "@/lib/admin/campaigns-actions";
 import type { CustomerListItem } from "@/lib/admin/customers-query";
 import { buildWaMeLink } from "@/lib/campaigns/template";
+import { formatCurrency } from "@/lib/currency";
 import type { Campaign, CampaignMessage } from "@/lib/campaigns/types";
 import {
   SEGMENT_LABEL,
@@ -37,12 +38,14 @@ export function CampaignDetailView({
   campaign,
   messages,
   audiencePreview,
+  redemptionAmountCents = 0,
 }: {
   slug: string;
   businessName: string;
   campaign: Campaign;
   messages: CampaignMessage[];
   audiencePreview: CustomerListItem[];
+  redemptionAmountCents?: number;
 }) {
   const [isPending, startTransition] = useTransition();
   const isDraft = campaign.status === "draft";
@@ -207,7 +210,11 @@ export function CampaignDetailView({
           <StatTile
             label="Canjeados"
             value={String(campaign.redeemed_count)}
-            sub={`${redeemedPct}% de conversión`}
+            sub={
+              redemptionAmountCents > 0
+                ? `${redeemedPct}% · ${formatCurrency(redemptionAmountCents)} en ventas`
+                : `${redeemedPct}% de conversión`
+            }
             icon={<TrendingUp className="size-4" strokeWidth={1.75} />}
             accent
           />

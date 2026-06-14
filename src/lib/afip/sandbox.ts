@@ -67,12 +67,19 @@ async function getLastNumber(
   businessId: string,
 ): Promise<number> {
   const service = createSupabaseServiceClient() as unknown as GenericClient;
+  // Cuentan todos los comprobantes que YA tomaron número (numero != NULL): los
+  // pending/failed tienen numero = NULL y se excluyen, pero los `cancelled`
+  // (anulados con su nota de crédito) conservan el número fiscal que
+  // consumieron — anular no libera el correlativo. Filtrar sólo `authorized`
+  // reusaría el número de una factura anulada y chocaría con el unique
+  // (business, tipo, pv, numero).
   const { data } = await service
     .from("invoices")
     .select("numero")
     .eq("business_id", businessId)
     .eq("tipo_comprobante", tipoComprobante)
     .eq("punto_venta", puntoVenta)
+    .not("numero", "is", null)
     .order("numero", { ascending: false })
     .limit(1)
     .maybeSingle();

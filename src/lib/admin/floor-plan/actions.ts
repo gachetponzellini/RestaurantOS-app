@@ -291,6 +291,6 @@ export async function deleteFloorPlan(
     return actionError("No pudimos borrar el salón.");
   }
   revalidatePath(`/${businessSlug}/admin/salones`);
-  revalidatePath(`/${businessSlug}/admin/local`);
+  revalidatePath(`/${businessSlug}/admin/operacion`);
   return actionOk(null);
 }

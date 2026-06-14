@@ -231,11 +231,15 @@ describe.skipIf(!dbAvailable)("asignación y transferencia (integration)", () =>
     expect(audit![0].to_value).toBe(mozoBId);
     expect(audit![0].reason).toBe("salgo a fumar");
 
+    // La transferencia genera la notif al encargado (broadcast por rol) y otra
+    // al mozo destino (por user_id). Buscamos puntualmente la del encargado —
+    // no asumimos cuál quedó con created_at más reciente entre las dos.
     const { data: notifs } = await supabase
       .from("notifications")
       .select("type, target_role, payload")
       .eq("business_id", businessId)
       .eq("type", "mesa.transferred")
+      .eq("target_role", "encargado")
       .order("created_at", { ascending: false })
       .limit(1);
     expect(notifs).toHaveLength(1);

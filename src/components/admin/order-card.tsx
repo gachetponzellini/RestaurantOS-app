@@ -115,7 +115,7 @@ export function OrderCard({
 
   const paymentBadge = (() => {
     if (order.payment_method === "cash")
-      return { label: "Efectivo", className: "bg-amber-100 text-amber-800", Icon: Banknote };
+      return { label: "Paga en efectivo", className: "bg-amber-100 text-amber-800", Icon: Banknote };
     if (order.payment_method === "mp" && order.payment_status === "paid")
       return { label: "Pagado", className: "bg-emerald-100 text-emerald-800", Icon: CreditCard };
     if (order.payment_method === "mp" && order.payment_status === "pending")

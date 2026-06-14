@@ -8,6 +8,8 @@
  * via Meta WhatsApp Cloud API. The interface stays identical.
  */
 
+import { sendWhatsapp } from "@/lib/notifications/whatsapp-sender";
+
 import type { CampaignChannel, CampaignMessage } from "./types";
 
 export type DispatchResult =
@@ -22,9 +24,9 @@ export type Channel = {
   /**
    * For "manual" this is a no-op (returns ok immediately) since the owner
    * sends from their phone and marks each message as sent manually via the UI.
-   * For "waba" this would call Meta API + parse the response.
+   * For "waba" this sends via 360dialog (resolviendo credenciales por negocio).
    */
-  dispatch(message: CampaignMessage): Promise<DispatchResult>;
+  dispatch(message: CampaignMessage, businessId: string): Promise<DispatchResult>;
 };
 
 export const manualChannel: Channel = {
@@ -39,20 +41,27 @@ export const manualChannel: Channel = {
 };
 
 /**
- * WABA stub — refuses to send until the Meta integration is wired up. This
- * exists so the rest of the system (admin UI selection, dispatcher loop,
- * channel-aware messaging) can be built and tested before the cuenta de Meta
- * está activa. When that happens, replace `dispatch` with a real fetch to
- * Meta's `/{phone-id}/messages` endpoint.
+ * Canal WhatsApp Business API vía 360dialog (cambio 18). Envía el mensaje
+ * renderizado por el sender compartido, que resuelve la API key del negocio. Si
+ * el negocio no está conectado, el sender devuelve "no conectado" y el dispatch
+ * falla sin romper la campaña.
+ *
+ * Nota: hoy manda el texto renderizado (válido dentro de la ventana de 24h).
+ * Para campañas masivas proactivas (fuera de sesión) Meta exige un template
+ * aprobado — queda como mejora cuando campañas modele su propio template.
  */
 export const wabaChannel: Channel = {
-  label: "WhatsApp Business API",
-  available: false,
-  async dispatch() {
-    return {
-      ok: false,
-      error: "WABA todavía no está conectado. Conectá tu cuenta de Meta Business primero.",
-    };
+  label: "WhatsApp Business API (360dialog)",
+  available: true,
+  async dispatch(message, businessId) {
+    const res = await sendWhatsapp({
+      businessId,
+      to: message.customer_phone,
+      text: message.rendered_message,
+    });
+    return res.ok
+      ? { ok: true, sent_at: res.sent_at }
+      : { ok: false, error: res.error };
   },
 };
 

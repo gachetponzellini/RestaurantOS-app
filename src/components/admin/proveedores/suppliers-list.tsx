@@ -131,9 +131,6 @@ export function SuppliersList({
                 !supplier.isActive && "opacity-50",
               )}
             >
-              <div className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-zinc-100">
-                <Truck className="size-5 text-zinc-500" />
-              </div>
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-semibold text-zinc-900">
                   {supplier.name}

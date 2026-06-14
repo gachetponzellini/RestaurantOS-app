@@ -413,7 +413,7 @@ export async function registrarPago(
   }
 
   revalidatePath(`/${input.slug}/mozo`);
-  revalidatePath(`/${input.slug}/admin/local`);
+  revalidatePath(`/${input.slug}/admin/operacion`);
   return actionOk({ payment, splitDone, orderClosed });
 }
 

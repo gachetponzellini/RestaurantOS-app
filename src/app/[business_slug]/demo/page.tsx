@@ -149,7 +149,7 @@ export default async function DemoHubPage({
           icon: LayoutDashboard,
         },
         {
-          href: `/${business_slug}/admin/local`,
+          href: `/${business_slug}/admin/operacion`,
           title: "Local en Vivo",
           description: "Mesas, comandas, pedidos y caja en una sola pantalla.",
           icon: Monitor,

@@ -30,7 +30,7 @@ export async function getFiscalSummary(
       .lt("created_at", endIso),
     supabase
       .from("orders")
-      .select("total_cents")
+      .select("total_cents, tip_cents")
       .eq("business_id", businessId)
       .neq("status", "cancelled")
       .gte("created_at", startIso)
@@ -62,7 +62,8 @@ export async function getFiscalSummary(
 
   let netSalesCents = 0;
   for (const o of ordersRes.data ?? []) {
-    netSalesCents += Number((o as { total_cents: number }).total_cents) || 0;
+    const row = o as { total_cents: number; tip_cents: number | null };
+    netSalesCents += (Number(row.total_cents) || 0) - (Number(row.tip_cents) || 0);
   }
 
   return {
@@ -95,20 +96,27 @@ export async function getMarketingSummary(
 ): Promise<MarketingSummary> {
   const supabase = await createSupabaseServerClient();
 
-  const [ordersRes, campaignsRes] = await Promise.all([
+  const [ordersRes, campaignsRes, redemptionsRes] = await Promise.all([
     supabase
       .from("orders")
-      .select("discount_cents, total_cents, promo_code_id")
+      .select("discount_cents, total_cents, tip_cents, promo_code_id")
       .eq("business_id", businessId)
       .neq("status", "cancelled")
       .gte("created_at", startIso)
       .lt("created_at", endIso),
     supabase
       .from("campaigns")
-      .select("sent_count, redeemed_count")
+      .select("sent_count")
       .eq("business_id", businessId)
       .gte("created_at", startIso)
       .lt("created_at", endIso),
+    supabase
+      .from("campaign_messages")
+      .select("id, campaigns!inner(business_id)")
+      .eq("campaigns.business_id", businessId)
+      .not("redeemed_at", "is", null)
+      .gte("redeemed_at", startIso)
+      .lt("redeemed_at", endIso),
   ]);
 
   let discountsCents = 0;
@@ -118,22 +126,22 @@ export async function getMarketingSummary(
     const row = o as {
       discount_cents: number | null;
       total_cents: number;
+      tip_cents: number | null;
       promo_code_id: string | null;
     };
     discountsCents += Number(row.discount_cents) || 0;
     if (row.promo_code_id) {
       ordersWithPromo += 1;
-      revenueWithPromoCents += Number(row.total_cents) || 0;
+      revenueWithPromoCents +=
+        Number(row.total_cents) - (Number(row.tip_cents) || 0);
     }
   }
 
   let campaignsSent = 0;
-  let campaignsRedeemed = 0;
   for (const c of campaignsRes.data ?? []) {
-    const row = c as { sent_count: number; redeemed_count: number };
-    campaignsSent += Number(row.sent_count) || 0;
-    campaignsRedeemed += Number(row.redeemed_count) || 0;
+    campaignsSent += Number((c as { sent_count: number }).sent_count) || 0;
   }
+  const campaignsRedeemed = redemptionsRes.data?.length ?? 0;
 
   return {
     discountsCents,

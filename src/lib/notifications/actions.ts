@@ -2,11 +2,22 @@
 
 import { revalidatePath } from "next/cache";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { z } from "zod";
 
 import { actionError, actionOk, type ActionResult } from "@/lib/actions";
 import { requireMozoActionContext } from "@/lib/mozo/auth";
+import { canManageNotificationPrefs } from "@/lib/permissions/can";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 import { getBusiness } from "@/lib/tenant";
+
+import { DELIVERY_NOTIFY_STATUSES } from "./delivery-templates";
+import {
+  NOTIFICATION_CHANNELS,
+  NOTIFICATION_EVENT_TYPES,
+  NOTIFICATION_TARGET_ROLES,
+  type NotificationChannel,
+} from "./preferences";
+import { sendWhatsapp } from "./whatsapp-sender";
 
 type GenericClient = SupabaseClient;
 
@@ -38,6 +49,443 @@ export async function markAllRead(
   revalidatePath(`/${businessSlug}/mozo`);
   revalidatePath(`/${businessSlug}/admin`);
   return actionOk(undefined);
+}
+
+// ── Preferencias de notificación (spec 15) ──────────────────────────────
+
+export type NotificationPreferenceRow = {
+  id: string;
+  event_type: string;
+  target_role: string | null;
+  target_user_id: string | null;
+  channel: NotificationChannel;
+  enabled: boolean;
+};
+
+/**
+ * Lista las preferencias de notificación del negocio. Sólo admin/encargado.
+ * Las filas son los overrides explícitos; lo que no aparece usa el default
+ * (in_app on) que resuelve `resolveChannels`.
+ */
+export async function listNotificationPreferences(
+  businessSlug: string,
+): Promise<ActionResult<NotificationPreferenceRow[]>> {
+  const business = await getBusiness(businessSlug);
+  if (!business) return actionError("Negocio no encontrado.");
+
+  const ctxResult = await requireMozoActionContext(business.id);
+  if (!ctxResult.ok) return ctxResult;
+  if (!canManageNotificationPrefs(ctxResult.data.role)) {
+    return actionError("No tenés permisos para ver la configuración de avisos.");
+  }
+
+  const service = createSupabaseServiceClient() as unknown as GenericClient;
+  const { data, error } = await service
+    .from("notification_preferences")
+    .select("id, event_type, target_role, target_user_id, channel, enabled")
+    .eq("business_id", business.id);
+
+  if (error) {
+    console.error("listNotificationPreferences", error);
+    return actionError("No pudimos cargar la configuración de avisos.");
+  }
+  return actionOk((data ?? []) as NotificationPreferenceRow[]);
+}
+
+const SetPreferenceInput = z
+  .object({
+    businessSlug: z.string().min(1),
+    eventType: z.enum(NOTIFICATION_EVENT_TYPES),
+    targetRole: z.enum(NOTIFICATION_TARGET_ROLES).nullish(),
+    targetUserId: z.string().uuid().nullish(),
+    channel: z.enum(NOTIFICATION_CHANNELS),
+    enabled: z.boolean(),
+  })
+  .refine((v) => Boolean(v.targetRole) || Boolean(v.targetUserId), {
+    message: "Falta el destinatario (rol o usuario).",
+  });
+
+/**
+ * Crea o actualiza una preferencia (evento × destinatario × canal) → enabled.
+ * Idempotente por destinatario+canal: si ya existe la fila, sólo cambia
+ * `enabled`. Sólo admin/encargado.
+ */
+export async function setNotificationPreference(
+  input: unknown,
+): Promise<ActionResult<void>> {
+  const parsed = SetPreferenceInput.safeParse(input);
+  if (!parsed.success) {
+    return actionError(parsed.error.issues[0]?.message ?? "Datos inválidos.");
+  }
+  const { businessSlug, eventType, targetRole, targetUserId, channel, enabled } =
+    parsed.data;
+
+  const business = await getBusiness(businessSlug);
+  if (!business) return actionError("Negocio no encontrado.");
+
+  const ctxResult = await requireMozoActionContext(business.id);
+  if (!ctxResult.ok) return ctxResult;
+  if (!canManageNotificationPrefs(ctxResult.data.role)) {
+    return actionError("No tenés permisos para configurar los avisos.");
+  }
+
+  const service = createSupabaseServiceClient() as unknown as GenericClient;
+
+  // Buscar la fila existente para este destinatario+canal (los índices únicos
+  // son parciales, así que resolvemos el upsert a mano en lugar de onConflict).
+  let lookup = service
+    .from("notification_preferences")
+    .select("id")
+    .eq("business_id", business.id)
+    .eq("event_type", eventType)
+    .eq("channel", channel);
+  lookup = targetRole
+    ? lookup.eq("target_role", targetRole).is("target_user_id", null)
+    : lookup.eq("target_user_id", targetUserId!).is("target_role", null);
+  const { data: existing } = await lookup.maybeSingle();
+
+  if (existing?.id) {
+    const { error } = await service
+      .from("notification_preferences")
+      .update({ enabled })
+      .eq("id", existing.id);
+    if (error) {
+      console.error("setNotificationPreference.update", error);
+      return actionError("No pudimos guardar la preferencia.");
+    }
+  } else {
+    const { error } = await service.from("notification_preferences").insert({
+      business_id: business.id,
+      event_type: eventType,
+      target_role: targetRole ?? null,
+      target_user_id: targetUserId ?? null,
+      channel,
+      enabled,
+    });
+    if (error) {
+      console.error("setNotificationPreference.insert", error);
+      return actionError("No pudimos guardar la preferencia.");
+    }
+  }
+
+  revalidatePath(`/${businessSlug}/admin`);
+  return actionOk(undefined);
+}
+
+// ── Plantillas de mensajes de delivery (spec 15) ────────────────────────
+
+export type DeliveryTemplateRow = {
+  id: string;
+  status: string;
+  body: string;
+  enabled: boolean;
+  template_name: string | null;
+  template_lang: string | null;
+};
+
+/** Lista las plantillas de delivery configuradas del negocio. Admin/encargado. */
+export async function listDeliveryTemplates(
+  businessSlug: string,
+): Promise<ActionResult<DeliveryTemplateRow[]>> {
+  const business = await getBusiness(businessSlug);
+  if (!business) return actionError("Negocio no encontrado.");
+
+  const ctxResult = await requireMozoActionContext(business.id);
+  if (!ctxResult.ok) return ctxResult;
+  if (!canManageNotificationPrefs(ctxResult.data.role)) {
+    return actionError("No tenés permisos para ver las plantillas.");
+  }
+
+  const service = createSupabaseServiceClient() as unknown as GenericClient;
+  const { data, error } = await service
+    .from("delivery_message_templates")
+    .select("id, status, body, enabled, template_name, template_lang")
+    .eq("business_id", business.id);
+
+  if (error) {
+    console.error("listDeliveryTemplates", error);
+    return actionError("No pudimos cargar las plantillas.");
+  }
+  return actionOk((data ?? []) as DeliveryTemplateRow[]);
+}
+
+const SetDeliveryTemplateInput = z.object({
+  businessSlug: z.string().min(1),
+  status: z.enum(DELIVERY_NOTIFY_STATUSES),
+  body: z.string().trim().min(1, "El mensaje no puede estar vacío.").max(1000),
+  enabled: z.boolean(),
+  // Template aprobado de Meta para este estado (necesario para el envío real
+  // fuera de la ventana de 24h). Opcional: sin él, el aviso queda en cola.
+  templateName: z.string().trim().max(120).optional(),
+  templateLang: z.string().trim().max(10).optional(),
+});
+
+/**
+ * Crea o actualiza la plantilla de un estado de delivery. Upsert por
+ * (negocio, estado). Sólo admin/encargado.
+ */
+export async function setDeliveryTemplate(
+  input: unknown,
+): Promise<ActionResult<void>> {
+  const parsed = SetDeliveryTemplateInput.safeParse(input);
+  if (!parsed.success) {
+    return actionError(parsed.error.issues[0]?.message ?? "Datos inválidos.");
+  }
+  const { businessSlug, status, body, enabled, templateName, templateLang } =
+    parsed.data;
+
+  const business = await getBusiness(businessSlug);
+  if (!business) return actionError("Negocio no encontrado.");
+
+  const ctxResult = await requireMozoActionContext(business.id);
+  if (!ctxResult.ok) return ctxResult;
+  if (!canManageNotificationPrefs(ctxResult.data.role)) {
+    return actionError("No tenés permisos para editar las plantillas.");
+  }
+
+  const service = createSupabaseServiceClient() as unknown as GenericClient;
+  const { error } = await service
+    .from("delivery_message_templates")
+    .upsert(
+      {
+        business_id: business.id,
+        status,
+        body,
+        enabled,
+        template_name: templateName ? templateName : null,
+        ...(templateLang ? { template_lang: templateLang } : {}),
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "business_id,status" },
+    );
+
+  if (error) {
+    console.error("setDeliveryTemplate", error);
+    return actionError("No pudimos guardar la plantilla.");
+  }
+
+  revalidatePath(`/${businessSlug}/admin`);
+  return actionOk(undefined);
+}
+
+// ── Credenciales de 360dialog por negocio (spec 18) ─────────────────────
+
+/** Sólo el admin del negocio (o platform) toca credenciales sensibles. */
+function canManageWhatsappCreds(ctx: {
+  role: string;
+  isPlatformAdmin: boolean;
+}): boolean {
+  return ctx.role === "admin" || ctx.isPlatformAdmin;
+}
+
+export type WhatsappStatus = {
+  connected: boolean;
+  hasApiKey: boolean;
+  fromPhone: string | null;
+  channelId: string | null;
+};
+
+/** Estado de conexión a 360dialog para la UI. NUNCA devuelve el valor de la key. */
+export async function getWhatsappStatus(
+  businessSlug: string,
+): Promise<ActionResult<WhatsappStatus>> {
+  const business = await getBusiness(businessSlug);
+  if (!business) return actionError("Negocio no encontrado.");
+
+  const ctxResult = await requireMozoActionContext(business.id);
+  if (!ctxResult.ok) return ctxResult;
+  if (!canManageNotificationPrefs(ctxResult.data.role)) {
+    return actionError("No tenés permisos para ver la configuración de WhatsApp.");
+  }
+
+  const service = createSupabaseServiceClient() as unknown as GenericClient;
+  const { data } = await service
+    .from("whatsapp_credentials")
+    .select("api_key, from_phone, channel_id")
+    .eq("business_id", business.id)
+    .maybeSingle();
+
+  const row = data as {
+    api_key: string | null;
+    from_phone: string | null;
+    channel_id: string | null;
+  } | null;
+  const hasApiKey = Boolean(row?.api_key);
+  return actionOk({
+    connected: hasApiKey,
+    hasApiKey,
+    fromPhone: row?.from_phone ?? null,
+    channelId: row?.channel_id ?? null,
+  });
+}
+
+const SetWhatsappCredsInput = z.object({
+  businessSlug: z.string().min(1),
+  // Write-only: si viene vacío/ausente, se conserva la key actual.
+  apiKey: z.string().trim().optional(),
+  fromPhone: z.string().trim().max(40).optional(),
+  channelId: z.string().trim().max(120).optional(),
+});
+
+/**
+ * Carga/actualiza las credenciales de 360dialog del negocio (tabla
+ * service-role-only). La API key es write-only: si el form la manda vacía, se
+ * mantiene la existente. Actualiza `businesses.whatsapp_connected`. Sólo admin.
+ */
+export async function setWhatsappCredentials(
+  input: unknown,
+): Promise<ActionResult<void>> {
+  const parsed = SetWhatsappCredsInput.safeParse(input);
+  if (!parsed.success) {
+    return actionError(parsed.error.issues[0]?.message ?? "Datos inválidos.");
+  }
+  const { businessSlug, apiKey, fromPhone, channelId } = parsed.data;
+
+  const business = await getBusiness(businessSlug);
+  if (!business) return actionError("Negocio no encontrado.");
+
+  const ctxResult = await requireMozoActionContext(business.id);
+  if (!ctxResult.ok) return ctxResult;
+  if (!canManageWhatsappCreds(ctxResult.data)) {
+    return actionError("Sólo el dueño puede configurar las credenciales de WhatsApp.");
+  }
+
+  const service = createSupabaseServiceClient() as unknown as GenericClient;
+  const { data: existing } = await service
+    .from("whatsapp_credentials")
+    .select("api_key, from_phone, channel_id")
+    .eq("business_id", business.id)
+    .maybeSingle();
+  const prev = existing as {
+    api_key: string | null;
+    from_phone: string | null;
+    channel_id: string | null;
+  } | null;
+
+  const nextApiKey = apiKey && apiKey.length > 0 ? apiKey : (prev?.api_key ?? null);
+  const nextFromPhone =
+    fromPhone !== undefined ? fromPhone : (prev?.from_phone ?? null);
+  const nextChannelId =
+    channelId !== undefined ? channelId : (prev?.channel_id ?? null);
+
+  const { error: upErr } = await service.from("whatsapp_credentials").upsert(
+    {
+      business_id: business.id,
+      provider: "360dialog",
+      api_key: nextApiKey,
+      from_phone: nextFromPhone,
+      channel_id: nextChannelId,
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: "business_id" },
+  );
+  if (upErr) {
+    console.error("setWhatsappCredentials upsert", upErr);
+    return actionError("No pudimos guardar las credenciales.");
+  }
+
+  const { error: bErr } = await service
+    .from("businesses")
+    .update({ whatsapp_connected: Boolean(nextApiKey) })
+    .eq("id", business.id);
+  if (bErr) console.error("setWhatsappCredentials connected flag", bErr);
+
+  revalidatePath(`/${businessSlug}/admin`);
+  return actionOk(undefined);
+}
+
+const SendWhatsappTestInput = z.object({
+  businessSlug: z.string().min(1),
+  toPhone: z.string().trim().min(6, "Ingresá un número válido."),
+});
+
+/** Envía un mensaje de prueba por 360dialog para validar la conexión. Admin. */
+export async function sendWhatsappTest(
+  input: unknown,
+): Promise<ActionResult<void>> {
+  const parsed = SendWhatsappTestInput.safeParse(input);
+  if (!parsed.success) {
+    return actionError(parsed.error.issues[0]?.message ?? "Datos inválidos.");
+  }
+  const business = await getBusiness(parsed.data.businessSlug);
+  if (!business) return actionError("Negocio no encontrado.");
+
+  const ctxResult = await requireMozoActionContext(business.id);
+  if (!ctxResult.ok) return ctxResult;
+  if (!canManageWhatsappCreds(ctxResult.data)) {
+    return actionError("Sólo el dueño puede probar el WhatsApp.");
+  }
+
+  const res = await sendWhatsapp({
+    businessId: business.id,
+    to: parsed.data.toPhone,
+    text: "Mensaje de prueba de RestaurantOS ✅",
+  });
+  if (!res.ok) return actionError(res.error);
+  return actionOk(undefined);
+}
+
+// ── Reproceso de la cola de WhatsApp (spec 18) ──────────────────────────
+
+/**
+ * Reintenta las filas de `whatsapp_outbox` en `failed`/`pending` (p. ej. tras
+ * conectar 360dialog o un fallo transitorio). NO toca las `sent` (anti
+ * doble-envío). Reintenta enviando el texto (`body`); los avisos proactivos
+ * fuera de la ventana de 24h pueden requerir reenviarse desde su origen con
+ * template. Sólo admin/encargado.
+ */
+export async function reprocessWhatsappOutbox(
+  businessSlug: string,
+): Promise<ActionResult<{ retried: number; sent: number }>> {
+  const business = await getBusiness(businessSlug);
+  if (!business) return actionError("Negocio no encontrado.");
+
+  const ctxResult = await requireMozoActionContext(business.id);
+  if (!ctxResult.ok) return ctxResult;
+  if (!canManageNotificationPrefs(ctxResult.data.role)) {
+    return actionError("No tenés permisos para reprocesar la cola.");
+  }
+
+  const service = createSupabaseServiceClient() as unknown as GenericClient;
+  const { data: rows, error } = await service
+    .from("whatsapp_outbox")
+    .select("id, to_phone, body")
+    .eq("business_id", business.id)
+    .in("status", ["failed", "pending"])
+    .limit(100);
+  if (error) {
+    console.error("reprocessWhatsappOutbox select", error);
+    return actionError("No pudimos leer la cola.");
+  }
+
+  let sent = 0;
+  const list = (rows ?? []) as Array<{
+    id: string;
+    to_phone: string | null;
+    body: string;
+  }>;
+  for (const row of list) {
+    const res = row.to_phone
+      ? await sendWhatsapp({
+          businessId: business.id,
+          to: row.to_phone,
+          text: row.body,
+        })
+      : ({ ok: false, error: "Sin teléfono destino." } as const);
+    await service
+      .from("whatsapp_outbox")
+      .update({
+        status: res.ok ? "sent" : "failed",
+        error: res.ok ? null : res.error,
+        sent_at: res.ok ? res.sent_at : null,
+        provider_message_id: res.ok ? res.messageId : null,
+      })
+      .eq("id", row.id);
+    if (res.ok) sent += 1;
+  }
+
+  revalidatePath(`/${businessSlug}/admin`);
+  return actionOk({ retried: list.length, sent });
 }
 
 export async function markRead(
