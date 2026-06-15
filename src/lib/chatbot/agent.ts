@@ -12,6 +12,7 @@ import { tool, type StructuredToolInterface } from "@langchain/core/tools";
 import { formatInTimeZone, toZonedTime } from "date-fns-tz";
 import { z } from "zod";
 
+import { limitChatbotTurn } from "@/lib/rate-limit";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 import {
   checkAvailabilityForChatbot,
@@ -65,6 +66,19 @@ export type RunChatbotResult = {
   assistantMessage: string;
   toolTrace: ToolTraceEntry[];
 };
+
+/**
+ * Error tipado cuando un turno se rechaza por rate-limit (spam por contacto o
+ * techo de costo por negocio). El entrypoint decide qué hacer: la ruta de test
+ * lo mapea a un 429 legible; el webhook futuro puede ackear y descartar sin
+ * responder (para no spamear de vuelta). Se lanza ANTES de instanciar el modelo.
+ */
+export class ChatbotRateLimitedError extends Error {
+  constructor() {
+    super("Estás enviando mensajes muy seguido. Esperá unos segundos y volvé a intentar.");
+    this.name = "ChatbotRateLimitedError";
+  }
+}
 
 export const DEFAULT_SYSTEM_PROMPT = `# Asistente virtual de {{businessName}}
 
@@ -168,18 +182,28 @@ const CHATBOT_MODEL = process.env.CHATBOT_MODEL ?? "claude-opus-4-7";
 // bump this in env via CHATBOT_MAX_TOKENS.
 const CHATBOT_MAX_TOKENS = Number(process.env.CHATBOT_MAX_TOKENS ?? 4096);
 
+// Auto-cierre lazy por inactividad (sin cron): si la última conversación abierta
+// de un contacto superó este umbral, `getOrOpenConversation` la cierra y abre
+// una fresca. Evita que un cliente habitual arrastre meses de historial en una
+// sola conversación (costo de tokens + contexto viejo). Configurable por env.
+const CONVERSATION_TTL_HOURS = Number(
+  process.env.CHATBOT_CONVERSATION_TTL_HOURS ?? 8,
+);
+
+// Tope duro de mensajes del historial que se mandan al modelo por turno.
+// Backstop del prompt, independiente del TTL. El resto del historial queda en la
+// DB (la vista de cliente lo sigue mostrando completo). Configurable por env.
+const HISTORY_WINDOW = Number(process.env.CHATBOT_HISTORY_WINDOW ?? 20);
+
 /**
  * Lee el flag `chatbot_enabled` del negocio. Sin fila en `chatbot_configs` →
  * false (el bot arranca apagado hasta que el dueño lo prende desde el panel).
- * Cast a cliente genérico porque la columna es nueva (migración 0056) y los
- * tipos generados todavía no la incluyen.
  */
 async function loadChatbotEnabled(
-  service: ReturnType<typeof createSupabaseServiceClient>,
+  service: Service,
   businessId: string,
 ): Promise<boolean> {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data } = await (service as any)
+  const { data } = await service
     .from("chatbot_configs")
     .select("chatbot_enabled")
     .eq("business_id", businessId)
@@ -190,6 +214,17 @@ async function loadChatbotEnabled(
 export async function runChatbot(
   input: RunChatbotInput,
 ): Promise<RunChatbotResult> {
+  // Gate de rate-limit: protege contra spam por contacto y DoS por costo a
+  // nivel negocio ANTES de tocar la DB o instanciar el modelo. El canal
+  // `web-test` se exime — ya está detrás de `ensureAdminAccess` en el admin.
+  if (input.channel !== "web-test") {
+    const { success } = await limitChatbotTurn(
+      input.businessId,
+      input.contactIdentifier,
+    );
+    if (!success) throw new ChatbotRateLimitedError();
+  }
+
   const service = createSupabaseServiceClient();
 
   // Gate de configuración: el bot sólo corre si la API key está presente en el
@@ -256,33 +291,6 @@ export async function closeConversation(
   return { ok: true };
 }
 
-export async function closeOpenChatbotConversation(
-  businessId: string,
-  customerPhone: string,
-): Promise<void> {
-  const digits = customerPhone.replace(/\D/g, "");
-  if (!digits) return;
-
-  const service = createSupabaseServiceClient();
-
-  const { data: contacts } = await service
-    .from("chatbot_contacts")
-    .select("id, identifier")
-    .eq("business_id", businessId);
-
-  const contactIds = (contacts ?? [])
-    .filter((c) => c.identifier.replace(/\D/g, "") === digits)
-    .map((c) => c.id);
-  if (contactIds.length === 0) return;
-
-  await service
-    .from("chatbot_conversations")
-    .update({ closed_at: new Date().toISOString() })
-    .eq("business_id", businessId)
-    .in("contact_id", contactIds)
-    .is("closed_at", null);
-}
-
 // ---------------- internals ----------------
 
 type Service = ReturnType<typeof createSupabaseServiceClient>;
@@ -324,39 +332,65 @@ async function getOrOpenConversation(
 ): Promise<string> {
   const { data: open } = await service
     .from("chatbot_conversations")
-    .select("id")
+    .select("id, updated_at")
     .eq("contact_id", contactId)
     .is("closed_at", null)
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
 
-  if (open?.id) return open.id;
+  if (open?.id) {
+    const ageMs = Date.now() - new Date(open.updated_at).getTime();
+    if (ageMs < CONVERSATION_TTL_HOURS * 3_600_000) return open.id;
+    // Vencida por inactividad → cerrarla y caer a abrir una nueva.
+    await service
+      .from("chatbot_conversations")
+      .update({ closed_at: new Date().toISOString() })
+      .eq("id", open.id);
+  }
 
   const { data: created, error } = await service
     .from("chatbot_conversations")
     .insert({ business_id: businessId, contact_id: contactId })
     .select("id")
     .single();
-  if (error || !created) {
-    throw new Error(
-      `Failed to open conversation: ${error?.message ?? "unknown"}`,
-    );
+  if (created?.id) return created.id;
+
+  // El índice único parcial (mig 0068) garantiza una sola conversación abierta
+  // por contacto. Si dos turnos concurrentes intentaron abrir a la vez, el
+  // INSERT perdedor viola el índice (23505): en vez de fallar, re-leemos la
+  // conversación que ganó la carrera.
+  if (error?.code === "23505") {
+    const { data: raced } = await service
+      .from("chatbot_conversations")
+      .select("id")
+      .eq("contact_id", contactId)
+      .is("closed_at", null)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (raced?.id) return raced.id;
   }
-  return created.id;
+  throw new Error(
+    `Failed to open conversation: ${error?.message ?? "unknown"}`,
+  );
 }
 
 async function fetchHistory(
   service: Service,
   conversationId: string,
 ): Promise<StoredMessage[]> {
+  // Últimos HISTORY_WINDOW mensajes (desc + limit) y luego revertidos a orden
+  // cronológico ascendente para el prompt. Acota lo que ve el modelo sin borrar
+  // nada de la DB.
   const { data, error } = await service
     .from("chatbot_messages")
     .select("role, content")
     .eq("conversation_id", conversationId)
-    .order("created_at", { ascending: true });
+    .order("created_at", { ascending: false })
+    .limit(HISTORY_WINDOW);
   if (error) throw new Error(`Failed to load history: ${error.message}`);
-  return (data ?? []) as StoredMessage[];
+  return ((data ?? []) as StoredMessage[]).reverse();
 }
 
 async function insertMessage(

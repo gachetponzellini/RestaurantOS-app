@@ -83,8 +83,7 @@ export async function DELETE(req: Request) {
 
   // Validate the conversation belongs to this business before closing.
   const service = createSupabaseServiceClient();
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: conv } = await (service as any)
+  const { data: conv } = await service
     .from("chatbot_conversations")
     .select("id, business_id")
     .eq("id", conversationId)

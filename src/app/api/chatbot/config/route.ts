@@ -30,10 +30,7 @@ export async function GET(req: Request) {
   await ensureAdminAccess(business.id, businessSlug);
 
   const service = createSupabaseServiceClient();
-  // Cast a cliente genérico: `chatbot_enabled` es columna nueva (0056) y los
-  // tipos generados aún no la incluyen.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data } = await (service as any)
+  const { data } = await service
     .from("chatbot_configs")
     .select("system_prompt, enabled_tools, tool_overrides, chatbot_enabled")
     .eq("business_id", business.id)
@@ -140,12 +137,7 @@ export async function PUT(req: Request) {
   }
 
   const service = createSupabaseServiceClient();
-  // Cast a cliente genérico: `chatbot_enabled` es columna nueva (0056) aún no
-  // reflejada en los tipos generados.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { error } = await (service as any)
-    .from("chatbot_configs")
-    .upsert(update);
+  const { error } = await service.from("chatbot_configs").upsert(update);
   if (error) {
     console.error("chatbot config upsert failed", error);
     return NextResponse.json({ error: error.message }, { status: 500 });
