@@ -5,9 +5,12 @@ import { fromZonedTime } from "date-fns-tz";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { actionError, actionOk, type ActionResult } from "@/lib/actions";
+import { canManageReservations } from "@/lib/permissions/can";
 import { isTableAvailableForReservation, pickTableExcluding } from "@/lib/reservations/assign-table";
 import {
+  getBusinessBySlug,
   getBusinessTables,
+  getReservationActor,
   getReservationSettings,
   getReservationsInRange,
 } from "@/lib/reservations/queries";
@@ -20,7 +23,7 @@ import {
   UpdateReservationStatusInputSchema,
 } from "@/lib/reservations/schema";
 import { openTable } from "@/lib/mozo/open-table";
-import type { Reservation } from "@/lib/reservations/types";
+import type { Reservation, ReservationSource } from "@/lib/reservations/types";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 
@@ -29,35 +32,18 @@ type GenericClient = SupabaseClient;
 const EXCLUSION_VIOLATION = "23P01";
 const MAX_ASSIGN_RETRIES = 5;
 
-async function getBusiness(slug: string) {
-  const service = createSupabaseServiceClient() as unknown as GenericClient;
-  const { data } = await service
-    .from("businesses")
-    .select("id, timezone")
-    .eq("slug", slug)
-    .maybeSingle();
-  return (data as { id: string; timezone: string } | null) ?? null;
-}
-
-async function assertCanManage(businessId: string, userId: string): Promise<boolean> {
-  const service = createSupabaseServiceClient() as unknown as GenericClient;
-  const [{ data: profile }, { data: membership }] = await Promise.all([
-    service.from("users").select("is_platform_admin").eq("id", userId).maybeSingle(),
-    service
-      .from("business_users")
-      .select("role")
-      .eq("business_id", businessId)
-      .eq("user_id", userId)
-      .maybeSingle(),
-  ]);
-  const isPlatformAdmin = (profile as { is_platform_admin?: boolean } | null)?.is_platform_admin ?? false;
-  const isAdmin = (membership as { role?: string } | null)?.role === "admin";
-  const isEncargado = (membership as { role?: string } | null)?.role === "encargado";
-  return isPlatformAdmin || isAdmin || isEncargado;
+/**
+ * Autoriza gestionar reservas (crear walk-in, sentar, cambiar estado, editar):
+ * admin/encargado/mozo o platform admin (spec 22). Centralizado en
+ * `canManageReservations` de `lib/permissions/can.ts`.
+ */
+async function canManage(businessId: string, userId: string): Promise<boolean> {
+  const { role, isPlatformAdmin } = await getReservationActor(businessId, userId);
+  return isPlatformAdmin || canManageReservations(role);
 }
 
 type CreateContext = {
-  source: "web" | "admin";
+  source: ReservationSource;
   businessId: string;
   timezone: string;
   userId: string | null;
@@ -93,7 +79,10 @@ async function createReservationCommon(
   if (Number.isNaN(start.getTime())) return actionError("Fecha u hora inválida.");
   const end = new Date(start.getTime() + settings.slot_duration_min * 60_000);
 
-  if (ctx.source === "web") {
+  // Validación de cliente final (lead time / horizonte / horario): aplica a
+  // la web directa y al chatbot. Los walk-ins de admin la saltean (el local
+  // puede cargar reservas fuera de esas reglas).
+  if (ctx.source !== "admin") {
     const leadCutoff = new Date(Date.now() + settings.lead_time_min * 60_000);
     if (start < leadCutoff) {
       return actionError("Necesitamos un poco más de antelación para ese horario.");
@@ -242,11 +231,11 @@ export async function createReservationFromCustomer(
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return actionError("Necesitás iniciar sesión para reservar.");
 
-  const business = await getBusiness(parsed.data.business_slug);
+  const business = await getBusinessBySlug(parsed.data.business_slug);
   if (!business) return actionError("Negocio no encontrado.");
 
   const result = await createReservationCommon({
-    source: "web",
+    source: parsed.data.source,
     businessId: business.id,
     timezone: business.timezone,
     userId: user.id,
@@ -276,9 +265,9 @@ export async function createReservationFromAdmin(
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return actionError("No autenticado.");
 
-  const business = await getBusiness(parsed.data.business_slug);
+  const business = await getBusinessBySlug(parsed.data.business_slug);
   if (!business) return actionError("Negocio no encontrado.");
-  if (!(await assertCanManage(business.id, user.id))) {
+  if (!(await canManage(business.id, user.id))) {
     return actionError("Permiso denegado.");
   }
 
@@ -310,9 +299,9 @@ export async function updateReservationStatus(
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return actionError("No autenticado.");
 
-  const business = await getBusiness(parsed.data.business_slug);
+  const business = await getBusinessBySlug(parsed.data.business_slug);
   if (!business) return actionError("Negocio no encontrado.");
-  if (!(await assertCanManage(business.id, user.id))) {
+  if (!(await canManage(business.id, user.id))) {
     return actionError("Permiso denegado.");
   }
 
@@ -345,9 +334,9 @@ export async function sentarReserva(
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return actionError("No autenticado.");
 
-  const business = await getBusiness(parsed.data.business_slug);
+  const business = await getBusinessBySlug(parsed.data.business_slug);
   if (!business) return actionError("Negocio no encontrado.");
-  if (!(await assertCanManage(business.id, user.id))) {
+  if (!(await canManage(business.id, user.id))) {
     return actionError("Permiso denegado.");
   }
 
@@ -459,9 +448,9 @@ export async function updateReservationDetails(
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return actionError("No autenticado.");
 
-  const business = await getBusiness(parsed.data.business_slug);
+  const business = await getBusinessBySlug(parsed.data.business_slug);
   if (!business) return actionError("Negocio no encontrado.");
-  if (!(await assertCanManage(business.id, user.id))) {
+  if (!(await canManage(business.id, user.id))) {
     return actionError("Permiso denegado.");
   }
 

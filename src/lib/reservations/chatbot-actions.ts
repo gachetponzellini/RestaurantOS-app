@@ -3,12 +3,11 @@ import "server-only";
 import { fromZonedTime } from "date-fns-tz";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-import { computeAvailableSlots } from "@/lib/reservations/availability";
 import {
+  getAvailability,
   getBusinessSalones,
   getBusinessTables,
   getReservationSettings,
-  getReservationsInRange,
 } from "@/lib/reservations/queries";
 import type { Reservation } from "@/lib/reservations/types";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
@@ -148,33 +147,12 @@ export async function checkAvailabilityForChatbot(
     };
   }
 
-  const tables = await getBusinessTables(businessId, {
-    useService: true,
-    floorPlanId: floorPlanId ?? null,
-    excludeBar: true,
-  });
-
-  // Reservations across the whole day (in TZ). We pad by 1 day on each side
-  // so the buffer logic sees neighbors near midnight.
-  const dayStart = fromZonedTime(`${date}T00:00:00`, business.timezone);
-  const dayEnd = new Date(dayStart.getTime() + 24 * 60 * 60 * 1000);
-  const windowStart = new Date(dayStart.getTime() - 24 * 60 * 60 * 1000);
-  const windowEnd = new Date(dayEnd.getTime() + 24 * 60 * 60 * 1000);
-  const reservations = await getReservationsInRange(
+  const slots = await getAvailability(
     businessId,
-    windowStart.toISOString(),
-    windowEnd.toISOString(),
+    business.timezone,
+    { date, partySize, floorPlanId: floorPlanId ?? null },
     { useService: true },
   );
-
-  const slots = computeAvailableSlots({
-    date,
-    partySize,
-    settings,
-    tables,
-    reservations,
-    timezone: business.timezone,
-  });
 
   // Si hay slots, devolvemos rápido. Si no, computamos un diagnóstico para
   // que el bot pueda explicarle al cliente *por qué* no hay (config faltante,
@@ -190,6 +168,12 @@ export async function checkAvailabilityForChatbot(
   }
 
   // ── Diagnóstico de availability vacía ──────────────────────────────
+  // Camino frío (no hay slots): recargamos las mesas para explicar el porqué.
+  const tables = await getBusinessTables(businessId, {
+    useService: true,
+    floorPlanId: floorPlanId ?? null,
+    excludeBar: true,
+  });
   const [y, m, d] = date.split("-").map(Number);
   const dow = String(new Date(Date.UTC(y, m - 1, d)).getUTCDay()) as
     | "0" | "1" | "2" | "3" | "4" | "5" | "6";
@@ -323,30 +307,12 @@ export async function createReservationIntent(input: {
     };
   }
 
-  const tables = await getBusinessTables(input.businessId, {
-    useService: true,
-    floorPlanId: input.floorPlanId ?? null,
-    excludeBar: true,
-  });
-  const dayStart = fromZonedTime(`${input.date}T00:00:00`, business.timezone);
-  const dayEnd = new Date(dayStart.getTime() + 24 * 60 * 60 * 1000);
-  const windowStart = new Date(dayStart.getTime() - 24 * 60 * 60 * 1000);
-  const windowEnd = new Date(dayEnd.getTime() + 24 * 60 * 60 * 1000);
-  const reservations = await getReservationsInRange(
+  const slots = await getAvailability(
     input.businessId,
-    windowStart.toISOString(),
-    windowEnd.toISOString(),
+    business.timezone,
+    { date: input.date, partySize: input.partySize, floorPlanId: input.floorPlanId ?? null },
     { useService: true },
   );
-
-  const slots = computeAvailableSlots({
-    date: input.date,
-    partySize: input.partySize,
-    settings,
-    tables,
-    reservations,
-    timezone: business.timezone,
-  });
 
   const isAvailable = slots.some((s) => s.slot === input.slot);
   if (!isAvailable) {

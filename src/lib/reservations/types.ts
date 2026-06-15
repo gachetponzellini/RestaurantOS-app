@@ -67,6 +67,9 @@ export type ReservationSettings = {
   lead_time_min: number;
   advance_days_max: number;
   max_party_size: number;
+  /** Minutos tras `starts_at` antes de marcar una reserva confirmada como
+   *  no_show automáticamente (spec 22). */
+  no_show_grace_min: number;
   schedule: WeeklySchedule;
   updated_at: string;
 };
@@ -78,7 +81,7 @@ export type ReservationStatus =
   | "no_show"
   | "cancelled";
 
-export type ReservationSource = "web" | "admin";
+export type ReservationSource = "web" | "admin" | "chatbot";
 
 /**
  * "Live" statuses: occupy the table and count against availability. Matches
@@ -112,5 +115,6 @@ export const DEFAULT_RESERVATION_SETTINGS: Omit<ReservationSettings, "business_i
   lead_time_min: 60,
   advance_days_max: 30,
   max_party_size: 12,
+  no_show_grace_min: 30,
   schedule: {},
 };

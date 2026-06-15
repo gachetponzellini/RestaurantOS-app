@@ -2,16 +2,69 @@ import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import type { BusinessRole } from "@/lib/admin/context";
+
 import type {
   FloorTable,
   Reservation,
   ReservationSettings,
 } from "@/lib/reservations/types";
 import { DEFAULT_RESERVATION_SETTINGS } from "@/lib/reservations/types";
+import {
+  availabilityLookupWindow,
+  computeAvailableSlots,
+  type AvailableSlot,
+} from "@/lib/reservations/availability";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 
 type GenericClient = SupabaseClient;
+
+/**
+ * Resuelve `{ id, timezone }` de un negocio por slug. Helper compartido por
+ * booking-actions y availability-actions (antes cada uno tenía su propia copia
+ * del select). Usa service client: corre en contextos públicos/anon.
+ */
+export async function getBusinessBySlug(
+  slug: string,
+): Promise<{ id: string; timezone: string } | null> {
+  const service = createSupabaseServiceClient() as unknown as GenericClient;
+  const { data } = await service
+    .from("businesses")
+    .select("id, timezone")
+    .eq("slug", slug)
+    .maybeSingle();
+  return (data as { id: string; timezone: string } | null) ?? null;
+}
+
+/**
+ * Resuelve el rol efectivo de un usuario para un negocio + si es platform
+ * admin. Reemplaza los `assertCanManage` hechos a mano que vivían en
+ * booking-actions / settings-actions: el llamador combina esto con los helpers
+ * puros de `lib/permissions/can.ts` (`canManageReservations`,
+ * `canConfigureReservations`). Usa service client (corre en contextos públicos
+ * donde RLS escondería la membership).
+ */
+export async function getReservationActor(
+  businessId: string,
+  userId: string,
+): Promise<{ role: BusinessRole | null; isPlatformAdmin: boolean }> {
+  const service = createSupabaseServiceClient() as unknown as GenericClient;
+  const [{ data: profile }, { data: membership }] = await Promise.all([
+    service.from("users").select("is_platform_admin").eq("id", userId).maybeSingle(),
+    service
+      .from("business_users")
+      .select("role")
+      .eq("business_id", businessId)
+      .eq("user_id", userId)
+      .maybeSingle(),
+  ]);
+  return {
+    role: (membership as { role?: BusinessRole } | null)?.role ?? null,
+    isPlatformAdmin:
+      (profile as { is_platform_admin?: boolean } | null)?.is_platform_admin ?? false,
+  };
+}
 
 /**
  * Reads the reservation settings row, returning DB defaults when nothing was
@@ -159,5 +212,43 @@ export async function getReservationsInRange(
     .gt("ends_at", fromIso)
     .order("starts_at", { ascending: true });
   return (data ?? []) as Reservation[];
+}
+
+/**
+ * Disponibilidad de un negocio para una fecha + party_size, opcionalmente
+ * restringida a un salón. Fuente ÚNICA del pipeline "settings + tables +
+ * reservas → computeAvailableSlots": la usan el flujo web (`fetchAvailability`)
+ * y las tools del chatbot (`checkAvailabilityForChatbot`, `createReservationIntent`).
+ *
+ * La ventana de reservas es TZ-aware (`availabilityLookupWindow`), así que
+ * cubre el día local completo en cualquier offset — antes cada caller la
+ * recalculaba a mano (uno en UTC fijo, con bug latente de borde de día).
+ *
+ * `computeAvailableSlots` (puro) sigue siendo la lógica de negocio; esto solo
+ * orquesta la carga de datos.
+ */
+export async function getAvailability(
+  businessId: string,
+  timezone: string,
+  params: { date: string; partySize: number; floorPlanId?: string | null },
+  options: { useService?: boolean } = {},
+): Promise<AvailableSlot[]> {
+  const settings = await getReservationSettings(businessId, options);
+  const tables = await getBusinessTables(businessId, {
+    useService: options.useService,
+    floorPlanId: params.floorPlanId ?? null,
+    excludeBar: true,
+  });
+  const { fromIso, toIso } = availabilityLookupWindow(params.date, timezone);
+  const reservations = await getReservationsInRange(businessId, fromIso, toIso, options);
+
+  return computeAvailableSlots({
+    date: params.date,
+    partySize: params.partySize,
+    settings,
+    tables,
+    reservations,
+    timezone,
+  });
 }
 

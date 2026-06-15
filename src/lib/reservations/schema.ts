@@ -60,6 +60,7 @@ export const ReservationSettingsInputSchema = z.object({
   lead_time_min: z.coerce.number().int().min(0).max(60 * 24 * 7),
   advance_days_max: z.coerce.number().int().min(1).max(365),
   max_party_size: z.coerce.number().int().min(1).max(100),
+  no_show_grace_min: z.coerce.number().int().min(0).max(600),
   schedule: WeeklyScheduleSchema,
 });
 
@@ -81,6 +82,10 @@ export const CreateReservationInputSchema = z.object({
   /** Salón elegido cuando el negocio tiene más de uno. Si no viene, el
    *  flujo asume el primer floor_plan (legacy single-salón). */
   floor_plan_id: z.string().uuid().optional(),
+  /** Canal de origen del cliente. La web directa no lo manda (default 'web');
+   *  el handoff del chatbot lo setea en 'chatbot'. 'admin' no se acepta acá:
+   *  los walk-ins van por AdminCreateReservationInputSchema. */
+  source: z.enum(["web", "chatbot"]).default("web"),
 });
 
 export type CreateReservationInput = z.infer<typeof CreateReservationInputSchema>;

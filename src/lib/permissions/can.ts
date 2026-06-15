@@ -182,6 +182,33 @@ export function canCrearPedidoFlash(role: BusinessRole): boolean {
   return role === "admin" || role === "encargado";
 }
 
+// ── Reservas (spec 22) ──────────────────────────────────────────
+
+/**
+ * Modificar reservas: crear walk-in, sentar, cambiar estado y editar
+ * mesa/comensales. Operación de salón/mostrador: admin, encargado **y mozo**
+ * (decisión 2026-06-15 — el mozo opera la agenda del salón). `personal` no
+ * opera el sistema. El platform admin se gatea aparte en cada action.
+ *
+ * Acepta `null` (sin membership) → false, para que los call sites no tengan
+ * que guardar el caso por separado.
+ */
+export function canManageReservations(role: BusinessRole | null): boolean {
+  return role === "admin" || role === "encargado" || role === "mozo";
+}
+
+/** Sentar una reserva confirmada = parte de gestionarla. Alias semántico. */
+export const canSeatReservation = canManageReservations;
+
+/**
+ * Configurar el motor de reservas (horarios, buffer, lead time, party size,
+ * gracia de no-show). Es config del negocio: admin/encargado. El mozo gestiona
+ * reservas pero no cambia las reglas.
+ */
+export function canConfigureReservations(role: BusinessRole | null): boolean {
+  return role === "admin" || role === "encargado";
+}
+
 // ── Notificaciones / chatbot (spec 15) ──────────────────────────
 
 /**

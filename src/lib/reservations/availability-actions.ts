@@ -1,19 +1,15 @@
 "use server";
 
 import { actionError, actionOk, type ActionResult } from "@/lib/actions";
-import { computeAvailableSlots } from "@/lib/reservations/availability";
 import {
+  getAvailability,
+  getBusinessBySlug,
   getBusinessSalones,
-  getBusinessTables,
-  getReservationSettings,
-  getReservationsInRange,
 } from "@/lib/reservations/queries";
 import {
   AvailabilityQuerySchema,
   ListSalonesQuerySchema,
 } from "@/lib/reservations/schema";
-import { createSupabaseServiceClient } from "@/lib/supabase/service";
-import type { SupabaseClient } from "@supabase/supabase-js";
 
 type AvailableSlotDTO = {
   slot: string;
@@ -37,41 +33,19 @@ export async function fetchAvailability(
   if (!parsed.success) {
     return actionError(parsed.error.issues[0]?.message ?? "Datos inválidos.");
   }
-  const service = createSupabaseServiceClient() as unknown as SupabaseClient;
-  const { data: business } = await service
-    .from("businesses")
-    .select("id, timezone")
-    .eq("slug", parsed.data.business_slug)
-    .maybeSingle();
-  const b = business as { id: string; timezone: string } | null;
+  const b = await getBusinessBySlug(parsed.data.business_slug);
   if (!b) return actionError("Negocio no encontrado.");
 
-  const settings = await getReservationSettings(b.id, { useService: true });
-  const tables = await getBusinessTables(b.id, {
-    useService: true,
-    floorPlanId: parsed.data.floor_plan_id ?? null,
-    excludeBar: true,
-  });
-
-  // Pull reservations covering the full day (in business timezone) plus one
-  // settings.slot_duration so adjacent-day spillovers count.
-  const dayStart = new Date(`${parsed.data.date}T00:00:00Z`);
-  const dayEnd = new Date(dayStart.getTime() + 36 * 60 * 60 * 1000);
-  const reservations = await getReservationsInRange(
+  const slots = await getAvailability(
     b.id,
-    dayStart.toISOString(),
-    dayEnd.toISOString(),
+    b.timezone,
+    {
+      date: parsed.data.date,
+      partySize: parsed.data.party_size,
+      floorPlanId: parsed.data.floor_plan_id ?? null,
+    },
     { useService: true },
   );
-
-  const slots = computeAvailableSlots({
-    date: parsed.data.date,
-    partySize: parsed.data.party_size,
-    settings,
-    tables,
-    reservations,
-    timezone: b.timezone,
-  });
 
   return actionOk(
     slots.map((s) => ({
@@ -94,13 +68,7 @@ export async function fetchBusinessSalones(
   if (!parsed.success) {
     return actionError(parsed.error.issues[0]?.message ?? "Datos inválidos.");
   }
-  const service = createSupabaseServiceClient() as unknown as SupabaseClient;
-  const { data: business } = await service
-    .from("businesses")
-    .select("id")
-    .eq("slug", parsed.data.business_slug)
-    .maybeSingle();
-  const b = business as { id: string } | null;
+  const b = await getBusinessBySlug(parsed.data.business_slug);
   if (!b) return actionError("Negocio no encontrado.");
 
   const salones = await getBusinessSalones(b.id, { useService: true });

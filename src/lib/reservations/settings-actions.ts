@@ -4,13 +4,20 @@ import { revalidatePath } from "next/cache";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { actionError, actionOk, type ActionResult } from "@/lib/actions";
+import { canConfigureReservations } from "@/lib/permissions/can";
+import { getReservationActor } from "@/lib/reservations/queries";
 import { ReservationSettingsInputSchema } from "@/lib/reservations/schema";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 
 type GenericClient = SupabaseClient;
 
-async function assertCanManage(businessSlug: string) {
+/**
+ * Autoriza configurar el motor de reservas (horarios/buffer/etc.):
+ * admin/encargado o platform admin (spec 22). El mozo gestiona reservas pero
+ * no cambia las reglas.
+ */
+async function assertCanConfigure(businessSlug: string) {
   const supabase = await createSupabaseServerClient();
   const {
     data: { user },
@@ -25,20 +32,12 @@ async function assertCanManage(businessSlug: string) {
     .maybeSingle();
   if (!business) return { ok: false as const, error: "Negocio no encontrado." };
 
-  const [{ data: profile }, { data: membership }] = await Promise.all([
-    service.from("users").select("is_platform_admin").eq("id", user.id).maybeSingle(),
-    service
-      .from("business_users")
-      .select("role")
-      .eq("business_id", (business as { id: string }).id)
-      .eq("user_id", user.id)
-      .maybeSingle(),
-  ]);
-
-  const isPlatformAdmin = (profile as { is_platform_admin?: boolean } | null)?.is_platform_admin ?? false;
-  const isAdmin = (membership as { role?: string } | null)?.role === "admin";
-  if (!isPlatformAdmin && !isAdmin) return { ok: false as const, error: "Permiso denegado." };
-  return { ok: true as const, businessId: (business as { id: string }).id };
+  const businessId = (business as { id: string }).id;
+  const { role, isPlatformAdmin } = await getReservationActor(businessId, user.id);
+  if (!isPlatformAdmin && !canConfigureReservations(role)) {
+    return { ok: false as const, error: "Permiso denegado." };
+  }
+  return { ok: true as const, businessId };
 }
 
 export async function saveReservationSettings(input: unknown): Promise<ActionResult<null>> {
@@ -46,7 +45,7 @@ export async function saveReservationSettings(input: unknown): Promise<ActionRes
   if (!parsed.success) {
     return actionError(parsed.error.issues[0]?.message ?? "Datos inválidos.");
   }
-  const guard = await assertCanManage(parsed.data.business_slug);
+  const guard = await assertCanConfigure(parsed.data.business_slug);
   if (!guard.ok) return actionError(guard.error);
 
   const service = createSupabaseServiceClient() as unknown as GenericClient;
@@ -58,6 +57,7 @@ export async function saveReservationSettings(input: unknown): Promise<ActionRes
       lead_time_min: parsed.data.lead_time_min,
       advance_days_max: parsed.data.advance_days_max,
       max_party_size: parsed.data.max_party_size,
+      no_show_grace_min: parsed.data.no_show_grace_min,
       schedule: parsed.data.schedule,
     },
     { onConflict: "business_id" },

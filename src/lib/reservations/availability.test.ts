@@ -1,9 +1,35 @@
 import { describe, expect, it } from "vitest";
 
-import { computeAvailableSlots } from "./availability";
+import { availabilityLookupWindow, computeAvailableSlots } from "./availability";
 import type { FloorTable, Reservation, WeeklySchedule } from "./types";
 
 const TZ = "America/Argentina/Buenos_Aires";
+
+describe("availabilityLookupWindow", () => {
+  it("AR (UTC-3): cubre el día local completo, anclado en la TZ y no en UTC", () => {
+    // 2026-06-20 00:00 local AR == 2026-06-20T03:00:00Z.
+    const { fromIso, toIso } = availabilityLookupWindow("2026-06-20", TZ);
+    expect(fromIso).toBe("2026-06-19T03:00:00.000Z");
+    expect(toIso).toBe("2026-06-22T03:00:00.000Z");
+
+    // El inicio y el fin del día local quedan DENTRO de la ventana.
+    const localDayStart = new Date("2026-06-20T03:00:00.000Z").getTime();
+    const localDayEnd = new Date("2026-06-21T03:00:00.000Z").getTime();
+    expect(new Date(fromIso).getTime()).toBeLessThan(localDayStart);
+    expect(new Date(toIso).getTime()).toBeGreaterThan(localDayEnd);
+  });
+
+  it("offset positivo (UTC+13): el inicio del día local NO se pierde (regresión del bug UTC fijo)", () => {
+    const TZ_POS = "Pacific/Auckland";
+    const { fromIso, toIso } = availabilityLookupWindow("2026-06-20", TZ_POS);
+    // 2026-06-20 00:00 en Auckland es 2026-06-19T12:00:00Z (invierno NZ, UTC+12).
+    const localDayStart = new Date("2026-06-19T12:00:00.000Z").getTime();
+    // El viejo cálculo (`${date}T00:00:00Z`) arrancaba a las 2026-06-20T00:00Z,
+    // 12h DESPUÉS del inicio del día local → perdía reservas de la mañana.
+    expect(new Date(fromIso).getTime()).toBeLessThanOrEqual(localDayStart);
+    expect(new Date(toIso).getTime()).toBeGreaterThan(localDayStart);
+  });
+});
 
 const baseSettings = {
   slot_duration_min: 90,

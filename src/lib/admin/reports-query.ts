@@ -69,6 +69,9 @@ export type ReservationFunnel = {
   noShow: number;
   cancelled: number;
   attendanceRate: number;
+  /** Reservas por canal de origen (spec 22). Las anteriores a la migración
+   *  caen como 'web'. */
+  byChannel: { web: number; admin: number; chatbot: number };
   weekly: {
     weekStart: string;
     completed: number;
@@ -253,7 +256,7 @@ export async function getReportData(
       .eq("business_id", businessId),
     supabase
       .from("reservations")
-      .select("id, status, starts_at, party_size")
+      .select("id, status, starts_at, party_size, source")
       .eq("business_id", businessId)
       .gte("starts_at", start.toISOString())
       .lt("starts_at", end.toISOString()),
@@ -503,6 +506,7 @@ export async function getReportData(
     let completed = 0;
     let noShow = 0;
     let cancelled = 0;
+    const byChannel = { web: 0, admin: 0, chatbot: 0 };
     const wkMap = new Map<
       string,
       { completed: number; noShow: number; cancelled: number }
@@ -514,6 +518,11 @@ export async function getReportData(
       else if (status === "completed") completed++;
       else if (status === "no_show") noShow++;
       else if (status === "cancelled") cancelled++;
+
+      const source = (r.source as string) ?? "web";
+      if (source === "admin") byChannel.admin++;
+      else if (source === "chatbot") byChannel.chatbot++;
+      else byChannel.web++;
 
       const wk = weekStartIso(new Date(r.starts_at as string), timezone);
       const w = wkMap.get(wk) ?? { completed: 0, noShow: 0, cancelled: 0 };
@@ -531,6 +540,7 @@ export async function getReportData(
       noShow,
       cancelled,
       attendanceRate: finalized > 0 ? (completed / finalized) * 100 : 0,
+      byChannel,
       weekly: [...wkMap.entries()]
         .map(([weekStart, v]) => ({ weekStart, ...v }))
         .sort((a, b) => a.weekStart.localeCompare(b.weekStart)),

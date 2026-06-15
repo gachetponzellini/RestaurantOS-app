@@ -2582,6 +2582,7 @@ export type Database = {
           business_id: string
           lead_time_min: number
           max_party_size: number
+          no_show_grace_min: number
           schedule: Json
           slot_duration_min: number
           updated_at: string
@@ -2592,6 +2593,7 @@ export type Database = {
           business_id: string
           lead_time_min?: number
           max_party_size?: number
+          no_show_grace_min?: number
           schedule?: Json
           slot_duration_min?: number
           updated_at?: string
@@ -2602,6 +2604,7 @@ export type Database = {
           business_id?: string
           lead_time_min?: number
           max_party_size?: number
+          no_show_grace_min?: number
           schedule?: Json
           slot_duration_min?: number
           updated_at?: string
@@ -3298,7 +3301,9 @@ export type Database = {
         Returns: boolean
       }
       is_business_member: { Args: { bid: string }; Returns: boolean }
+      is_business_staff: { Args: { bid: string }; Returns: boolean }
       is_platform_admin: { Args: never; Returns: boolean }
+      mark_overdue_reservations_no_show: { Args: never; Returns: number }
     }
     Enums: {
       [_ in never]: never

@@ -50,6 +50,8 @@ export async function confirmReservationFromIntent(
     customer_name: parsed.data.customer_name,
     customer_phone: parsed.data.customer_phone,
     notes: parsed.data.notes ?? null,
+    // Marca el canal: la reserva nace del handoff del chatbot (spec 22).
+    source: "chatbot",
     // Forward the salón the chatbot chose (if any). Intents creados antes de
     // multi-salón no tienen el campo y caen al comportamiento legacy.
     ...(intent.intent.floor_plan_id

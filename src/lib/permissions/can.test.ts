@@ -11,10 +11,13 @@ import {
   canCrearPedidoFlash,
   canHacerCorte,
   canMakeSangria,
+  canConfigureReservations,
   canManageCajas,
+  canManageReservations,
   canMarkRotura,
   canModifyPostEnvio,
   canRendirMozo,
+  canSeatReservation,
 } from "./can";
 
 describe("permissions / canModifyPostEnvio", () => {
@@ -160,5 +163,36 @@ describe("permissions / canCrearPedidoFlash", () => {
     expect(canCrearPedidoFlash("encargado")).toBe(true);
     expect(canCrearPedidoFlash("mozo")).toBe(false);
     expect(canCrearPedidoFlash("personal")).toBe(false);
+  });
+});
+
+describe("permissions / canManageReservations", () => {
+  it("admin, encargado y mozo pueden; personal no", () => {
+    expect(canManageReservations("admin")).toBe(true);
+    expect(canManageReservations("encargado")).toBe(true);
+    expect(canManageReservations("mozo")).toBe(true);
+    expect(canManageReservations("personal")).toBe(false);
+  });
+
+  it("sin membership (null) no puede", () => {
+    expect(canManageReservations(null)).toBe(false);
+  });
+
+  it("canSeatReservation es alias de canManageReservations", () => {
+    expect(canSeatReservation("mozo")).toBe(true);
+    expect(canSeatReservation("personal")).toBe(false);
+  });
+});
+
+describe("permissions / canConfigureReservations", () => {
+  it("admin y encargado configuran; mozo y personal no", () => {
+    expect(canConfigureReservations("admin")).toBe(true);
+    expect(canConfigureReservations("encargado")).toBe(true);
+    expect(canConfigureReservations("mozo")).toBe(false);
+    expect(canConfigureReservations("personal")).toBe(false);
+  });
+
+  it("sin membership (null) no puede", () => {
+    expect(canConfigureReservations(null)).toBe(false);
   });
 });

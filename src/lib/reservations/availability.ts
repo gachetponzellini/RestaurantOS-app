@@ -85,6 +85,26 @@ function tableHasConflict(
 }
 
 /**
+ * Reservation-lookup window (UTC ISO) covering the full local day plus its
+ * neighbors, so the buffer/overlap logic near midnight is correct in ANY
+ * timezone. Built from the business TZ via `fromZonedTime` — NOT from a fixed
+ * UTC midnight (that older approach only worked for negative offsets like AR
+ * by luck). One day of padding on each side absorbs the turnover buffer of
+ * reservations that start the day before / end the day after.
+ */
+export function availabilityLookupWindow(
+  date: string,
+  timezone: string,
+): { fromIso: string; toIso: string } {
+  const dayStart = fromZonedTime(`${date}T00:00:00`, timezone);
+  const dayMs = 24 * 60 * 60 * 1000;
+  return {
+    fromIso: new Date(dayStart.getTime() - dayMs).toISOString(),
+    toIso: new Date(dayStart.getTime() + 2 * dayMs).toISOString(),
+  };
+}
+
+/**
  * Pure function. Given settings, tables, and existing reservations, returns
  * the slots a customer with `partySize` can book on `date`. A slot is
  * available when at least one active table fits the party AND has no live

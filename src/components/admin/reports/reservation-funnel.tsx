@@ -55,6 +55,12 @@ export function ReservationFunnelSection({
   ];
   const max = Math.max(1, ...stages.map((s) => s.value));
 
+  const channels = [
+    { key: "web", label: "Web", value: data.byChannel.web },
+    { key: "chatbot", label: "Chatbot", value: data.byChannel.chatbot },
+    { key: "admin", label: "Mostrador", value: data.byChannel.admin },
+  ].filter((c) => c.value > 0);
+
   return (
     <section className="rounded-2xl bg-white p-6 ring-1 ring-zinc-200/70">
       <header className="flex flex-wrap items-end justify-between gap-4">
@@ -119,6 +125,22 @@ export function ReservationFunnelSection({
           );
         })}
       </div>
+
+      {channels.length > 0 ? (
+        <div className="mt-5 flex flex-wrap gap-2 border-t border-zinc-100 pt-4">
+          <span className="text-[0.65rem] font-semibold uppercase tracking-[0.14em] text-zinc-500">
+            Por canal
+          </span>
+          {channels.map((c) => (
+            <span
+              key={c.key}
+              className="rounded-full bg-zinc-100 px-2.5 py-0.5 text-xs font-medium text-zinc-700 tabular-nums"
+            >
+              {c.label} <span className="font-semibold text-zinc-900">{c.value}</span>
+            </span>
+          ))}
+        </div>
+      ) : null}
 
       {chartData.length > 0 ? (
         <div className="mt-6 h-[180px]">
