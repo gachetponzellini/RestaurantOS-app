@@ -1,4 +1,4 @@
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 
 import { CashControlCard } from "@/components/admin/reports/cash-control";
 import { CategoryBreakdownSection } from "@/components/admin/reports/category-breakdown";
@@ -30,6 +30,8 @@ import {
   type ReportRangeInput,
 } from "@/lib/admin/reports-query";
 import { getMozoPerformance } from "@/lib/admin/staff-query";
+import { ensureAdminAccess } from "@/lib/admin/context";
+import { canSee } from "@/lib/permissions/sections";
 import { getSupplierProductOutflow } from "@/lib/proveedores/queries";
 import { getBusiness } from "@/lib/tenant";
 
@@ -45,6 +47,13 @@ export default async function ReportesPage({
     await searchParams;
   const business = await getBusiness(business_slug);
   if (!business) notFound();
+
+  // Reportes = solo admin/dueño (datos sensibles: fiscal, márgenes). El
+  // encargado no entra ni por URL. Ver matriz en sections.ts.
+  const ctx = await ensureAdminAccess(business.id, business_slug);
+  if (!canSee("reportes", ctx.role, { isPlatformAdmin: ctx.isPlatformAdmin })) {
+    redirect(`/${business_slug}/admin`);
+  }
 
   let rangeInput: ReportRangeInput;
   let activeRange: ReportRange | "custom";

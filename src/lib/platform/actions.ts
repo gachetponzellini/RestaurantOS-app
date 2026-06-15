@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
 import { actionError, actionOk, type ActionResult } from "@/lib/actions";
+import { cloneBusinessStructure } from "@/lib/platform/clone-business";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 
@@ -138,6 +139,121 @@ export async function createBusiness(
     console.error("business_users insert", buErr);
     return actionError("No pudimos asignar al admin.");
   }
+
+  revalidatePath("/");
+  return actionOk({ id: business.id, slug: business.slug });
+}
+
+// ── Provisioning por clonación (spec 14) ──────────────────────
+
+const CloneBusinessInput = z.object({
+  name: z.string().min(1, "Requerido.").max(120),
+  slug: z
+    .string()
+    .min(2, "Muy corto.")
+    .max(60)
+    .regex(/^[a-z0-9-]+$/, "Sólo minúsculas, números y guiones."),
+  timezone: z.string().min(1),
+  admin_email: z.string().email("Email inválido."),
+  source_business_id: z.string().uuid("ID de negocio plantilla inválido."),
+});
+
+export async function cloneBusiness(
+  input: unknown,
+): Promise<ActionResult<{ id: string; slug: string }>> {
+  const guard = await assertPlatformAdmin();
+  if (guard) return guard;
+
+  const parsed = CloneBusinessInput.safeParse(input);
+  if (!parsed.success) {
+    return actionError(
+      parsed.error.issues[0]?.message ?? "Datos inválidos.",
+    );
+  }
+  const { name, slug, timezone, admin_email, source_business_id } =
+    parsed.data;
+
+  if (RESERVED_SLUGS.has(slug)) {
+    return actionError("Ese slug está reservado.");
+  }
+
+  const service = createSupabaseServiceClient();
+
+  const { data: existing } = await service
+    .from("businesses")
+    .select("id")
+    .eq("slug", slug)
+    .maybeSingle();
+  if (existing) return actionError("Ya existe un negocio con ese slug.");
+
+  const { data: source } = await service
+    .from("businesses")
+    .select("id")
+    .eq("id", source_business_id)
+    .maybeSingle();
+  if (!source) return actionError("Negocio plantilla no encontrado.");
+
+  let userId: string | null = null;
+  const {
+    data: { users: allUsers },
+  } = await service.auth.admin.listUsers({ perPage: 200 });
+  const existingUser = allUsers.find(
+    (u) => u.email?.toLowerCase() === admin_email.toLowerCase(),
+  );
+
+  const adminRedirectTo = `${getSiteUrl()}/${slug}/admin`;
+
+  if (existingUser) {
+    userId = existingUser.id;
+  } else {
+    const { data: invite, error: inviteErr } =
+      await service.auth.admin.inviteUserByEmail(admin_email, {
+        redirectTo: adminRedirectTo,
+      });
+    if (inviteErr || !invite.user) {
+      console.error("inviteUserByEmail", inviteErr);
+      return actionError("No pudimos enviar la invitación.");
+    }
+    userId = invite.user.id;
+  }
+
+  const { data: business, error: bizErr } = await service
+    .from("businesses")
+    .insert({
+      slug,
+      name,
+      timezone,
+      settings: {
+        primary_color: "#E11D48",
+        primary_foreground: "#FFFFFF",
+      },
+    })
+    .select("id, slug")
+    .single();
+  if (bizErr || !business) {
+    console.error("cloneBusiness insert", bizErr);
+    return actionError("No pudimos crear el negocio.");
+  }
+
+  const { error: userUpsertErr } = await service
+    .from("users")
+    .upsert({ id: userId, email: admin_email }, { onConflict: "id" });
+  if (userUpsertErr) {
+    console.error("users upsert", userUpsertErr);
+    return actionError("No pudimos registrar al admin.");
+  }
+
+  const { error: buErr } = await service.from("business_users").insert({
+    business_id: business.id,
+    user_id: userId,
+    role: "admin",
+  });
+  if (buErr) {
+    console.error("business_users insert", buErr);
+    return actionError("No pudimos asignar al admin.");
+  }
+
+  await cloneBusinessStructure(service, source_business_id, business.id);
 
   revalidatePath("/");
   return actionOk({ id: business.id, slug: business.slug });

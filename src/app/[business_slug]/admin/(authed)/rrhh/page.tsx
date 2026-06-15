@@ -8,10 +8,8 @@ import {
 import { RrhhShell, type RrhhTab } from "@/components/admin/rrhh/rrhh-shell";
 import { AsistenciaTab } from "@/components/admin/rrhh/asistencia-tab";
 import { EquipoTab } from "@/components/admin/rrhh/equipo-tab";
-import {
-  canManageBusiness,
-  ensureAdminAccess,
-} from "@/lib/admin/context";
+import { ensureAdminAccess } from "@/lib/admin/context";
+import { canSee } from "@/lib/permissions/sections";
 import { listBusinessMembers } from "@/lib/admin/members-query";
 import {
   getClockHistory,
@@ -39,7 +37,7 @@ export default async function RrhhPage({
   if (!business) notFound();
 
   const ctx = await ensureAdminAccess(business.id, business_slug);
-  if (!canManageBusiness(ctx) && ctx.role !== "encargado") {
+  if (!canSee("rrhh", ctx.role, { isPlatformAdmin: ctx.isPlatformAdmin })) {
     redirect(`/${business_slug}/admin`);
   }
 

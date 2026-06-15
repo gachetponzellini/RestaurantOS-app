@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ChevronLeft, ExternalLink } from "lucide-react";
+import { ChevronLeft, Copy, ExternalLink } from "lucide-react";
 
 import { InviteMemberForm } from "@/components/super/invite-member-form";
 import { MemberRow } from "@/components/super/member-row";
@@ -49,6 +49,12 @@ export default async function PlatformBusinessDetailPage({
             className="text-muted-foreground inline-flex items-center gap-1"
           >
             Ver menú público <ExternalLink className="size-3.5" />
+          </Link>
+          <Link
+            href={`/negocios/clonar/${business.id}`}
+            className="text-muted-foreground inline-flex items-center gap-1"
+          >
+            Clonar local <Copy className="size-3.5" />
           </Link>
         </div>
       </header>

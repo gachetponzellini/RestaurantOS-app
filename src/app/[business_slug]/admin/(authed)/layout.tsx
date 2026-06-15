@@ -3,7 +3,8 @@ import { notFound, redirect } from "next/navigation";
 import { AdminSidebar } from "@/components/admin/admin-sidebar";
 import { BrandStyle } from "@/components/admin/shell/brand-style";
 import { NotificationsLauncher } from "@/components/notifications/notifications-launcher";
-import { canManageBusiness, ensureAdminAccess } from "@/lib/admin/context";
+import { ensureAdminAccess } from "@/lib/admin/context";
+import { getMyAdminBusinesses } from "@/lib/platform/queries";
 import { getPendingOrderCount } from "@/lib/admin/orders-query";
 import { getLowKitchenStockCount } from "@/lib/ingredients/queries";
 import { countUnread, listForUser } from "@/lib/notifications/queries";
@@ -31,11 +32,22 @@ export default async function AdminAuthedLayout({
     redirect(`/${business_slug}/mozo`);
   }
 
-  const [pendingCount, lowBebidasCount, lowCocinaCount] = await Promise.all([
-    getPendingOrderCount(business.id, business.timezone),
-    getLowStockCount(business.id),
-    getLowKitchenStockCount(business.id),
-  ]);
+  const [pendingCount, lowBebidasCount, lowCocinaCount, myBusinesses] =
+    await Promise.all([
+      getPendingOrderCount(business.id, business.timezone),
+      getLowStockCount(business.id),
+      getLowKitchenStockCount(business.id),
+      getMyAdminBusinesses(),
+    ]);
+  // Switcher de negocio: solo si el dueño es admin de ≥2 locales (spec 14).
+  const siblings =
+    myBusinesses.length >= 2
+      ? myBusinesses.map((b) => ({
+          slug: b.slug,
+          name: b.name,
+          logoUrl: b.logo_url,
+        }))
+      : [];
   // El badge de "Productos e inventario" suma faltantes de bebidas + cocina,
   // ya que ambos stocks ahora viven en la misma sección.
   const lowStockCount = lowBebidasCount + lowCocinaCount;
@@ -76,7 +88,8 @@ export default async function AdminAuthedLayout({
         userEmail={ctx.userEmail}
         userName={ctx.userName}
         isPlatformAdmin={ctx.isPlatformAdmin}
-        canManageBusiness={canManageBusiness(ctx)}
+        role={ctx.role}
+        siblings={siblings}
         initialPendingCount={pendingCount}
         lowStockCount={lowStockCount}
         isActive={business.is_active ?? true}

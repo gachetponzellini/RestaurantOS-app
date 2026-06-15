@@ -7,10 +7,15 @@ import { ChatbotTester } from "@/components/admin/chatbot-tester";
 export function ChatbotPanel({
   businessSlug,
   businessName,
+  access = "full",
 }: {
   businessSlug: string;
   businessName: string;
+  // "full" = prompt + tester + toggle (admin). "limited" = solo on/off (encargado).
+  access?: "full" | "limited";
 }) {
+  const limited = access === "limited";
+
   return (
     <div className="flex h-full flex-col">
       <header className="pb-6">
@@ -21,31 +26,34 @@ export function ChatbotPanel({
           Chatbot
         </h1>
         <p className="mt-1 max-w-2xl text-sm text-zinc-600">
-          Probá cómo se comporta el bot en WhatsApp. Editá el prompt y las
-          herramientas. Todo en vivo.
+          {limited
+            ? "Activá o pausá el asistente de WhatsApp del local."
+            : "Probá cómo se comporta el bot en WhatsApp. Editá el prompt y las herramientas. Todo en vivo."}
         </p>
         <div className="mt-3">
           <ChatbotStatusBadge businessSlug={businessSlug} />
         </div>
       </header>
 
-      <div className="flex min-h-0 flex-1 flex-col gap-6 lg:flex-row">
-        {/* Tester (phone) — fixed width on desktop */}
-        <aside className="flex shrink-0 justify-center lg:w-96 lg:justify-start">
-          <ChatbotTester
-            businessSlug={businessSlug}
-            businessName={businessName}
-          />
-        </aside>
+      {!limited && (
+        <div className="flex min-h-0 flex-1 flex-col gap-6 lg:flex-row">
+          {/* Tester (phone) — fixed width on desktop */}
+          <aside className="flex shrink-0 justify-center lg:w-96 lg:justify-start">
+            <ChatbotTester
+              businessSlug={businessSlug}
+              businessName={businessName}
+            />
+          </aside>
 
-        {/* Configuration — takes the rest */}
-        <section className="flex min-h-0 min-w-0 flex-1 flex-col">
-          <ChatbotPromptEditor
-            businessSlug={businessSlug}
-            businessName={businessName}
-          />
-        </section>
-      </div>
+          {/* Configuration — takes the rest */}
+          <section className="flex min-h-0 min-w-0 flex-1 flex-col">
+            <ChatbotPromptEditor
+              businessSlug={businessSlug}
+              businessName={businessName}
+            />
+          </section>
+        </div>
+      )}
     </div>
   );
 }

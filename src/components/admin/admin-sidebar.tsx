@@ -8,7 +8,9 @@ import { Menu } from "@base-ui/react/menu";
 import {
   ArrowLeft,
   BarChart3,
+  Building2,
   CalendarDays,
+  ChevronsUpDown,
   Clock,
   History,
   LayoutDashboard,
@@ -27,12 +29,15 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
+import type { BusinessRole } from "@/lib/admin/context";
+import { canSee, type AdminSection } from "@/lib/permissions/sections";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { cn } from "@/lib/utils";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
 type NavItem = {
+  section: AdminSection;
   href: string;
   label: string;
   icon: React.ReactNode;
@@ -45,24 +50,34 @@ type NavGroup = {
 };
 
 // ─── Nav builder ────────────────────────────────────────────────────────────
+//
+// Se arman TODOS los grupos/items con su `section`, y se filtran por `canSee`
+// (matriz en `src/lib/permissions/sections.ts`). Los grupos que quedan vacíos
+// para el rol se descartan. Así sidebar y page-gates comparten la misma fuente.
 
-function buildNav(slug: string, showBusinessTools: boolean): NavGroup[] {
+function buildNav(
+  slug: string,
+  role: BusinessRole | null,
+  isPlatformAdmin: boolean,
+): NavGroup[] {
   const adminBase = `/${slug}/admin`;
   const icon = (I: React.ComponentType<{ className?: string; strokeWidth?: number }>) => (
     <I className="size-[18px]" strokeWidth={1.75} />
   );
 
-  const groups: NavGroup[] = [
+  const allGroups: NavGroup[] = [
     {
       label: "Operación",
       items: [
         {
+          section: "dashboard",
           href: adminBase,
           label: "Dashboard",
           icon: icon(LayoutDashboard),
           match: (p) => p === adminBase,
         },
         {
+          section: "operacion",
           href: `${adminBase}/operacion`,
           label: "Operación Diaria",
           icon: icon(Zap),
@@ -74,27 +89,26 @@ function buildNav(slug: string, showBusinessTools: boolean): NavGroup[] {
               !p.startsWith(`${adminBase}/pedidos/historial`)),
         },
         {
+          section: "pedidos",
           href: `${adminBase}/pedidos/historial`,
           label: "Pedidos",
           icon: icon(History),
           match: (p) => p.startsWith(`${adminBase}/pedidos/historial`),
         },
-        ...(showBusinessTools
-          ? [
-              {
-                href: `${adminBase}/cajas`,
-                label: "Cajas",
-                icon: icon(Wallet),
-                match: (p: string) => p.startsWith(`${adminBase}/cajas`),
-              },
-            ]
-          : []),
+        {
+          section: "cajas",
+          href: `${adminBase}/cajas`,
+          label: "Cajas",
+          icon: icon(Wallet),
+          match: (p) => p.startsWith(`${adminBase}/cajas`),
+        },
       ],
     },
     {
       label: "Catálogo",
       items: [
         {
+          section: "catalogo",
           href: `${adminBase}/catalogo`,
           label: "Productos e inventario",
           icon: icon(Package),
@@ -104,12 +118,14 @@ function buildNav(slug: string, showBusinessTools: boolean): NavGroup[] {
             p.startsWith(`${adminBase}/stock`),
         },
         {
+          section: "salones",
           href: `${adminBase}/salones`,
           label: "Salones",
           icon: icon(LayoutGrid),
           match: (p) => p.startsWith(`${adminBase}/salones`),
         },
         {
+          section: "reservas",
           href: `${adminBase}/reservas`,
           label: "Reservas",
           icon: icon(CalendarDays),
@@ -121,28 +137,28 @@ function buildNav(slug: string, showBusinessTools: boolean): NavGroup[] {
       label: "Marketing",
       items: [
         {
+          section: "clientes",
           href: `${adminBase}/clientes`,
           label: "Clientes",
           icon: icon(Users),
           match: (p) => p.startsWith(`${adminBase}/clientes`),
         },
-        ...(showBusinessTools
-          ? [
-              {
-                href: `${adminBase}/promociones`,
-                label: "Promociones",
-                icon: icon(Tag),
-                match: (p: string) => p.startsWith(`${adminBase}/promociones`),
-              },
-              {
-                href: `${adminBase}/campanas`,
-                label: "Campañas",
-                icon: icon(Megaphone),
-                match: (p: string) => p.startsWith(`${adminBase}/campanas`),
-              },
-            ]
-          : []),
         {
+          section: "promociones",
+          href: `${adminBase}/promociones`,
+          label: "Promociones",
+          icon: icon(Tag),
+          match: (p) => p.startsWith(`${adminBase}/promociones`),
+        },
+        {
+          section: "campanas",
+          href: `${adminBase}/campanas`,
+          label: "Campañas",
+          icon: icon(Megaphone),
+          match: (p) => p.startsWith(`${adminBase}/campanas`),
+        },
+        {
+          section: "chatbot",
           href: `${adminBase}/chatbot`,
           label: "Chatbot",
           icon: icon(MessageSquare),
@@ -150,31 +166,32 @@ function buildNav(slug: string, showBusinessTools: boolean): NavGroup[] {
         },
       ],
     },
-  ];
-
-  if (showBusinessTools) {
-    groups.push({
+    {
       label: "Administración",
       items: [
         {
+          section: "reportes",
           href: `${adminBase}/reportes`,
           label: "Reportes",
           icon: icon(BarChart3),
           match: (p) => p.startsWith(`${adminBase}/reportes`),
         },
         {
+          section: "proveedores",
           href: `${adminBase}/proveedores`,
           label: "Proveedores",
           icon: icon(Truck),
           match: (p) => p.startsWith(`${adminBase}/proveedores`),
         },
         {
+          section: "facturacion",
           href: `${adminBase}/facturacion`,
           label: "Facturación",
           icon: icon(Receipt),
           match: (p) => p.startsWith(`${adminBase}/facturacion`),
         },
         {
+          section: "rrhh",
           href: `${adminBase}/rrhh`,
           label: "RRHH",
           icon: icon(Clock),
@@ -184,16 +201,24 @@ function buildNav(slug: string, showBusinessTools: boolean): NavGroup[] {
             p.startsWith(`${adminBase}/usuarios`),
         },
         {
+          section: "configuracion",
           href: `${adminBase}/configuracion`,
           label: "Ajustes",
           icon: icon(Settings),
           match: (p) => p.startsWith(`${adminBase}/configuracion`),
         },
       ],
-    });
-  }
+    },
+  ];
 
-  return groups;
+  return allGroups
+    .map((g) => ({
+      ...g,
+      items: g.items.filter((it) =>
+        canSee(it.section, role, { isPlatformAdmin }),
+      ),
+    }))
+    .filter((g) => g.items.length > 0);
 }
 
 // ─── Dimensiones ────────────────────────────────────────────────────────────
@@ -211,7 +236,8 @@ export function AdminSidebar({
   userEmail,
   userName,
   isPlatformAdmin = false,
-  canManageBusiness = false,
+  role = null,
+  siblings = [],
   initialPendingCount = 0,
   lowStockCount = 0,
   isActive: _isActive = true,
@@ -223,14 +249,15 @@ export function AdminSidebar({
   userEmail: string;
   userName?: string | null;
   isPlatformAdmin?: boolean;
-  canManageBusiness?: boolean;
+  role?: BusinessRole | null;
+  siblings?: { slug: string; name: string; logoUrl: string | null }[];
   initialPendingCount?: number;
   lowStockCount?: number;
   isActive?: boolean;
 }) {
   void _isActive;
   const pathname = usePathname();
-  const groups = buildNav(slug, canManageBusiness);
+  const groups = buildNav(slug, role, isPlatformAdmin);
 
   // ── Sidebar expanded / collapsed (hover-driven) ───────────────────────────
   const [expanded, setExpanded] = useState(false);
@@ -266,17 +293,27 @@ export function AdminSidebar({
         },
         (payload) => {
           if (payload.eventType === "INSERT") {
-            setPendingCount((c) => c + 1);
             const newOrder = payload.new as {
               order_number?: number;
               customer_name?: string;
+              delivery_type?: string;
             };
+            // Solo pedidos online: las órdenes de mesa (dine_in) viven en el
+            // salón, no son "pedidos" de este badge. Contarlas lo inflaba y
+            // disparaba un toast de pedido cuando un mozo abría una mesa.
+            if (newOrder.delivery_type === "dine_in") return;
+            setPendingCount((c) => c + 1);
             toast(
               `🔔 Pedido #${newOrder.order_number ?? "—"} — ${newOrder.customer_name ?? "cliente"}`,
               { duration: 6000 },
             );
           } else if (payload.eventType === "UPDATE") {
-            const newStatus = (payload.new as { status?: string }).status ?? "";
+            const updated = payload.new as {
+              status?: string;
+              delivery_type?: string;
+            };
+            if (updated.delivery_type === "dine_in") return;
+            const newStatus = updated.status ?? "";
             const isTerminal =
               newStatus === "delivered" || newStatus === "cancelled";
             if (isTerminal) {
@@ -321,25 +358,39 @@ export function AdminSidebar({
       >
         {/* ── Header ──────────────────────────────────────────────────────── */}
         <header className="flex flex-row items-center gap-2 px-3 pt-2.5 pb-1.5">
-          <BusinessMark
-            slug={slug}
-            name={businessName}
-            logoUrl={businessLogoUrl}
-          />
-          <div
-            className={cn(
-              "min-w-0 flex-1 overflow-hidden transition-opacity duration-200",
-              expanded ? "opacity-100 delay-100" : "pointer-events-none opacity-0",
-            )}
-            aria-hidden={!expanded}
-          >
-            <p className="truncate text-sm font-semibold tracking-tight text-zinc-900">
-              {businessName}
-            </p>
-            <p className="truncate text-[0.65rem] font-medium uppercase tracking-[0.14em] text-zinc-500">
-              Panel admin
-            </p>
-          </div>
+          {siblings.length >= 2 ? (
+            <BusinessSwitcher
+              currentSlug={slug}
+              businessName={businessName}
+              businessLogoUrl={businessLogoUrl}
+              siblings={siblings}
+              expanded={expanded}
+            />
+          ) : (
+            <>
+              <BusinessMark
+                slug={slug}
+                name={businessName}
+                logoUrl={businessLogoUrl}
+              />
+              <div
+                className={cn(
+                  "min-w-0 flex-1 overflow-hidden transition-opacity duration-200",
+                  expanded
+                    ? "opacity-100 delay-100"
+                    : "pointer-events-none opacity-0",
+                )}
+                aria-hidden={!expanded}
+              >
+                <p className="truncate text-sm font-semibold tracking-tight text-zinc-900">
+                  {businessName}
+                </p>
+                <p className="truncate text-[0.65rem] font-medium uppercase tracking-[0.14em] text-zinc-500">
+                  Panel admin
+                </p>
+              </div>
+            </>
+          )}
         </header>
 
         {/* ── Nav ─────────────────────────────────────────────────────────── */}
@@ -473,6 +524,156 @@ function BusinessMark({
         <span className="text-xs font-bold tracking-tight">{initials}</span>
       )}
     </Link>
+  );
+}
+
+// ─── Business switcher (dueño multi-local) ──────────────────────────────────
+
+function BusinessSwitcher({
+  currentSlug,
+  businessName,
+  businessLogoUrl,
+  siblings,
+  expanded,
+}: {
+  currentSlug: string;
+  businessName: string;
+  businessLogoUrl: string | null;
+  siblings: { slug: string; name: string; logoUrl: string | null }[];
+  expanded: boolean;
+}) {
+  // base-ui's Menu usa useId → hydration mismatch en SSR. Igual que UserMenu,
+  // pintamos un placeholder no-interactivo hasta montar.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+
+  const mark = (
+    <span
+      className={cn(
+        "relative flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-xl",
+        "ring-1 ring-black/10 shadow-[inset_0_1px_0_rgba(255,255,255,0.14)]",
+      )}
+      style={{ background: "var(--brand)", color: "var(--brand-foreground)" }}
+    >
+      {businessLogoUrl ? (
+        <Image
+          src={businessLogoUrl}
+          alt={businessName}
+          fill
+          sizes="44px"
+          className="object-cover"
+        />
+      ) : (
+        <Building2 className="size-5" strokeWidth={1.75} />
+      )}
+    </span>
+  );
+
+  const labels = (
+    <div
+      className={cn(
+        "min-w-0 flex-1 overflow-hidden text-left transition-opacity duration-200",
+        expanded ? "opacity-100 delay-100" : "pointer-events-none opacity-0",
+      )}
+      aria-hidden={!expanded}
+    >
+      <p className="truncate text-sm font-semibold tracking-tight text-zinc-900">
+        {businessName}
+      </p>
+      <p className="truncate text-[0.65rem] font-medium uppercase tracking-[0.14em] text-zinc-500">
+        Cambiar local
+      </p>
+    </div>
+  );
+
+  if (!mounted) {
+    return (
+      <div className="flex min-w-0 flex-1 items-center gap-2" aria-hidden>
+        {mark}
+        {labels}
+      </div>
+    );
+  }
+
+  return (
+    <Menu.Root>
+      <Menu.Trigger
+        aria-label="Cambiar de local"
+        className={cn(
+          "flex min-w-0 flex-1 items-center gap-2 rounded-xl outline-none transition",
+          expanded && "hover:bg-zinc-200/40",
+          "focus-visible:ring-2 focus-visible:ring-zinc-900/20",
+        )}
+      >
+        {mark}
+        {labels}
+        {expanded && (
+          <ChevronsUpDown className="size-4 shrink-0 text-zinc-400" />
+        )}
+      </Menu.Trigger>
+      <Menu.Portal>
+        <Menu.Positioner sideOffset={10} align="start" side="bottom" className="z-50">
+          <Menu.Popup
+            className={cn(
+              "min-w-60 overflow-hidden rounded-xl border border-zinc-200 bg-white p-1",
+              "shadow-lg shadow-zinc-900/5",
+              "data-[starting-style]:opacity-0 data-[ending-style]:opacity-0 transition-opacity",
+            )}
+          >
+            <p className="px-3 py-2 text-[0.6rem] font-semibold uppercase tracking-[0.14em] text-zinc-400">
+              Tus locales
+            </p>
+            {siblings.map((b) => (
+              <Menu.Item
+                key={b.slug}
+                render={<Link href={`/${b.slug}/admin`} />}
+                className={cn(
+                  "flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-3 py-2 text-sm outline-none transition",
+                  "data-[highlighted]:bg-zinc-100",
+                  b.slug === currentSlug && "font-semibold",
+                )}
+              >
+                <span className="flex size-6 shrink-0 items-center justify-center overflow-hidden rounded-md bg-zinc-100 text-zinc-600">
+                  {b.logoUrl ? (
+                    <Image
+                      src={b.logoUrl}
+                      alt={b.name}
+                      width={24}
+                      height={24}
+                      className="size-full object-cover"
+                    />
+                  ) : (
+                    <Building2 className="size-3.5" strokeWidth={1.75} />
+                  )}
+                </span>
+                <span className="min-w-0 flex-1 truncate text-zinc-800">
+                  {b.name}
+                </span>
+                {b.slug === currentSlug && (
+                  <span
+                    className="size-1.5 rounded-full"
+                    style={{ background: "var(--brand)" }}
+                  />
+                )}
+              </Menu.Item>
+            ))}
+            <div className="my-1 h-px bg-zinc-100" />
+            <Menu.Item
+              render={<Link href="/mis-locales" />}
+              className={cn(
+                "flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-3 py-2 text-sm outline-none transition",
+                "data-[highlighted]:bg-zinc-100",
+              )}
+            >
+              <span className="flex size-6 shrink-0 items-center justify-center rounded-md bg-zinc-900 text-zinc-50">
+                <BarChart3 className="size-3.5" strokeWidth={1.75} />
+              </span>
+              <span className="font-medium text-zinc-900">Mis locales</span>
+            </Menu.Item>
+          </Menu.Popup>
+        </Menu.Positioner>
+      </Menu.Portal>
+    </Menu.Root>
   );
 }
 

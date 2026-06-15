@@ -26,7 +26,8 @@ export async function middleware(request: NextRequest) {
     pathname === "/auth/confirm" ||
     pathname === "/" ||
     pathname === "/login" ||
-    pathname.startsWith("/negocios");
+    pathname.startsWith("/negocios") ||
+    pathname.startsWith("/mis-locales");
   if (
     hostSlug &&
     !isGlobalRoute &&
@@ -43,10 +44,14 @@ export async function middleware(request: NextRequest) {
     ? `/${hostSlug}${pathname === "/" ? "" : pathname}`
     : pathname;
 
-  // Protect platform routes (/ and /negocios/*). /login is the unauthenticated
-  // entry point so it's excluded.
+  // Protect platform routes (/ and /negocios/*) y "Mis locales" (vista del dueño
+  // multi-local, cross-negocio). /login es el ingreso anónimo, excluido.
+  // El gate fino (admin de ≥2 locales) lo hace el layout de (owner); acá solo
+  // se bloquea la sesión anónima.
   const isPlatformProtected =
-    effectivePath === "/" || effectivePath.startsWith("/negocios");
+    effectivePath === "/" ||
+    effectivePath.startsWith("/negocios") ||
+    effectivePath.startsWith("/mis-locales");
   if (isPlatformProtected) {
     const response = NextResponse.next();
     const supabase = makeSessionClient(request, response);
