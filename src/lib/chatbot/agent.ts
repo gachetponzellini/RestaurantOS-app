@@ -169,12 +169,13 @@ Cuando mandes el link, usá esta estructura:
 // in a single turn, so we allow a bit more headroom.
 const MAX_TOOL_ITERATIONS = 8;
 
-// Override via CHATBOT_MODEL in .env.local. Defaults to Claude Opus 4.7 (the
-// most capable Claude model). For cost-sensitive deployments, set
-// CHATBOT_MODEL=claude-sonnet-4-6 in env — Sonnet 4.6 is the natural
-// gpt-4o-equivalent in price/speed for a tool-calling chatbot. Both support
-// adaptive thinking and prompt caching out of the box.
-const CHATBOT_MODEL = process.env.CHATBOT_MODEL ?? "claude-opus-4-7";
+// Override via CHATBOT_MODEL in .env.local. Default: Claude Sonnet 4.6 — el
+// punto justo de precio/velocidad para un bot de tool-calling por WhatsApp.
+// Opus consumía demasiado para este caso de uso (respuestas cortas, flujo
+// simple), así que dejó de ser el default. Para máxima latencia/costo mínimos,
+// CHATBOT_MODEL=claude-haiku-4-5; si se quiere más capacidad puntual,
+// claude-opus-4-8. Todos soportan adaptive thinking y prompt caching.
+const CHATBOT_MODEL = process.env.CHATBOT_MODEL ?? "claude-sonnet-4-6";
 
 // Cap on the assistant's per-response output. Anthropic requires this be
 // explicit; we keep it small because messages are short (WhatsApp-style).
@@ -1609,12 +1610,10 @@ async function invokeLlm({
   const toolsByName: Record<string, StructuredToolInterface> =
     Object.fromEntries(tools.map((t) => [t.name, t]));
 
-  // Adaptive thinking lets Claude decide per-turn whether to "think" before
-  // responding — solo los turnos complejos pagan latencia. `temperature`
-  // no se acepta en Opus 4.7 (devuelve 400), así que no lo seteamos.
+  // `thinking: disabled` minimiza latencia en respuestas tipo WhatsApp; subir a
+  // `{ type: "adaptive" }` si se quiere que el modelo razone en turnos complejos.
+  // No seteamos `temperature` (no hace falta para este flujo).
   // `ANTHROPIC_API_KEY` se lee de env automáticamente por el wrapper.
-  // Si querés latencia mínima sin razonamiento, exportá `CHATBOT_MODEL` a
-  // claude-sonnet-4-6 (también soporta adaptive thinking) o claude-haiku-4-5.
   const baseLlm = new ChatAnthropic({
     model: CHATBOT_MODEL,
     maxTokens: CHATBOT_MAX_TOKENS,
