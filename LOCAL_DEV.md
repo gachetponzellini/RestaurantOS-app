@@ -87,10 +87,29 @@ pnpm db:clone   # esquema + TODA la data real del cloud (limpia el local y copia
 ⚠️ Copia data **real**: clientes (PII) + **secretos por negocio** (tokens MP, certs
 ARCA, keys del chatbot). Queda en `supabase/.clone/` (gitignored). Úsalo a conciencia.
 
-**Opción B — seed demo (sin secretos):** negocios House/Golf ficticios.
+**Opción B — seed demo (sin secretos):** un único negocio demo `demo` ("Restaurante Demo").
 
 ```bash
-pnpm setup:local   # esquema del cloud + tipos + seed demo (estructura + operativo)
+pnpm setup:local   # esquema del cloud + tipos + seed demo (estructura + operativo) → slug `demo`
+```
+
+El negocio canónico de demo es **slug `demo`** (`localhost:3000/demo`). El equipo entra
+con email + `demo1234` (PINs en la tabla `business_users`):
+
+| email | rol | PIN |
+|---|---|---|
+| `admin@demo.test` | admin | — |
+| `sofia@demo.test` | encargado | 1234 |
+| `pedro@demo.test` / `lucia@demo.test` / `diego@demo.test` | mozo | 1111 / 2222 / 3333 |
+| `ramon@demo.test` / `marta@demo.test` | personal | 4444 / 5555 |
+
+> `setup:local` y los seeds apuntan a `demo`, **no** a `golf-jcr` (que tiene data
+> que se quiere preservar). `delete-business.ts` además protege `golf-jcr` por hardcode.
+
+**Borrar negocios (FK-safe, no toca `auth.users` ni `golf-jcr`):**
+
+```bash
+pnpm delete:business <slug> [<slug> ...]   # apunta al entorno actual de .env.local
 ```
 
 ---
@@ -122,7 +141,8 @@ Google OAuth es **solo para la carta pública** (clientes).
 | `pnpm db:pull-schema` | re-bajar el esquema del cloud y aplicarlo al local |
 | `pnpm db:reset-local` | re-aplicar el esquema (dump cacheado) al local |
 | `pnpm db:clone` | **copia exacta** del cloud (esquema + toda la data) |
-| `pnpm setup:local` | local listo con **seed demo** (sin secretos) |
+| `pnpm setup:local` | local listo con **seed demo** (slug `demo`, sin secretos) |
+| `pnpm delete:business <slug>` | borra negocio(s) por completo (FK-safe); protege `golf-jcr` |
 | `pnpm local:login <email> [pass]` | setear password a un usuario del auth local |
 | `pnpm local:superadmin <email> <pass>` | crear/actualizar usuario + marcarlo platform admin |
 | `pnpm db:types:local` | regenerar tipos TS desde el **local** (`db:types` apunta al cloud) |

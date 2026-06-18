@@ -56,6 +56,7 @@ const sb = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
 // ════════════════════════════════════════════════════════════════════════════
 
 const SLUG = process.argv[2] || "golf-jcr";
+const NAME = process.argv[3] || "JCR Golf";
 
 // ════════════════════════════════════════════════════════════════════════════
 // COUNTERS
@@ -200,7 +201,7 @@ async function fase1_business(): Promise<string> {
 
   const payload = {
     slug: SLUG,
-    name: "JCR Golf",
+    name: NAME,
     timezone: "America/Argentina/Buenos_Aires",
     currency: "ARS",
     is_active: true,
@@ -706,6 +707,7 @@ async function fase7_team(businessId: string) {
         user_id: userId,
         role: member.role,
         pin: member.pin,
+        full_name: member.name,
       },
       { onConflict: "business_id,user_id" },
     );
@@ -1019,7 +1021,7 @@ async function fase11_daily_menus(businessId: string) {
   ];
 
   for (const menu of menus) {
-    const { data: menuRow } = await rpc(
+    const menuRow = await rpc(
       () =>
         sb
           .from("daily_menus")
@@ -1129,31 +1131,51 @@ async function main() {
   console.log(`  SEED ESTRUCTURA — ${SLUG}`);
   console.log(`${"═".repeat(60)}`);
 
+  let businessId: string;
   try {
-    const businessId = await fase1_business();
-    await fase0_cleanup(businessId);
-    await fase2_hours(businessId);
-    await fase3_catalogo(businessId);
-    await fase4_modifiers(businessId);
-    await fase5_floor_plans(businessId);
-    await fase6_reservations(businessId);
-    await fase7_team(businessId);
-    await fase8_ingredients_recipes(businessId);
-    await fase9_stock(businessId);
-    await fase10_chatbot(businessId);
-    await fase11_daily_menus(businessId);
-    await fase12_cajas(businessId);
-    await fase13_payment_methods(businessId);
-
-    // ── Summary ──
-    header("RESUMEN");
-    for (const [key, val] of Object.entries(counts).sort()) {
-      console.log(`  ${key}: ${val}`);
-    }
-    console.log(`\n✓ Seed completed for ${SLUG}`);
+    businessId = await fase1_business();
   } catch (err: any) {
-    console.error(`\n✗ Seed failed: ${err.message ?? err}`);
+    console.error(`\n✗ Seed failed at fase1_business: ${err.message ?? err}`);
     process.exit(1);
+  }
+
+  // Cada fase corre aislada: si una falla, se loguea y se sigue con el resto
+  // (así un bug en, p.ej., daily_menus no impide seedear cajas / payment_methods).
+  const phases: [string, (id: string) => Promise<unknown>][] = [
+    ["fase0_cleanup", fase0_cleanup],
+    ["fase2_hours", fase2_hours],
+    ["fase3_catalogo", fase3_catalogo],
+    ["fase4_modifiers", fase4_modifiers],
+    ["fase5_floor_plans", fase5_floor_plans],
+    ["fase6_reservations", fase6_reservations],
+    ["fase7_team", fase7_team],
+    ["fase8_ingredients_recipes", fase8_ingredients_recipes],
+    ["fase9_stock", fase9_stock],
+    ["fase10_chatbot", fase10_chatbot],
+    ["fase11_daily_menus", fase11_daily_menus],
+    ["fase12_cajas", fase12_cajas],
+    ["fase13_payment_methods", fase13_payment_methods],
+  ];
+
+  const failed: string[] = [];
+  for (const [name, fn] of phases) {
+    try {
+      await fn(businessId);
+    } catch (err: any) {
+      failed.push(name);
+      console.error(`\n  ⚠ ${name} falló: ${err.message ?? err} — sigo con el resto`);
+    }
+  }
+
+  // ── Summary ──
+  header("RESUMEN");
+  for (const [key, val] of Object.entries(counts).sort()) {
+    console.log(`  ${key}: ${val}`);
+  }
+  if (failed.length) {
+    console.log(`\n⚠ Seed completado con fases fallidas: ${failed.join(", ")}`);
+  } else {
+    console.log(`\n✓ Seed completed for ${SLUG}`);
   }
 }
 
