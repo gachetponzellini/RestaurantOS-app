@@ -1,30 +1,21 @@
 "use client";
 
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import {
-  ArrowRight,
-  Ban,
-  Lock,
-  Receipt,
-  Scissors,
-  Trash2,
-  Users,
-} from "lucide-react";
+import { ArrowRight, Lock, Receipt, Scissors, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 
 import type { BusinessRole } from "@/lib/admin/context";
 import {
   aplicarPropinaYDescuento,
   cancelarItemEnCuenta,
-  dividirPorComensal,
-  dividirPorItems,
-  dividirPorPersonas,
   limpiarDivision,
 } from "@/lib/billing/cuenta-actions";
+import { sumActiveItems } from "@/lib/billing/totals";
 import type { CuentaState } from "@/lib/billing/types";
 import { formatCurrency } from "@/lib/currency";
 import { canApplyDiscount, canCancelItem } from "@/lib/permissions/can";
+import { useOptimisticAction } from "@/lib/ui/use-optimistic-action";
 import { cn } from "@/lib/utils";
 
 import { PageShell } from "@/components/admin/shell/page-shell";
@@ -38,13 +29,8 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Tabs,
-  TabsContent,
-  TabsList,
-  TabsTrigger,
-} from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
+import { DividirModal, SplitsBanner } from "@/components/billing/dividir-modal";
 
 const TIP_PRESETS = [0, 5, 10, 15];
 const DISCOUNT_REASONS = [
@@ -61,6 +47,20 @@ type Props = {
   tableLabel: string;
   role: BusinessRole;
   cuenta: CuentaState;
+  /** Destinos para usar la vista desde el panel admin sin saltar a /mozo.
+   *  Default: la app del mozo. */
+  homeHref?: string;
+  cobrarHref?: string;
+  /** Modo embebido: se renderiza dentro del panel del salón (no como página).
+   *  Sin chrome full-screen; header de panel con cerrar; CTA no-fija. En vez de
+   *  navegar usa los callbacks. */
+  embedded?: boolean;
+  /** Cerrar el panel (volver al detalle de mesa). Solo embebido. */
+  onClose?: () => void;
+  /** "Pasar a cobro": el parent abre el cobro embebido de la misma mesa. */
+  onCobrar?: () => void;
+  /** Re-fetch tras dividir / limpiar / cancelar item, sin cerrar el panel. */
+  onReload?: () => void;
 };
 
 export function CuentaClient({
@@ -69,10 +69,38 @@ export function CuentaClient({
   tableLabel,
   role,
   cuenta,
+  homeHref,
+  cobrarHref,
+  embedded = false,
+  onClose,
+  onCobrar,
+  onReload,
 }: Props) {
   const router = useRouter();
+  const backHref = homeHref ?? `/${slug}/mozo`;
+  const cobrarTarget = cobrarHref ?? `/${slug}/mozo/mesa/${tableId}/cobrar`;
   const [isPending, startTransition] = useTransition();
-  const subtotal = cuenta.totals.subtotal_cents;
+  // Refrescar datos: embebido re-fetchea via parent; página re-renderiza.
+  const reloadData = () => {
+    if (embedded) onReload?.();
+    else router.refresh();
+  };
+
+  // Cancelar ítem es optimista: marcamos el ítem cancelado al instante y el
+  // subtotal (y total/propina/descuento derivados) se recalcula con la misma
+  // `sumActiveItems` del server — sin total transitorio incorrecto. El overlay
+  // se sostiene hasta que el `router.refresh()` (dentro de la transición del
+  // helper) trae el dato real; si falla, revierte solo.
+  const { state: items, run: runCancelItem } = useOptimisticAction(
+    cuenta.items,
+    (list, payload: { id: string; cancelledAt: string }) =>
+      list.map((it) =>
+        it.id === payload.id
+          ? { ...it, cancelled_at: payload.cancelledAt }
+          : it,
+      ),
+  );
+  const subtotal = sumActiveItems(items);
 
   const [tipPercent, setTipPercent] = useState<number | "custom">(
     cuenta.order.tip_cents === 0 ? 0 : "custom",
@@ -144,7 +172,8 @@ export function CuentaClient({
           return;
         }
       }
-      router.push(`/${slug}/mozo/mesa/${tableId}/cobrar`);
+      if (embedded) onCobrar?.();
+      else router.push(cobrarTarget);
     });
   };
 
@@ -152,37 +181,64 @@ export function CuentaClient({
     role === "mozo" ? "10%" : role === "encargado" ? "25%" : "sin límite";
 
   return (
-    <div className="min-h-dvh bg-zinc-100/60 pb-32">
-      {/* Top bar — mobile-first */}
-      <header className="sticky top-0 z-20 border-b border-zinc-200 bg-white/95 backdrop-blur">
-        <div className="mx-auto flex max-w-screen-md items-center gap-3 px-4 py-3">
+    <div
+      className={cn(
+        embedded
+          ? "flex h-full min-h-0 flex-col"
+          : "min-h-dvh bg-zinc-100/60 pb-32",
+      )}
+    >
+      {embedded ? (
+        <header className="border-border/60 flex items-center gap-3 border-b px-4 py-3">
+          <div className="min-w-0 flex-1">
+            <h3 className="text-foreground text-2xl font-extrabold leading-none tracking-tight">
+              {tableLabel}
+            </h3>
+            <p className="text-muted-foreground mt-1 text-[11px] font-semibold uppercase tracking-wider">
+              Cuenta
+            </p>
+          </div>
           <button
             type="button"
-            onClick={() => router.push(`/${slug}/mozo`)}
-            className="inline-flex size-9 items-center justify-center rounded-full text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-900"
-            aria-label="Volver al salón"
+            onClick={onClose}
+            className="hover:bg-muted/60 flex-shrink-0 rounded-full p-1.5 text-zinc-500"
+            aria-label="Cerrar cuenta"
           >
-            <ArrowRight className="size-4 rotate-180" />
+            <X className="h-4 w-4" />
           </button>
-          <div className="min-w-0 flex-1">
-            <p className="text-[0.6rem] font-semibold uppercase tracking-[0.18em] text-zinc-500">
-              {tableLabel}
-            </p>
-            <h1 className="text-base font-semibold tracking-tight text-zinc-900">
-              Cuenta
-            </h1>
+        </header>
+      ) : (
+        <header className="sticky top-0 z-20 border-b border-zinc-200 bg-white/95 backdrop-blur">
+          <div className="mx-auto flex max-w-screen-md items-center gap-3 px-4 py-3">
+            <button
+              type="button"
+              onClick={() => router.push(backHref)}
+              className="inline-flex size-9 items-center justify-center rounded-full text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-900"
+              aria-label="Volver al salón"
+            >
+              <ArrowRight className="size-4 rotate-180" />
+            </button>
+            <div className="min-w-0 flex-1">
+              <p className="text-[0.6rem] font-semibold uppercase tracking-[0.18em] text-zinc-500">
+                {tableLabel}
+              </p>
+              <h1 className="text-base font-semibold tracking-tight text-zinc-900">
+                Cuenta
+              </h1>
+            </div>
+            <div className="text-right">
+              <p className="text-[0.6rem] font-semibold uppercase tracking-[0.14em] text-zinc-500">
+                Total
+              </p>
+              <p className="text-lg font-bold tracking-tight text-zinc-900 tabular-nums">
+                {formatCurrency(total)}
+              </p>
+            </div>
           </div>
-          <div className="text-right">
-            <p className="text-[0.6rem] font-semibold uppercase tracking-[0.14em] text-zinc-500">
-              Total
-            </p>
-            <p className="text-lg font-bold tracking-tight text-zinc-900 tabular-nums">
-              {formatCurrency(total)}
-            </p>
-          </div>
-        </div>
-      </header>
+        </header>
+      )}
 
+      <div className={cn(embedded ? "min-h-0 flex-1 overflow-y-auto" : "contents")}>
       <PageShell width="narrow" className="!py-4 sm:!py-6">
         {/* Banner: división activa */}
         {cuenta.splits.length > 0 && (
@@ -194,7 +250,7 @@ export function CuentaClient({
                 if (!r.ok) toast.error(r.error);
                 else {
                   toast.success("División eliminada");
-                  router.refresh();
+                  reloadData();
                 }
               })
             }
@@ -209,7 +265,7 @@ export function CuentaClient({
                 Detalle
               </p>
               <h2 className="text-sm font-semibold tracking-tight text-zinc-900">
-                {cuenta.items.filter((it) => it.cancelled_at === null).length}{" "}
+                {items.filter((it) => it.cancelled_at === null).length}{" "}
                 items
               </h2>
             </div>
@@ -218,7 +274,7 @@ export function CuentaClient({
             </p>
           </div>
           <ul className="divide-y divide-zinc-100 border-t border-zinc-100">
-            {cuenta.items.map((it, idx) => {
+            {items.map((it) => {
               const cancelled = it.cancelled_at !== null;
               return (
                 <li
@@ -445,10 +501,17 @@ export function CuentaClient({
           </button>
         </section>
       </PageShell>
+      </div>
 
-      {/* Sticky CTA */}
-      <div className="fixed inset-x-0 bottom-0 z-30 border-t border-zinc-200 bg-white/95 backdrop-blur">
-        <div className="mx-auto max-w-screen-md p-4">
+      {/* CTA — fija en página, al pie del panel en embebido */}
+      <div
+        className={cn(
+          embedded
+            ? "border-border/60 border-t p-3"
+            : "fixed inset-x-0 bottom-0 z-30 border-t border-zinc-200 bg-white/95 backdrop-blur",
+        )}
+      >
+        <div className={cn(!embedded && "mx-auto max-w-screen-md p-4")}>
           <button
             type="button"
             onClick={handleConfirmar}
@@ -470,13 +533,13 @@ export function CuentaClient({
       <DividirModal
         open={dividirOpen}
         onOpenChange={setDividirOpen}
-        items={cuenta.items.filter((i) => i.cancelled_at === null)}
+        items={items.filter((i) => i.cancelled_at === null)}
         orderId={cuenta.order.id}
         slug={slug}
         parentStartTransition={startTransition}
         onDone={() => {
           setDividirOpen(false);
-          router.refresh();
+          reloadData();
         }}
       />
 
@@ -491,19 +554,20 @@ export function CuentaClient({
           <CancelarItemForm
             onSubmit={(motivo) => {
               if (!cancelarItemId) return;
-              startTransition(async () => {
-                const r = await cancelarItemEnCuenta(
-                  cancelarItemId,
-                  motivo,
-                  slug,
-                );
-                if (!r.ok) toast.error(r.error);
-                else {
-                  toast.success("Item cancelado");
-                  setCancelarItemId(null);
-                  router.refresh();
-                }
-              });
+              const id = cancelarItemId;
+              // Optimista: cerramos el diálogo y tachamos el ítem al instante.
+              setCancelarItemId(null);
+              runCancelItem(
+                { id, cancelledAt: new Date().toISOString() },
+                async () => {
+                  const r = await cancelarItemEnCuenta(id, motivo, slug);
+                  if (r.ok) {
+                    toast.success("Item cancelado");
+                    reloadData();
+                  }
+                  return r;
+                },
+              );
             }}
             onCancel={() => setCancelarItemId(null)}
           />
@@ -533,49 +597,6 @@ function ResumenRow({
       >
         {value}
       </span>
-    </div>
-  );
-}
-
-function SplitsBanner({
-  splits,
-  onLimpiar,
-}: {
-  splits: CuentaState["splits"];
-  onLimpiar: () => void;
-}) {
-  const totalAsignado = splits.reduce(
-    (acc, s) => acc + s.expected_amount_cents,
-    0,
-  );
-  return (
-    <div
-      className="flex flex-wrap items-center gap-3 rounded-2xl p-4"
-      style={{ background: "var(--brand-soft, #F4F4F5)" }}
-    >
-      <div className="flex size-9 items-center justify-center rounded-full bg-white">
-        <Scissors
-          className="size-4"
-          style={{ color: "var(--brand, #18181B)" }}
-        />
-      </div>
-      <div className="min-w-0 flex-1">
-        <p className="text-sm font-semibold text-zinc-900">
-          Cuenta dividida en {splits.length}{" "}
-          {splits.length === 1 ? "sub-cuenta" : "sub-cuentas"}
-        </p>
-        <p className="text-xs text-zinc-600 tabular-nums">
-          Total asignado: {formatCurrency(totalAsignado)}
-        </p>
-      </div>
-      <button
-        type="button"
-        onClick={onLimpiar}
-        className="inline-flex items-center gap-1 rounded-full bg-white px-3 py-1.5 text-xs font-semibold text-zinc-700 ring-1 ring-zinc-200 transition hover:bg-zinc-50"
-      >
-        <Ban className="size-3" />
-        Limpiar
-      </button>
     </div>
   );
 }
@@ -612,284 +633,5 @@ function CancelarItemForm({
         </Button>
       </DialogFooter>
     </>
-  );
-}
-
-// ── Modal dividir ─────────────────────────────────────────────
-
-function DividirModal({
-  open,
-  onOpenChange,
-  items,
-  orderId,
-  slug,
-  parentStartTransition,
-  onDone,
-}: {
-  open: boolean;
-  onOpenChange: (o: boolean) => void;
-  items: CuentaState["items"];
-  orderId: string;
-  slug: string;
-  parentStartTransition: (cb: () => void | Promise<void>) => void;
-  onDone: () => void;
-}) {
-  const startTransition = parentStartTransition;
-  const [tab, setTab] = useState<"personas" | "items" | "comensal">("personas");
-  const [count, setCount] = useState(2);
-  const [mapping, setMapping] = useState<Record<string, number>>({});
-  const [numSplits, setNumSplits] = useState(2);
-
-  const hasSeatNumbers = useMemo(
-    () => items.some((it) => (it as { seat_number?: number | null }).seat_number != null),
-    [items],
-  );
-
-  useEffect(() => {
-    if (!open) {
-      setCount(2);
-      setMapping({});
-      setNumSplits(2);
-      setTab("personas");
-    }
-  }, [open]);
-
-  const allAssigned = useMemo(
-    () => items.every((it) => mapping[it.id]),
-    [items, mapping],
-  );
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90dvh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>Dividir cuenta</DialogTitle>
-        </DialogHeader>
-        <Tabs value={tab} onValueChange={(v) => setTab(v as typeof tab)}>
-          <TabsList className={cn("mb-4 grid", hasSeatNumbers ? "grid-cols-3" : "grid-cols-2")}>
-            <TabsTrigger value="personas">
-              <Users className="mr-2 size-4" /> Personas
-            </TabsTrigger>
-            <TabsTrigger value="items">
-              <Scissors className="mr-2 size-4" /> Por items
-            </TabsTrigger>
-            {hasSeatNumbers && (
-              <TabsTrigger value="comensal">
-                <Users className="mr-2 size-4" /> Comensal
-              </TabsTrigger>
-            )}
-          </TabsList>
-          <TabsContent value="personas" className="space-y-4">
-            <div>
-              <Label>¿Cuántas personas?</Label>
-              <div className="mt-2 flex items-center justify-center gap-4">
-                <button
-                  type="button"
-                  onClick={() => setCount(Math.max(2, count - 1))}
-                  className="inline-flex size-10 items-center justify-center rounded-full bg-zinc-100 text-lg font-semibold text-zinc-700 transition hover:bg-zinc-200 active:scale-95"
-                  aria-label="Restar"
-                >
-                  −
-                </button>
-                <span className="w-10 text-center text-3xl font-bold tabular-nums">
-                  {count}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setCount(Math.min(20, count + 1))}
-                  className="inline-flex size-10 items-center justify-center rounded-full bg-zinc-100 text-lg font-semibold text-zinc-700 transition hover:bg-zinc-200 active:scale-95"
-                  aria-label="Sumar"
-                >
-                  +
-                </button>
-              </div>
-              <p className="mt-2 text-center text-xs text-zinc-500">
-                El total se reparte equitativo (2 a 20 personas).
-              </p>
-            </div>
-            <button
-              type="button"
-              className="mt-1 inline-flex h-12 w-full items-center justify-center gap-2 rounded-full bg-primary text-sm font-bold text-primary-foreground transition hover:bg-primary/90 active:translate-y-px disabled:opacity-50"
-              onClick={() =>
-                startTransition(async () => {
-                  const r = await dividirPorPersonas(orderId, count, slug);
-                  if (!r.ok) toast.error(r.error);
-                  else {
-                    toast.success(`Dividido en ${count}`);
-                    onDone();
-                  }
-                })
-              }
-            >
-              Confirmar división
-            </button>
-          </TabsContent>
-          <TabsContent value="items" className="space-y-3">
-            <div>
-              <Label>¿Cuántas sub-cuentas?</Label>
-              <div className="mt-2 flex items-center justify-center gap-4">
-                <button
-                  type="button"
-                  onClick={() => {
-                    const next = Math.max(2, numSplits - 1);
-                    setNumSplits(next);
-                    setMapping((prev) => {
-                      const out: Record<string, number> = {};
-                      for (const [k, v] of Object.entries(prev)) {
-                        if (v <= next) out[k] = v;
-                      }
-                      return out;
-                    });
-                  }}
-                  className="inline-flex size-10 items-center justify-center rounded-full bg-zinc-100 text-lg font-semibold text-zinc-700 transition hover:bg-zinc-200 active:scale-95"
-                  aria-label="Restar"
-                >
-                  −
-                </button>
-                <span className="w-10 text-center text-3xl font-bold tabular-nums">
-                  {numSplits}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setNumSplits(Math.min(20, numSplits + 1))}
-                  className="inline-flex size-10 items-center justify-center rounded-full bg-zinc-100 text-lg font-semibold text-zinc-700 transition hover:bg-zinc-200 active:scale-95"
-                  aria-label="Sumar"
-                >
-                  +
-                </button>
-              </div>
-              <p className="mt-2 text-center text-xs text-zinc-500">
-                Tocá un número junto a cada item para asignarlo a esa
-                sub-cuenta.
-              </p>
-            </div>
-            <ul className="max-h-72 space-y-1.5 overflow-y-auto">
-              {items.map((it) => (
-                <li
-                  key={it.id}
-                  className="flex items-center justify-between gap-2 rounded-lg bg-zinc-50 p-2.5"
-                >
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-medium text-zinc-900">
-                      {it.quantity}× {it.product_name}
-                    </p>
-                    <p className="text-xs text-zinc-500 tabular-nums">
-                      {formatCurrency(it.subtotal_cents)}
-                    </p>
-                  </div>
-                  <div className="flex flex-wrap gap-1">
-                    {Array.from({ length: numSplits }, (_, i) => i + 1).map(
-                      (idx) => (
-                        <button
-                          key={idx}
-                          type="button"
-                          onClick={() =>
-                            setMapping({ ...mapping, [it.id]: idx })
-                          }
-                          className={cn(
-                            "size-7 rounded-full text-xs font-semibold ring-1 transition",
-                            mapping[it.id] === idx
-                              ? "bg-zinc-900 text-white ring-zinc-900"
-                              : "bg-white text-zinc-700 ring-zinc-200 hover:bg-zinc-50",
-                          )}
-                        >
-                          {idx}
-                        </button>
-                      ),
-                    )}
-                  </div>
-                </li>
-              ))}
-            </ul>
-            <button
-              type="button"
-              className="mt-1 inline-flex h-12 w-full items-center justify-center gap-2 rounded-full bg-primary text-sm font-bold text-primary-foreground transition hover:bg-primary/90 active:translate-y-px disabled:opacity-50"
-              disabled={!allAssigned}
-              onClick={() =>
-                startTransition(async () => {
-                  const grouped: Record<number, string[]> = {};
-                  for (let i = 1; i <= numSplits; i++) grouped[i] = [];
-                  for (const [itemId, idx] of Object.entries(mapping)) {
-                    grouped[idx].push(itemId);
-                  }
-                  for (const k of Object.keys(grouped)) {
-                    if (grouped[Number(k)].length === 0)
-                      delete grouped[Number(k)];
-                  }
-                  const r = await dividirPorItems(orderId, grouped, slug);
-                  if (!r.ok) toast.error(r.error);
-                  else {
-                    toast.success("División por items aplicada");
-                    onDone();
-                  }
-                })
-              }
-            >
-              {allAssigned ? "Confirmar" : "Asigná todos los items"}
-            </button>
-          </TabsContent>
-          {hasSeatNumbers && (
-            <TabsContent value="comensal" className="space-y-4">
-              <div className="rounded-xl bg-violet-50 p-3 ring-1 ring-violet-100">
-                <p className="text-sm font-semibold text-violet-900">
-                  Dividir por comensal
-                </p>
-                <p className="mt-1 text-xs text-violet-700">
-                  Se agrupan automáticamente los items por número de comensal asignado al pedir.
-                </p>
-              </div>
-              <ul className="max-h-56 space-y-1 overflow-y-auto">
-                {(() => {
-                  const seatMap = new Map<number | null, typeof items>();
-                  for (const it of items) {
-                    const key = (it as { seat_number?: number | null }).seat_number ?? null;
-                    const bucket = seatMap.get(key) ?? [];
-                    bucket.push(it);
-                    seatMap.set(key, bucket);
-                  }
-                  const entries = Array.from(seatMap.entries()).sort((a, b) => {
-                    if (a[0] === null) return 1;
-                    if (b[0] === null) return -1;
-                    return a[0] - b[0];
-                  });
-                  return entries.map(([seat, seatItems]) => (
-                    <li
-                      key={seat ?? "null"}
-                      className="rounded-lg bg-zinc-50 p-2.5"
-                    >
-                      <p className="text-sm font-semibold text-zinc-900">
-                        {seat != null ? `Comensal ${seat}` : "Sin asignar"}
-                        <span className="ml-1 text-xs font-normal text-zinc-500">
-                          · {seatItems.length} {seatItems.length === 1 ? "item" : "items"}
-                        </span>
-                      </p>
-                      <p className="text-xs text-zinc-500 tabular-nums">
-                        {formatCurrency(seatItems.reduce((a, it) => a + it.subtotal_cents, 0))}
-                      </p>
-                    </li>
-                  ));
-                })()}
-              </ul>
-              <button
-                type="button"
-                className="mt-1 inline-flex h-12 w-full items-center justify-center gap-2 rounded-full bg-primary text-sm font-bold text-primary-foreground transition hover:bg-primary/90 active:translate-y-px disabled:opacity-50"
-                onClick={() =>
-                  startTransition(async () => {
-                    const r = await dividirPorComensal(orderId, slug);
-                    if (!r.ok) toast.error(r.error);
-                    else {
-                      toast.success("Dividido por comensal");
-                      onDone();
-                    }
-                  })
-                }
-              >
-                Confirmar división por comensal
-              </button>
-            </TabsContent>
-          )}
-        </Tabs>
-      </DialogContent>
-    </Dialog>
   );
 }

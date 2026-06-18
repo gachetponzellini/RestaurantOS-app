@@ -64,6 +64,7 @@ export async function confirmarPedido(
   const result = await routeOrderToCocina(orderId, business.id);
 
   revalidatePath(`/${slug}/admin/pedidos`);
+  revalidatePath(`/${slug}/admin/operacion`);
   revalidatePath(`/${slug}/mozo`);
 
   return result;

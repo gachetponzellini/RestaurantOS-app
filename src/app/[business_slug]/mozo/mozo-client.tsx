@@ -373,12 +373,13 @@ export function MozoClient({
   const handleNotifClick = useCallback(
     async (n: Notification) => {
       if (n.read_at) return;
-      if (isMockNotificationId(n.id)) {
-        markReadLocally(n.id);
-        return;
-      }
-      await markRead(n.id, businessSlug);
-      router.refresh();
+      // Optimista: se ve leído al instante (igual que "marcar todos"). El
+      // server reconcilia con revalidatePath; si falla, el realtime/refresh
+      // vuelve a traer el estado real.
+      markReadLocally(n.id);
+      if (isMockNotificationId(n.id)) return;
+      const r = await markRead(n.id, businessSlug);
+      if (r.ok) router.refresh();
     },
     [businessSlug, router, markReadLocally],
   );

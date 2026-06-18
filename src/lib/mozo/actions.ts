@@ -114,6 +114,25 @@ async function insertAudit(
   }
 }
 
+/**
+ * Al cerrar una mesa, sus reservas `seated` quedan huérfanas si no se transicionan.
+ * Las pasamos a un estado terminal para que no reaparezcan pegadas a la mesa libre.
+ */
+async function closeSeatedReservations(
+  service: GenericClient,
+  tableId: string,
+  businessId: string,
+  to: "completed" | "no_show",
+): Promise<void> {
+  const { error } = await service
+    .from("reservations")
+    .update({ status: to })
+    .eq("table_id", tableId)
+    .eq("business_id", businessId)
+    .eq("status", "seated");
+  if (error) console.error("closeSeatedReservations", error);
+}
+
 // ── Estado operacional de la mesa (CU-07) ───────────────────────
 
 export async function updateTableOperationalStatus(
@@ -183,6 +202,23 @@ export async function updateTableOperationalStatus(
     toValue: status,
     byUserId: ctx.userId,
   });
+
+  // Al liberar: no dejar órdenes abiertas ni reservas seated huérfanas — eso
+  // produce el estado imposible "mesa Libre con orden abierta".
+  if (status === "libre" && from !== "libre") {
+    const { error: cancelErr } = await service
+      .from("orders")
+      .update({
+        lifecycle_status: "cancelled",
+        cancelled_at: new Date().toISOString(),
+        cancelled_reason: "Mesa liberada",
+      })
+      .eq("table_id", tableId)
+      .eq("business_id", business.id)
+      .eq("lifecycle_status", "open");
+    if (cancelErr) console.error("liberar: cancelar órdenes abiertas", cancelErr);
+    await closeSeatedReservations(service, tableId, business.id, "completed");
+  }
 
   revalidatePath(`/${businessSlug}/mozo`);
   revalidatePath(`/${businessSlug}/admin/operacion`);
@@ -405,6 +441,9 @@ export async function anularMesa(
     byUserId: ctx.userId,
     reason,
   });
+
+  // La reserva seated (si la hubo) pasa a no_show: la mesa se anuló sin consumo.
+  await closeSeatedReservations(service, tableId, business.id, "no_show");
 
   // Notify the assigned mozo (if any) that their table was cancelled.
   const cancelPayload = { tableLabel: table.label, reason };

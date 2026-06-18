@@ -220,6 +220,16 @@ export async function closeOrderIfFullyPaid(
       by_user_id: null,
       reason: `cobro completo order ${order.order_number}`,
     });
+
+    // La reserva seated asociada (si la hubo) pasa a completed: el cliente
+    // consumió y pagó. Si no, queda pegada a la mesa libre (orphan).
+    const { error: resErr } = await service
+      .from("reservations")
+      .update({ status: "completed" })
+      .eq("table_id", order.table_id)
+      .eq("business_id", business.id)
+      .eq("status", "seated");
+    if (resErr) console.error("cobro: completar reserva seated", resErr);
   }
 
   return { orderClosed: true };

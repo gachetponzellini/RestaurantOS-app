@@ -205,14 +205,18 @@ function TabsInner({
             onDistribuirClose={() => setDistribuirOpen(false)}
           />
         )}
-        {active === "pedidos" && (
+        {/* El board de Pedidos online se mantiene SIEMPRE montado (oculto con
+            CSS cuando no es la tab activa) para que su suscripción realtime no
+            se caiga al cambiar de tab. Antes, volver a la tab perdía los pedidos
+            entrados mientras tanto y re-hidrataba de un snapshot viejo del server. */}
+        <div className={active === "pedidos" ? "" : "hidden"}>
           <OrdersRealtimeBoard
             businessId={businessId}
             slug={slug}
             timezone={timezone}
             initialOrders={initialOrders}
           />
-        )}
+        </div>
         {active === "comandas" && (
           <ComandasKanban
             slug={slug}

@@ -48,6 +48,7 @@ import {
 } from "@/lib/comandas/actions";
 import type { ComandaConItems } from "@/lib/comandas/queries";
 import type { ComandaStatus } from "@/lib/comandas/types";
+import { useOptimisticAction } from "@/lib/ui/use-optimistic-action";
 import { formatCurrency } from "@/lib/currency";
 import type {
   CatalogCategory,
@@ -100,6 +101,16 @@ type Props = {
   topProductIds: string[];
   dailyMenus: DailyMenuForMozo[];
   role: BusinessRole;
+  /** Destino del botón "volver" y del post-envío. Default: la vista del mozo.
+   *  El admin/encargado lo setea a `/{slug}/admin/operacion` para cargar el
+   *  pedido sin salir del panel (misma idea que el cobro admin). */
+  homeHref?: string;
+  /** Modo embebido: la vista se renderiza dentro de un panel (el sidebar del
+   *  salón) en vez de pantalla completa — layout en columna flex y footer
+   *  no-fixed. `onClose` cierra el panel; `onSent` corre tras enviar. */
+  embedded?: boolean;
+  onClose?: () => void;
+  onSent?: () => void;
 };
 
 type Step = "catalogo" | "resumen";
@@ -203,6 +214,11 @@ function minutesSince(iso: string | null | undefined): number | null {
   return Math.floor((Date.now() - new Date(iso).getTime()) / 60_000);
 }
 
+/** Cambio optimista sobre las comandas ya enviadas (entregar / cancelar ítem). */
+type ComandaOptimistic =
+  | { kind: "entregar"; comandaId: string; deliveredAt: string }
+  | { kind: "cancelarItem"; orderItemId: string; reason: string; cancelledAt: string };
+
 export function MozoPedirClient({
   slug,
   businessName,
@@ -213,9 +229,44 @@ export function MozoPedirClient({
   topProductIds,
   dailyMenus,
   role,
+  homeHref,
+  embedded = false,
+  onClose,
+  onSent,
 }: Props) {
   const router = useRouter();
+  // Default: vista del mozo. El admin pasa `/{slug}/admin/operacion`.
+  const backHref = homeHref ?? `/${slug}/mozo`;
   const [pending, startTransition] = useTransition();
+
+  // Overlay optimista de las comandas enviadas (spec 21): entregar y cancelar
+  // ítem se ven al instante; el server reconcilia vía revalidatePath y el
+  // overlay se descarta al terminar la transición (rollback si falla).
+  const {
+    state: comandas,
+    run: runComanda,
+    pending: comandaPending,
+  } = useOptimisticAction(
+    existingComandas,
+    (cs: ComandaConItems[], a: ComandaOptimistic): ComandaConItems[] => {
+      if (a.kind === "entregar") {
+        return cs.map((c) =>
+          c.id === a.comandaId
+            ? { ...c, status: "entregado", delivered_at: a.deliveredAt }
+            : c,
+        );
+      }
+      const markItem = (it: ComandaConItems["items"][number]) =>
+        it.order_item_id === a.orderItemId
+          ? { ...it, cancelled_at: a.cancelledAt, cancelled_reason: a.reason }
+          : it;
+      return cs.map((c) => ({
+        ...c,
+        items: c.items.map(markItem),
+        combina_con: c.combina_con.map(markItem),
+      }));
+    },
+  );
 
   // ── Indexado de catálogo ──
   const allProducts: CatalogProduct[] = useMemo(
@@ -360,10 +411,10 @@ export function MozoPedirClient({
 
   // Si paso a step 2 sin items y sin comandas existentes, vuelvo automáticamente.
   useEffect(() => {
-    if (step === "resumen" && cart.length === 0 && existingComandas.length === 0) {
+    if (step === "resumen" && cart.length === 0 && comandas.length === 0) {
       setStep("catalogo");
     }
-  }, [step, cart.length, existingComandas.length]);
+  }, [step, cart.length, comandas.length]);
 
   // Tabs "tocadas" — las que ya tienen al menos un item en el carrito.
   const tabTouched: Record<TabId, boolean> = useMemo(() => {
@@ -483,10 +534,14 @@ export function MozoPedirClient({
         `Enviado · ${r.data.comanda_ids.length} ${r.data.comanda_ids.length === 1 ? "comanda" : "comandas"}`,
       );
       setCart([]);
-      // Volvemos a /mozo con el drawer de la mesa abierto para que el mozo
-      // vea el resumen del pedido recién enviado y siga a "Pedir cuenta" o
-      // cargar más items.
-      router.push(`/${slug}/mozo?openTable=${table.id}`);
+      // Embebido (panel del salón): cerramos el panel y refrescamos vía onSent,
+      // sin navegar. Si no, volvemos al origen: el mozo a /mozo con el drawer de
+      // la mesa abierto; el admin (ruta) a la vista de operación (homeHref).
+      if (onSent) {
+        onSent();
+      } else {
+        router.push(homeHref ?? `/${slug}/mozo?openTable=${table.id}`);
+      }
     });
   };
 
@@ -497,29 +552,40 @@ export function MozoPedirClient({
       toast.error("Indicá el motivo.");
       return;
     }
-    startTransition(async () => {
-      const r = await cancelarItem(cancelTarget.orderItemId, reason, slug);
-      if (!r.ok) {
-        toast.error(r.error);
-        return;
-      }
-      toast.success("Item cancelado");
-      setCancelTarget(null);
-      setCancelReason("");
-      router.refresh();
-    });
+    const target = cancelTarget;
+    setCancelTarget(null);
+    setCancelReason("");
+    // Optimista: el ítem se tacha al instante. revalidatePath de la action
+    // refresca el server; el overlay se descarta y revierte si falla.
+    runComanda(
+      {
+        kind: "cancelarItem",
+        orderItemId: target.orderItemId,
+        reason,
+        cancelledAt: new Date().toISOString(),
+      },
+      async () => {
+        const r = await cancelarItem(target.orderItemId, reason, slug);
+        if (r.ok) toast.success("Item cancelado");
+        return r;
+      },
+    );
   };
 
   const handleAdvance = (comandaId: string) => {
-    startTransition(async () => {
-      const r = await marcarComandaEntregada(comandaId, slug);
-      if (!r.ok) {
-        toast.error(r.error);
-        return;
-      }
-      toast.success("Comanda entregada");
-      router.refresh();
-    });
+    // Optimista: la comanda se marca entregada al instante.
+    runComanda(
+      {
+        kind: "entregar",
+        comandaId,
+        deliveredAt: new Date().toISOString(),
+      },
+      async () => {
+        const r = await marcarComandaEntregada(comandaId, slug);
+        if (r.ok) toast.success("Comanda entregada");
+        return r;
+      },
+    );
   };
 
   const userCanCancel = canCancelItem(role);
@@ -531,20 +597,45 @@ export function MozoPedirClient({
   const showTabNavInFooter =
     step === "catalogo" && !isSearching && (prevTab !== null || nextTab !== null);
 
+  // Layout: pantalla completa (mozo) vs embebido en un panel (sidebar admin).
+  // Embebido = columna flex con scroll interno y footer no-fixed.
+  const rootClass = embedded
+    ? "relative flex h-full min-h-0 flex-col overflow-hidden bg-zinc-50"
+    : `min-h-dvh bg-zinc-50 ${showTabNavInFooter ? "pb-48" : "pb-36"}`;
+  // Overlay de modales: scopeado al panel en embebido (`absolute`), full-screen
+  // en la app del mozo (`fixed`).
+  const overlayPos = embedded ? "absolute" : "fixed";
+  const mainClass = embedded
+    ? "mx-auto w-full max-w-md min-h-0 flex-1 overflow-y-auto px-3 pt-3"
+    : "mx-auto max-w-md px-3 pt-3";
+  const footerClass = embedded
+    ? "z-20 shrink-0 border-t border-zinc-200 bg-white/95 backdrop-blur"
+    : "fixed inset-x-0 bottom-0 z-20 bg-white/95 pb-[env(safe-area-inset-bottom)] backdrop-blur";
+
   // ─────────────────────────────────────────────────────────────────────────
   return (
-    <div className={`min-h-dvh bg-zinc-50 ${showTabNavInFooter ? "pb-48" : "pb-36"}`}>
+    <div className={rootClass}>
       {/* ─── Header sticky ─── */}
       <header className="sticky top-0 z-30 border-b border-zinc-200 bg-white/95 backdrop-blur-md">
         <div className="mx-auto flex max-w-md items-center gap-2 px-3 py-3">
           {step === "catalogo" ? (
-            <Link
-              href={`/${slug}/mozo`}
-              className="-ml-1 rounded-full p-2 text-zinc-700 active:bg-zinc-100"
-              aria-label="Volver al salón"
-            >
-              <ArrowLeft className="h-5 w-5" />
-            </Link>
+            embedded ? (
+              <button
+                onClick={() => onClose?.()}
+                className="-ml-1 rounded-full p-2 text-zinc-700 active:bg-zinc-100"
+                aria-label="Volver al salón"
+              >
+                <ArrowLeft className="h-5 w-5" />
+              </button>
+            ) : (
+              <Link
+                href={backHref}
+                className="-ml-1 rounded-full p-2 text-zinc-700 active:bg-zinc-100"
+                aria-label="Volver al salón"
+              >
+                <ArrowLeft className="h-5 w-5" />
+              </Link>
+            )
           ) : (
             <button
               onClick={() => setStep("catalogo")}
@@ -577,10 +668,10 @@ export function MozoPedirClient({
               <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
               {TABLE_STATUS_LABEL[table.operational_status] ?? table.operational_status}
             </span>
-            {existingComandas.length > 0 && (
+            {comandas.length > 0 && (
               <span className="inline-flex items-center gap-1 text-[11px] text-zinc-500">
-                · {existingComandas.length}{" "}
-                {existingComandas.length === 1 ? "comanda enviada" : "comandas enviadas"}
+                · {comandas.length}{" "}
+                {comandas.length === 1 ? "comanda enviada" : "comandas enviadas"}
               </span>
             )}
           </div>
@@ -664,7 +755,7 @@ export function MozoPedirClient({
       </header>
 
       {/* ─── Body por step ─── */}
-      <main className="mx-auto max-w-md px-3 pt-3">
+      <main className={mainClass}>
         {step === "catalogo" ? (
           <CatalogoStep
             search={search}
@@ -682,10 +773,10 @@ export function MozoPedirClient({
         ) : (
           <ResumenStep
             cart={cart}
-            existingComandas={existingComandas}
+            existingComandas={comandas}
             stationNameById={stationNameById}
             userCanCancel={userCanCancel}
-            pending={pending}
+            pending={pending || comandaPending}
             seatMode={seatMode}
             seatCount={seatCount}
             onToggleSeatMode={() => setSeatMode((v) => !v)}
@@ -705,8 +796,8 @@ export function MozoPedirClient({
         )}
       </main>
 
-      {/* ─── Sticky bottom: TabNav (anterior/siguiente) arriba + CTA debajo ─── */}
-      <div className="fixed inset-x-0 bottom-0 z-20 bg-white/95 pb-[env(safe-area-inset-bottom)] backdrop-blur">
+      {/* ─── Bottom: TabNav (anterior/siguiente) arriba + CTA debajo ─── */}
+      <div className={footerClass}>
         <div className="mx-auto max-w-md">
           {showTabNavInFooter && (
             <div className="border-t border-zinc-200 px-3 py-2">
@@ -722,7 +813,7 @@ export function MozoPedirClient({
               <BottomCTACatalogo
                 cartCount={cartCount}
                 cartTotal={cartTotal}
-                hasExisting={existingComandas.length > 0}
+                hasExisting={comandas.length > 0}
                 onClick={() => setStep("resumen")}
               />
             ) : (
@@ -743,11 +834,13 @@ export function MozoPedirClient({
         open={!!openProduct}
         onClose={() => setOpenProduct(null)}
         onAdd={addToCart}
+        embedded={embedded}
       />
 
       {/* ─── Modal: agregar menú del día ─── */}
       <DailyMenuModal
         menu={openDailyMenu}
+        embedded={embedded}
         onClose={() => setOpenDailyMenu(null)}
         onAdd={(menu, quantity, selectedChoices) => {
           setCart((prev) => [
@@ -776,7 +869,7 @@ export function MozoPedirClient({
             setCancelTarget(null);
             setCancelReason("");
           }}
-          className="fixed inset-0 z-50 flex items-end justify-center bg-black/40"
+          className={`${overlayPos} inset-0 z-50 flex items-end justify-center bg-black/40`}
         >
           <div
             onClick={(e) => e.stopPropagation()}
@@ -1146,6 +1239,7 @@ function DailyMenuModal({
   menu,
   onClose,
   onAdd,
+  embedded = false,
 }: {
   menu: DailyMenuForMozo | null;
   onClose: () => void;
@@ -1154,6 +1248,7 @@ function DailyMenuModal({
     quantity: number,
     selectedChoices: CartDailyMenuItem["selected_choices"],
   ) => void;
+  embedded?: boolean;
 }) {
   const [quantity, setQuantity] = useState(1);
   const [selections, setSelections] = useState<
@@ -1183,11 +1278,11 @@ function DailyMenuModal({
   return (
     <div
       onClick={onClose}
-      className="fixed inset-0 z-50 flex items-end justify-center bg-black/45 backdrop-blur-sm"
+      className={`${embedded ? "absolute" : "fixed"} inset-0 z-50 flex items-end justify-center bg-black/45 backdrop-blur-sm`}
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="flex w-full max-w-md max-h-[92dvh] flex-col rounded-t-3xl bg-white shadow-2xl"
+        className={`flex w-full max-w-md ${embedded ? "max-h-full" : "max-h-[92dvh]"} flex-col rounded-t-3xl bg-white shadow-2xl`}
       >
         <div className="flex justify-center py-2">
           <span className="h-1 w-10 rounded-full bg-zinc-200" />

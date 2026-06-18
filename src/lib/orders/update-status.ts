@@ -64,5 +64,8 @@ export async function updateOrderStatus(
 
   revalidatePath(`/${business_slug}/admin`);
   revalidatePath(`/${business_slug}/admin/pedidos/${order_id}`);
+  // La vista de Operación (tab "Pedidos online") produce `initialOrders` desde
+  // esta ruta — sin esto su snapshot server no se invalida ante un cambio de estado.
+  revalidatePath(`/${business_slug}/admin/operacion`);
   return actionOk({ order_id, status: next_status });
 }

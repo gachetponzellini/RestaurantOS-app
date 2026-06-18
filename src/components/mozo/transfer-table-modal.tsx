@@ -14,7 +14,8 @@ type Props = {
   mozos: MozoMember[];
   businessSlug: string;
   onClose: () => void;
-  onSuccess: () => void;
+  /** Recibe el `user_id` del mozo destino, para overlay optimista del llamador. */
+  onSuccess: (toMozoId: string) => void;
 };
 
 export function TransferTableModal({
@@ -51,7 +52,7 @@ export function TransferTableModal({
       return;
     }
     toast.success("Mesa transferida.");
-    onSuccess();
+    onSuccess(toMozoId);
   };
 
   return (

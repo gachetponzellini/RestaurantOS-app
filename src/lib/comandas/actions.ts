@@ -758,6 +758,10 @@ export async function advanceItemKitchenStatus(
 
   revalidatePath(`/${slug}/cocina`);
   revalidatePath(`/${slug}/mozo`);
+  // La tab Comandas del back-office (operación) también lee estos estados —
+  // sin esto, el avance por item no se propaga al kanban. Igual que el fix
+  // ya aplicado a las acciones de mesa.
+  revalidatePath(`/${slug}/admin/operacion`);
   return actionOk({ kitchen_status: next });
 }
 
@@ -838,5 +842,9 @@ export async function cancelarItem(
 
   revalidatePath(`/${slug}/cocina`);
   revalidatePath(`/${slug}/mozo`);
+  // La tab Comandas del back-office (operación) muestra los items cancelados
+  // en vivo — sin esto, el "86" no se refleja en el kanban hasta un refresh
+  // manual. Igual que el fix ya aplicado a las acciones de mesa.
+  revalidatePath(`/${slug}/admin/operacion`);
   return actionOk(undefined);
 }

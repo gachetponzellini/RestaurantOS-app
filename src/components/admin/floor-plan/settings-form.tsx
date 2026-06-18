@@ -26,6 +26,7 @@ type FormState = {
   lead_time_min: string;
   advance_days_max: string;
   max_party_size: string;
+  no_show_grace_min: string;
   schedule: WeeklySchedule;
 };
 
@@ -36,6 +37,7 @@ function fromInitial(s: ReservationSettings): FormState {
     lead_time_min: String(s.lead_time_min),
     advance_days_max: String(s.advance_days_max),
     max_party_size: String(s.max_party_size),
+    no_show_grace_min: String(s.no_show_grace_min),
     schedule: s.schedule ?? {},
   };
 }
@@ -87,6 +89,7 @@ export function ReservationSettingsForm({
         lead_time_min: state.lead_time_min,
         advance_days_max: state.advance_days_max,
         max_party_size: state.max_party_size,
+        no_show_grace_min: state.no_show_grace_min,
         schedule: state.schedule,
       });
       if (result.ok) toast.success("Configuración guardada");
@@ -150,6 +153,21 @@ export function ReservationSettingsForm({
             value={state.max_party_size}
             onChange={(e) => patch("max_party_size", e.target.value)}
           />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="no_show_grace_min">Gracia no-show (min)</Label>
+          <Input
+            id="no_show_grace_min"
+            type="number"
+            min={0}
+            max={600}
+            value={state.no_show_grace_min}
+            onChange={(e) => patch("no_show_grace_min", e.target.value)}
+          />
+          <p className="text-xs text-muted-foreground">
+            Tras este margen pasado el horario, la reserva confirmada se marca
+            como no-show automáticamente y libera la mesa.
+          </p>
         </div>
       </section>
 

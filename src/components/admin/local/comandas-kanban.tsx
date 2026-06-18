@@ -1,9 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ChefHat, Check, Package, Play, Truck, UtensilsCrossed } from "lucide-react";
-import { toast } from "sonner";
 
 import {
   advanceComandaStatus,
@@ -11,6 +10,7 @@ import {
 } from "@/lib/comandas/actions";
 import type { LocalComanda, LocalStation } from "@/lib/admin/local-query";
 import type { ComandaStatus } from "@/lib/comandas/types";
+import { useOptimisticAction } from "@/lib/ui/use-optimistic-action";
 import { mozoPalette } from "@/lib/mozo/colors";
 import type { MozoMember } from "@/lib/mozo/queries";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
@@ -143,6 +143,11 @@ function deliveryIcon(type: string) {
 
 // ─── Componente principal ───────────────────────────────────────────────────
 
+/** Cambio optimista de estado de una comanda (id + transición a aplicar). */
+type ComandaOptimistic =
+  | { kind: "empezar"; id: string }
+  | { kind: "entregar"; id: string; deliveredAt: string };
+
 export function ComandasKanban({
   slug,
   businessId,
@@ -157,44 +162,31 @@ export function ComandasKanban({
   mozos: MozoMember[];
 }) {
   const router = useRouter();
-  const [comandas, setComandas] = useState<LocalComanda[]>(initialComandas);
-  useEffect(() => setComandas(initialComandas), [initialComandas]);
 
-  // Mutaciones de estado en la card. Optimistic con rollback en error.
-  // Realtime trae el cambio igualmente, pero el optimistic evita el flash.
-  const [isPending, startTransition] = useTransition();
+  // Optimistic con rollback en error vía helper compartido (spec 21). El `base`
+  // es `initialComandas` (props del server): realtime dispara router.refresh()
+  // y el overlay optimista persiste hasta que termina SU transición, sin pisar
+  // el cambio ni hacer flash. El rollback es automático si la action falla.
+  const { state: comandas, run, pending: isPending } = useOptimisticAction(
+    initialComandas,
+    (cs: LocalComanda[], action: ComandaOptimistic): LocalComanda[] =>
+      cs.map((c) => {
+        if (c.id !== action.id) return c;
+        if (action.kind === "empezar")
+          return { ...c, status: "en_preparacion" };
+        return { ...c, status: "entregado", delivered_at: action.deliveredAt };
+      }),
+  );
 
   const onEmpezar = (id: string) => {
-    const prev = comandas;
-    setComandas((cs) =>
-      cs.map((c) => (c.id === id ? { ...c, status: "en_preparacion" } : c)),
-    );
-    startTransition(async () => {
-      const res = await advanceComandaStatus(id, slug);
-      if (!res.ok) {
-        setComandas(prev);
-        toast.error(res.error);
-      }
-    });
+    run({ kind: "empezar", id }, () => advanceComandaStatus(id, slug));
   };
 
   const onEntregar = (id: string) => {
-    const prev = comandas;
-    const nowIso = new Date().toISOString();
-    setComandas((cs) =>
-      cs.map((c) =>
-        c.id === id
-          ? { ...c, status: "entregado", delivered_at: nowIso }
-          : c,
-      ),
+    run(
+      { kind: "entregar", id, deliveredAt: new Date().toISOString() },
+      () => marcarComandaEntregada(id, slug),
     );
-    startTransition(async () => {
-      const res = await marcarComandaEntregada(id, slug);
-      if (!res.ok) {
-        setComandas(prev);
-        toast.error(res.error);
-      }
-    });
   };
 
   // ── Realtime sobre `comandas` ──
@@ -203,6 +195,19 @@ export function ComandasKanban({
     const supabase = createSupabaseBrowserClient();
     let channel: ReturnType<typeof supabase.channel> | null = null;
     let cancelled = false;
+    let pendingRefresh: ReturnType<typeof setTimeout> | null = null;
+
+    const scheduleRefresh = () => {
+      // Debounce: una orden multi-sector dispara N INSERTs en `comandas`
+      // (uno por sector) → sin esto serían N router.refresh() seguidos.
+      // 200 ms los coalesce en un solo refresh, imperceptible. Mismo patrón
+      // que use-tables-realtime.ts.
+      if (pendingRefresh) clearTimeout(pendingRefresh);
+      pendingRefresh = setTimeout(() => {
+        if (!cancelled) router.refresh();
+        pendingRefresh = null;
+      }, 200);
+    };
 
     (async () => {
       const {
@@ -226,8 +231,8 @@ export function ComandasKanban({
           () => {
             // Comandas no tiene business_id directo; el filter por business
             // viaja via JOIN en el server. router.refresh() re-fetchea con
-            // permisos correctos.
-            router.refresh();
+            // permisos correctos. Debounced para no spamear en ráfagas.
+            scheduleRefresh();
           },
         )
         .subscribe();
@@ -235,6 +240,7 @@ export function ComandasKanban({
 
     return () => {
       cancelled = true;
+      if (pendingRefresh) clearTimeout(pendingRefresh);
       if (channel) supabase.removeChannel(channel);
     };
   }, [router]);
@@ -262,6 +268,9 @@ export function ComandasKanban({
     for (const s of stations) m.set(s.id, 0);
     for (const c of comandas) {
       if (c.status === "entregado") continue;
+      // No contamos comandas fantasma (todos los items cancelados): no se
+      // muestran como card, así que no deben inflar la saturación del sector.
+      if (!c.items.some((it) => !it.cancelled_at)) continue;
       m.set(c.station_id, (m.get(c.station_id) ?? 0) + 1);
     }
     return m;
@@ -274,12 +283,20 @@ export function ComandasKanban({
       entregado: [],
     };
     for (const c of comandas) {
+      // Comandas activas (pendiente/en_preparacion) cuyos items están TODOS
+      // cancelados quedarían como cards fantasma: header + sector + botón
+      // accionable pero sin un solo item vivo. Las ocultamos. Las entregadas
+      // sí se muestran aunque no tengan items vivos (registro histórico del día).
+      if (c.status !== "entregado") {
+        const hasLiveItem = c.items.some((it) => !it.cancelled_at);
+        if (!hasLiveItem) continue;
+      }
       groups[c.status].push(c);
     }
     // Entregadas ya vienen acotadas al día operativo + tope 100 desde la
-    // query, ordenadas por delivered_at desc. Cap de display por las dudas
-    // (locales de mucho volumen) sin perder el "todo lo de hoy" práctico.
-    groups.entregado = groups.entregado.slice(0, 60);
+    // query, ordenadas por delivered_at desc. Alineamos el cap de display al
+    // mismo 100 del server para no recortar lo que sí trajo la query.
+    groups.entregado = groups.entregado.slice(0, 100);
     return groups;
   }, [comandas]);
 

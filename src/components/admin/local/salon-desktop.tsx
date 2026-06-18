@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
@@ -27,7 +27,22 @@ import { WalkInModal } from "@/components/mozo/walk-in-modal";
 import { Button } from "@/components/ui/button";
 import type { BusinessRole } from "@/lib/admin/context";
 import type { FloorPlanWithTables } from "@/lib/admin/floor-plan/queries";
+import { MozoPedirClient } from "@/app/[business_slug]/mozo/mesa/[id]/pedir/pedir-client";
+import { CobrarDesktopClient } from "@/app/[business_slug]/admin/(authed)/mesa/[id]/cobrar/cobrar-desktop-client";
+import { CuentaClient } from "@/app/[business_slug]/mozo/mesa/[id]/cuenta/cuenta-client";
+import {
+  loadCobroForTable,
+  loadCuentaForTable,
+  type CobroPanelData,
+  type CuentaPanelData,
+} from "@/lib/billing/cobro-panel-data";
+import type { ComandaConItems } from "@/lib/comandas/queries";
 import { anularMesa, assignMozoToTable } from "@/lib/mozo/actions";
+import {
+  loadPedirCatalog,
+  loadTableComandas,
+  type PedirCatalogBundle,
+} from "@/lib/mozo/pedir-panel-data";
 import { sentarReserva } from "@/lib/reservations/booking-actions";
 import { initialsFromName, mozoColor, mozoPalette } from "@/lib/mozo/colors";
 import type { MozoMember } from "@/lib/mozo/queries";
@@ -89,9 +104,15 @@ const STATUS_COLORS: Record<
 
 const STATS_ORDER: OperationalStatus[] = ["libre", "ocupada", "pidio_cuenta"];
 
-function minutesSince(iso: string | null | undefined): number | null {
-  if (!iso) return null;
-  return Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 60_000));
+function minutesSince(
+  iso: string | null | undefined,
+  now: number | null,
+): number | null {
+  // `now == null` en SSR / primer render de cliente → no mostramos tiempo,
+  // para que el HTML del server y el del cliente coincidan (sin hydration
+  // mismatch por Date.now()). El cliente lo completa al montar.
+  if (!iso || now == null) return null;
+  return Math.max(0, Math.floor((now - new Date(iso).getTime()) / 60_000));
 }
 
 /**
@@ -174,12 +195,234 @@ export function SalonDesktop({
   } | null>(null);
   const [anularReason, setAnularReason] = useState("");
   const [showNewReservation, setShowNewReservation] = useState(false);
-  // Overlay optimista de apertura de mesa: tableId → ocupada + opened_at.
-  // Da feedback inmediato al abrir (walk-in/reserva) sin esperar el refetch
-  // del server. Se reconcilia abajo cuando llega el dato real.
+  // Overlay optimista por mesa: patch parcial (estado / opened_at / mozo).
+  // Da feedback inmediato a TODAS las acciones de mesa (abrir, walk-in, sentar
+  // reserva, anular, transferir) sin esperar el refetch. Se reconcilia abajo
+  // cuando el server ya refleja el cambio (o se revierte en error).
   const [optimisticStatus, setOptimisticStatus] = useState<
-    Record<string, { operational_status: OperationalStatus; opened_at: string }>
+    Record<
+      string,
+      {
+        operational_status?: OperationalStatus;
+        opened_at?: string | null;
+        mozo_id?: string | null;
+      }
+    >
   >({});
+
+  // Reloj de cliente para "hace cuánto" (mesa abierta / reserva próxima).
+  // Arranca en null → SSR y primer render de cliente coinciden (sin hydration
+  // mismatch por Date.now()); al montar se setea y tickea cada 30s, dando
+  // además un timer vivo que ya no queda congelado entre eventos realtime.
+  const [now, setNow] = useState<number | null>(null);
+  useEffect(() => {
+    setNow(Date.now());
+    const id = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(id);
+  }, []);
+
+  // ── "Cargar pedido" embebido en el panel derecho (no navega) ──
+  // El catálogo (pesado, business-level) se PREFETCHEA al montar y se cachea;
+  // al abrir una mesa solo se piden sus comandas (chico). Así la apertura se
+  // siente instantánea en vez de esperar un fetch grande cada vez.
+  const [catalogBundle, setCatalogBundle] = useState<PedirCatalogBundle | null>(
+    null,
+  );
+  const catalogBundleRef = useRef<PedirCatalogBundle | null>(null);
+  catalogBundleRef.current = catalogBundle;
+  const [pedirTable, setPedirTable] = useState<FloorTable | null>(null);
+  const [pedirComandas, setPedirComandas] = useState<ComandaConItems[] | null>(
+    null,
+  );
+  const [pedirLoading, setPedirLoading] = useState(false);
+
+  // ── "Cobrar mesa" embebido en el panel derecho (no navega) ──
+  // Espejo de "pedir": al tocar Cobrar se carga la cuenta + iniciarCobro de la
+  // mesa (loader cliente) y el panel muestra el flujo de cobro completo. El
+  // cuerpo es el mismo `CobrarDesktopClient` de la página, en modo `embedded`.
+  const [cobroTable, setCobroTable] = useState<FloorTable | null>(null);
+  const [cobroData, setCobroData] = useState<CobroPanelData | null>(null);
+  const [cobroLoading, setCobroLoading] = useState(false);
+
+  // ── "Pedir cuenta" embebido (propina/descuento/dividir) previo al cobro ──
+  // Mismo flujo que el mozo: cuenta → "Pasar a cobro" → cobro. Embebido en el
+  // panel del salón (espejo de cobro/pedir).
+  const [cuentaTable, setCuentaTable] = useState<FloorTable | null>(null);
+  const [cuentaData, setCuentaData] = useState<CuentaPanelData | null>(null);
+  const [cuentaLoading, setCuentaLoading] = useState(false);
+
+  // Prefetch del catálogo al montar (no bloquea; si falla se reintenta al abrir).
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await loadPedirCatalog(slug);
+        if (!cancelled && r.ok) setCatalogBundle(r.data);
+      } catch {
+        // ignore — se reintenta on-demand al abrir el panel
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [slug]);
+
+  const closePedir = useCallback(() => {
+    setPedirTable(null);
+    setPedirComandas(null);
+  }, []);
+
+  const closeCobro = useCallback(() => {
+    setCobroTable(null);
+    setCobroData(null);
+  }, []);
+
+  const openCobro = useCallback(
+    (table: FloorTable) => {
+      // Cobro, cuenta y pedir son excluyentes por mesa: abrir uno cierra los otros.
+      setPedirTable(null);
+      setPedirComandas(null);
+      setCuentaTable(null);
+      setCuentaData(null);
+      setCobroTable(table);
+      setCobroData(null);
+      setCobroLoading(true);
+      (async () => {
+        try {
+          const r = await loadCobroForTable(slug, table.id);
+          if (!r.ok) {
+            toast.error(r.error);
+            setCobroTable(null);
+            return;
+          }
+          setCobroData(r.data);
+        } catch (e) {
+          toast.error(
+            e instanceof Error ? e.message : "No pudimos abrir el cobro.",
+          );
+          setCobroTable(null);
+        } finally {
+          setCobroLoading(false);
+        }
+      })();
+    },
+    [slug],
+  );
+
+  // Re-fetch de los datos del cobro sin cerrar el panel (tras dividir / limpiar
+  // / pago parcial). El panel sigue mostrando lo anterior hasta que llega lo
+  // nuevo (sin spinner de takeover).
+  const reloadCobro = useCallback(() => {
+    const table = cobroTable;
+    if (!table) return;
+    (async () => {
+      try {
+        const r = await loadCobroForTable(slug, table.id);
+        if (!r.ok) {
+          toast.error(r.error);
+          return;
+        }
+        setCobroData(r.data);
+      } catch (e) {
+        toast.error(
+          e instanceof Error ? e.message : "No pudimos recargar el cobro.",
+        );
+      }
+    })();
+  }, [slug, cobroTable]);
+
+  // ── Cuenta embebida ──
+  const closeCuenta = useCallback(() => {
+    setCuentaTable(null);
+    setCuentaData(null);
+  }, []);
+
+  const openCuenta = useCallback(
+    (table: FloorTable) => {
+      // Excluyente con cobro y pedir.
+      setPedirTable(null);
+      setPedirComandas(null);
+      setCobroTable(null);
+      setCobroData(null);
+      setCuentaTable(table);
+      setCuentaData(null);
+      setCuentaLoading(true);
+      (async () => {
+        try {
+          const r = await loadCuentaForTable(slug, table.id);
+          if (!r.ok) {
+            toast.error(r.error);
+            setCuentaTable(null);
+            return;
+          }
+          setCuentaData(r.data);
+        } catch (e) {
+          toast.error(
+            e instanceof Error ? e.message : "No pudimos abrir la cuenta.",
+          );
+          setCuentaTable(null);
+        } finally {
+          setCuentaLoading(false);
+        }
+      })();
+    },
+    [slug],
+  );
+
+  const reloadCuenta = useCallback(() => {
+    const table = cuentaTable;
+    if (!table) return;
+    (async () => {
+      try {
+        const r = await loadCuentaForTable(slug, table.id);
+        if (!r.ok) {
+          toast.error(r.error);
+          return;
+        }
+        setCuentaData(r.data);
+      } catch (e) {
+        toast.error(
+          e instanceof Error ? e.message : "No pudimos recargar la cuenta.",
+        );
+      }
+    })();
+  }, [slug, cuentaTable]);
+
+  const openPedir = useCallback(
+    (table: FloorTable) => {
+      // Cerramos cobro y cuenta si estaban abiertos (excluyentes por mesa).
+      setCobroTable(null);
+      setCobroData(null);
+      setCuentaTable(null);
+      setCuentaData(null);
+      setPedirTable(table);
+      setPedirComandas(null);
+      setPedirLoading(true);
+      (async () => {
+        try {
+          // Catálogo: cache primero; si todavía no llegó el prefetch, lo traemos.
+          let bundle = catalogBundleRef.current;
+          if (!bundle) {
+            const cr = await loadPedirCatalog(slug);
+            if (!cr.ok) throw new Error(cr.error);
+            bundle = cr.data;
+            setCatalogBundle(bundle);
+          }
+          // Comandas de la mesa puntual (rápido).
+          const tr = await loadTableComandas(slug, table.id);
+          setPedirComandas(tr.ok ? tr.data : []);
+        } catch (e) {
+          toast.error(
+            e instanceof Error ? e.message : "No pudimos abrir el pedido.",
+          );
+          setPedirTable(null);
+        } finally {
+          setPedirLoading(false);
+        }
+      })();
+    },
+    [slug],
+  );
 
   // ── Multi-salón ──
   // Selección persistida por business. Si el id guardado ya no existe (plano
@@ -223,12 +466,11 @@ export function SalonDesktop({
   const active = floorPlans.find((p) => p.plan.id === activePlanId) ?? floorPlans[0];
   const plan = active?.plan;
 
-  // Aplica el overlay optimista de apertura sobre una mesa (no muta el server).
+  // Aplica el overlay optimista (patch parcial) sobre una mesa. Solo pisa las
+  // claves presentes en el patch (no muta el server).
   const withOverlay = (t: FloorTable): FloorTable => {
     const ov = optimisticStatus[t.id];
-    return ov
-      ? { ...t, operational_status: ov.operational_status, opened_at: ov.opened_at }
-      : t;
+    return ov ? { ...t, ...ov } : t;
   };
 
   const tables = useMemo(
@@ -252,8 +494,9 @@ export function SalonDesktop({
     [floorPlans, optimisticStatus],
   );
 
-  // Reconciliación: cuando el server ya refleja la apertura (mesa != libre),
-  // soltamos el override y volvemos a la fuente de verdad.
+  // Reconciliación: soltamos el override cuando el server ya refleja TODOS los
+  // campos del patch (estado y/o mozo). Sirve para abrir (→ocupada), anular
+  // (→libre) y transferir (mozo), no solo para aperturas.
   useEffect(() => {
     setOptimisticStatus((prev) => {
       if (Object.keys(prev).length === 0) return prev;
@@ -261,7 +504,14 @@ export function SalonDesktop({
       const next = { ...prev };
       for (const fp of floorPlans) {
         for (const t of fp.tables) {
-          if (next[t.id] && (t.operational_status ?? "libre") !== "libre") {
+          const ov = next[t.id];
+          if (!ov) continue;
+          const statusMatches =
+            ov.operational_status === undefined ||
+            (t.operational_status ?? "libre") === ov.operational_status;
+          const mozoMatches =
+            ov.mozo_id === undefined || (t.mozo_id ?? null) === ov.mozo_id;
+          if (statusMatches && mozoMatches) {
             delete next[t.id];
             changed = true;
           }
@@ -286,21 +536,41 @@ export function SalonDesktop({
     return out;
   }, [allActiveTables]);
 
+  // Estado operacional por mesa (con overlay optimista ya aplicado). Sirve de
+  // guard defensivo: una orden/reserva-seated sobre una mesa libre es data
+  // inconsistente (seed viejo / liberación incompleta) y no debe renderizarse
+  // como "mesa con orden" — fue el bug "mesa Libre con orden #N".
+  const tableStatusById = useMemo(() => {
+    const m: Record<string, OperationalStatus> = {};
+    for (const t of allActiveTables) {
+      m[t.id] = (t.operational_status ?? "libre") as OperationalStatus;
+    }
+    return m;
+  }, [allActiveTables]);
+
   const reservationByTable = useMemo(() => {
     const m: Record<string, SalonReservationRef> = {};
     for (const r of reservations) {
-      if (r.table_id) m[r.table_id] = r;
+      if (!r.table_id) continue;
+      // Una reserva `seated` sobre una mesa libre quedó huérfana → no la pegamos.
+      // Las `confirmed` (próximas) sí pueden mostrarse sobre una mesa libre.
+      if (r.status === "seated" && tableStatusById[r.table_id] === "libre") continue;
+      m[r.table_id] = r;
     }
     return m;
-  }, [reservations]);
+  }, [reservations, tableStatusById]);
 
   const orderByTable = useMemo(() => {
     const m: Record<string, SalonOrderRef> = {};
     for (const o of dineInOrders) {
-      if (o.table_id) m[o.table_id] = o;
+      if (!o.table_id) continue;
+      // Solo descartamos cuando SABEMOS que la mesa está libre (no cuando falta
+      // en el mapa), para no ocultar órdenes de mesas en estados no-activos.
+      if (tableStatusById[o.table_id] === "libre") continue;
+      m[o.table_id] = o;
     }
     return m;
-  }, [dineInOrders]);
+  }, [dineInOrders, tableStatusById]);
 
   const mozoNameById = useMemo(() => {
     const m = new Map<string, string>();
@@ -328,21 +598,29 @@ export function SalonDesktop({
       toast.error("Indicá el motivo.");
       return;
     }
+    const { tableId } = anularPrompt;
+    // Optimista: la mesa se libera al instante. Cerramos el prompt y la
+    // selección; el server reconcilia (o revertimos si falla).
+    setOptimisticStatus((prev) => ({
+      ...prev,
+      [tableId]: { operational_status: "libre" },
+    }));
+    setAnularPrompt(null);
+    setAnularReason("");
+    setSelectedId(null);
     startTransition(async () => {
-      const r = await anularMesa(anularPrompt.tableId, reason, slug);
+      const r = await anularMesa(tableId, reason, slug);
       if (!r.ok) {
         toast.error(r.error);
+        setOptimisticStatus((prev) => {
+          if (!prev[tableId]) return prev;
+          const next = { ...prev };
+          delete next[tableId];
+          return next;
+        });
         return;
       }
       toast.success("Mesa anulada.");
-      setOptimisticStatus((prev) => {
-        if (!prev[anularPrompt.tableId]) return prev;
-        const next = { ...prev };
-        delete next[anularPrompt.tableId];
-        return next;
-      });
-      setAnularPrompt(null);
-      setAnularReason("");
       router.refresh();
     });
   }, [anularPrompt, anularReason, slug, router]);
@@ -489,7 +767,9 @@ export function SalonDesktop({
               delivery_type: "dine_in",
             }
           : undefined,
-        minutesOpen: t.opened_at ? (minutesSince(t.opened_at) ?? undefined) : undefined,
+        minutesOpen: t.opened_at
+          ? (minutesSince(t.opened_at, now) ?? undefined)
+          : undefined,
         mozoInitial: mozoName ? initialsFromName(mozoName) : undefined,
         mozoColor: effectiveMozoId ? mozoColor(effectiveMozoId) : undefined,
       };
@@ -502,6 +782,7 @@ export function SalonDesktop({
     mozoNameById,
     distribuirOpen,
     localAssign,
+    now,
   ]);
 
   // Mozos visibles en este salón (con su conteo de mesas asignadas). Usado
@@ -536,7 +817,19 @@ export function SalonDesktop({
       )}
 
       {/* ── Layout split: plano + sidebar ── */}
-      <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 lg:grid-cols-[1fr_360px]">
+      <div
+        className={cn(
+          "grid min-h-0 flex-1 grid-cols-1 gap-4",
+          // Ensanchamos el panel según el modo embebido, para que el contenido
+          // respire (el plano sigue visible a la izq). Cobro es el más denso
+          // (KPI + cajas + splits + form de pago) → el más ancho.
+          cobroTable || cuentaTable
+            ? "lg:grid-cols-[1fr_480px]"
+            : pedirTable
+              ? "lg:grid-cols-[1fr_440px]"
+              : "lg:grid-cols-[1fr_360px]",
+        )}
+      >
         {/* Columna del plano: viewer arriba + stats al pie */}
         <div className="flex min-h-0 flex-col gap-3">
           <div className="bg-card ring-border/60 min-h-0 flex-1 overflow-hidden rounded-2xl ring-1">
@@ -565,10 +858,10 @@ export function SalonDesktop({
           <SalonStats stats={stats} total={allActiveTables.length} />
         </div>
 
-        {/* Panel lateral — 3 modos: paint (Distribuir mozos) > selección
-            de mesa > lista por defecto. Paint gana porque mientras el
-            encargado está pintando no queremos que un tap accidental
-            abra el detalle. */}
+        {/* Panel lateral — modos por prioridad: paint (Distribuir mozos) >
+            cobro > pedir > detalle de mesa > lista. Paint gana porque mientras
+            el encargado pinta no queremos que un tap accidental abra el
+            detalle. Cobro y pedir son terminales por mesa (excluyentes). */}
         <aside className="bg-card ring-border/60 flex min-h-0 flex-col overflow-hidden rounded-2xl ring-1">
           {distribuirOpen ? (
             <AsignarMozosPanel
@@ -579,6 +872,104 @@ export function SalonDesktop({
               totalSinAsignar={totalSinAsignar}
               onDone={closeDistribuir}
             />
+          ) : cobroTable ? (
+            cobroData?.kind === "ok" ? (
+              <CobrarDesktopClient
+                slug={slug}
+                tableId={cobroTable.id}
+                tableLabel={cobroData.tableLabel}
+                role={role}
+                cuenta={cobroData.cuenta}
+                init={cobroData.init}
+                embedded
+                onClose={closeCobro}
+                onClosed={() => {
+                  closeCobro();
+                  setSelectedId(null);
+                  router.refresh();
+                }}
+                onReload={reloadCobro}
+              />
+            ) : cobroData ? (
+              <CobroPanelEmptyState
+                tableLabel={cobroData.tableLabel}
+                kind={cobroData.kind}
+                error={cobroData.kind === "no_caja" ? cobroData.error : null}
+                slug={slug}
+                tableId={cobroTable.id}
+                onClose={closeCobro}
+              />
+            ) : (
+              <div className="text-muted-foreground flex h-full items-center justify-center p-8 text-center text-sm">
+                {cobroLoading ? "Abriendo cobro…" : "…"}
+              </div>
+            )
+          ) : cuentaTable ? (
+            cuentaData?.kind === "ok" ? (
+              <CuentaClient
+                slug={slug}
+                tableId={cuentaTable.id}
+                tableLabel={cuentaData.tableLabel}
+                role={role}
+                cuenta={cuentaData.cuenta}
+                embedded
+                onClose={closeCuenta}
+                onReload={reloadCuenta}
+                onCobrar={() => openCobro(cuentaTable)}
+              />
+            ) : cuentaData ? (
+              <CobroPanelEmptyState
+                tableLabel={cuentaData.tableLabel}
+                kind="no_cuenta"
+                error={null}
+                slug={slug}
+                tableId={cuentaTable.id}
+                onClose={closeCuenta}
+              />
+            ) : (
+              <div className="text-muted-foreground flex h-full items-center justify-center p-8 text-center text-sm">
+                {cuentaLoading ? "Abriendo cuenta…" : "…"}
+              </div>
+            )
+          ) : pedirTable ? (
+            catalogBundle && pedirComandas ? (
+              <MozoPedirClient
+                slug={slug}
+                businessName={catalogBundle.businessName}
+                table={{
+                  id: pedirTable.id,
+                  label: pedirTable.label,
+                  operational_status: pedirTable.operational_status ?? "libre",
+                  opened_at: pedirTable.opened_at ?? null,
+                }}
+                catalog={catalogBundle.catalog}
+                stationNameById={catalogBundle.stationNameById}
+                existingComandas={pedirComandas}
+                topProductIds={catalogBundle.topProductIds}
+                dailyMenus={catalogBundle.dailyMenus}
+                role={role}
+                embedded
+                onClose={closePedir}
+                onSent={() => {
+                  // Optimista: al enviar la primera comanda la mesa pasa a
+                  // ocupada en el acto (la comanda en sí no es optimista).
+                  const id = pedirTable.id;
+                  setOptimisticStatus((prev) => ({
+                    ...prev,
+                    [id]: {
+                      operational_status: "ocupada",
+                      opened_at: new Date().toISOString(),
+                    },
+                  }));
+                  closePedir();
+                  router.refresh();
+                }}
+              />
+            ) : (
+              <div className="text-muted-foreground flex h-full items-center justify-center p-8 text-center text-sm">
+                {pedirLoading ? "Cargando catálogo…" : "…"}
+              </div>
+            )
           ) : selected ? (
             <TableDetail
               table={selected}
@@ -587,10 +978,13 @@ export function SalonDesktop({
               mozoName={
                 selected.mozo_id ? (mozoNameById.get(selected.mozo_id) ?? null) : null
               }
+              now={now}
               role={role}
               currentUserId={currentUserId}
               slug={slug}
               pending={pending}
+              onCargarPedido={() => openPedir(selected)}
+              onPedirCuenta={() => openCuenta(selected)}
               onClose={() => setSelectedId(null)}
               onWalkIn={() => setWalkInTableId(selected.id)}
               onSentarReserva={() => {
@@ -615,6 +1009,7 @@ export function SalonDesktop({
                 orderByTable={orderByTable}
                 reservationByTable={reservationByTable}
                 mozoNameById={mozoNameById}
+                now={now}
                 onSelect={(id) => setSelectedId(id)}
                 canDistribuir={canAssignMozo(role) && !!onDistribuirOpen}
                 onDistribuir={() => onDistribuirOpen?.()}
@@ -666,7 +1061,14 @@ export function SalonDesktop({
           mozos={mozos}
           businessSlug={slug}
           onClose={() => setTransferTableId(null)}
-          onSuccess={() => {
+          onSuccess={(toMozoId) => {
+            // Optimista: la mesa cambia de mozo al instante.
+            if (transferTableId) {
+              setOptimisticStatus((prev) => ({
+                ...prev,
+                [transferTableId]: { mozo_id: toMozoId },
+              }));
+            }
             setTransferTableId(null);
             router.refresh();
           }}
@@ -893,6 +1295,7 @@ function ActiveTablesList({
   orderByTable,
   reservationByTable,
   mozoNameById,
+  now,
   onSelect,
   canDistribuir,
   onDistribuir,
@@ -902,6 +1305,7 @@ function ActiveTablesList({
   orderByTable: Record<string, SalonOrderRef>;
   reservationByTable: Record<string, SalonReservationRef>;
   mozoNameById: Map<string, string>;
+  now: number | null;
   onSelect: (id: string) => void;
   /** Mostrar el CTA "Distribuir mozos" en el header de la lista. Solo
    *  encargado / admin lo ven (el flag es del parent). */
@@ -929,15 +1333,16 @@ function ActiveTablesList({
   }, [tables]);
 
   // Libres con reserva próxima (próximas 2h) van al tope del grupo libre.
-  const ahora = Date.now();
+  // En SSR/primer render (now == null) ordenamos solo por label, para que el
+  // orden del server y del cliente coincidan (sin hydration mismatch).
   const dosHoras = 2 * 60 * 60 * 1000;
   const libresOrdenadas = groups.libre.slice().sort((a, b) => {
     const ra = reservationByTable[a.id];
     const rb = reservationByTable[b.id];
     const aProxima =
-      ra && new Date(ra.starts_at).getTime() - ahora < dosHoras;
+      now != null && ra && new Date(ra.starts_at).getTime() - now < dosHoras;
     const bProxima =
-      rb && new Date(rb.starts_at).getTime() - ahora < dosHoras;
+      now != null && rb && new Date(rb.starts_at).getTime() - now < dosHoras;
     if (aProxima && !bProxima) return -1;
     if (!aProxima && bProxima) return 1;
     return a.label.localeCompare(b.label);
@@ -962,7 +1367,8 @@ function ActiveTablesList({
               order={orderByTable[t.id]}
               reservation={reservationByTable[t.id]}
               mozoName={t.mozo_id ? mozoNameById.get(t.mozo_id) : null}
-              minutes={minutesSince(t.opened_at)}
+              minutes={minutesSince(t.opened_at, now)}
+              now={now}
               tone={tone}
               onSelect={onSelect}
             />
@@ -1039,6 +1445,7 @@ function ActiveTableRow({
   reservation,
   mozoName,
   minutes,
+  now,
   tone,
   onSelect,
 }: {
@@ -1047,6 +1454,7 @@ function ActiveTableRow({
   reservation: SalonReservationRef | undefined;
   mozoName: string | null | undefined;
   minutes: number | null;
+  now: number | null;
   tone: OperationalStatus;
   onSelect: (id: string) => void;
 }) {
@@ -1069,12 +1477,13 @@ function ActiveTableRow({
         .reduce((a, it) => a + it.quantity, 0)
     : 0;
 
-  // Reserva próxima sobre mesa libre.
-  const ahora = Date.now();
+  // Reserva próxima sobre mesa libre. En SSR (now == null) no la marcamos,
+  // para coincidir con el primer render de cliente.
   const reservaProxima =
+    now != null &&
     tone === "libre" &&
     reservation &&
-    new Date(reservation.starts_at).getTime() - ahora < 2 * 60 * 60 * 1000;
+    new Date(reservation.starts_at).getTime() - now < 2 * 60 * 60 * 1000;
 
   return (
     <li>
@@ -1166,6 +1575,91 @@ function ActiveTableRow({
   );
 }
 
+// ─── Estados borde del cobro embebido (sin cuenta / sin caja) ───────────────
+
+function CobroPanelEmptyState({
+  tableLabel,
+  kind,
+  error,
+  slug,
+  tableId,
+  onClose,
+}: {
+  tableLabel: string;
+  kind: "no_cuenta" | "no_caja";
+  error: string | null;
+  slug: string;
+  tableId: string;
+  onClose: () => void;
+}) {
+  const isNoCuenta = kind === "no_cuenta";
+  return (
+    <div className="flex h-full min-h-0 flex-col">
+      <header className="border-border/60 flex items-center gap-3 border-b px-4 py-3">
+        <div className="min-w-0 flex-1">
+          <h3 className="text-foreground text-2xl font-extrabold leading-none tracking-tight">
+            {tableLabel}
+          </h3>
+          <p className="text-muted-foreground mt-1 text-[11px] font-semibold uppercase tracking-wider">
+            Cobrar mesa
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          className="hover:bg-muted/60 flex-shrink-0 rounded-full p-1.5 text-zinc-500"
+          aria-label="Cerrar cobro"
+        >
+          <X className="h-4 w-4" />
+        </button>
+      </header>
+      <div className="flex flex-1 flex-col items-center justify-center gap-3 p-8 text-center">
+        <div className="flex size-12 items-center justify-center rounded-full bg-zinc-100 text-zinc-500">
+          {isNoCuenta ? (
+            <ClipboardList className="size-5" />
+          ) : (
+            <Receipt className="size-5" />
+          )}
+        </div>
+        <p className="text-sm font-semibold text-zinc-900">
+          {isNoCuenta ? "No hay cuenta para cobrar" : "No se puede cobrar"}
+        </p>
+        <p className="max-w-xs text-xs text-zinc-500">
+          {isNoCuenta
+            ? "Esta mesa no tiene un pedido activo. Cargá items primero."
+            : (error ?? "No se pudo iniciar el cobro.")}
+        </p>
+        <div className="mt-1 flex flex-wrap items-center justify-center gap-2">
+          {isNoCuenta ? (
+            <Link
+              href={`/${slug}/admin/mesa/${tableId}/pedir`}
+              className="inline-flex items-center gap-1.5 rounded-full bg-zinc-900 px-4 py-2 text-xs font-semibold text-white transition hover:brightness-110"
+            >
+              <ClipboardList className="size-3.5" />
+              Cargar pedido
+            </Link>
+          ) : (
+            <Link
+              href={`/${slug}/admin/operacion?tab=caja`}
+              className="inline-flex items-center gap-1.5 rounded-full bg-zinc-900 px-4 py-2 text-xs font-semibold text-white transition hover:brightness-110"
+            >
+              <Receipt className="size-3.5" />
+              Ir a caja
+            </Link>
+          )}
+          <button
+            type="button"
+            onClick={onClose}
+            className="inline-flex items-center gap-1.5 rounded-full bg-zinc-100 px-4 py-2 text-xs font-semibold text-zinc-700 ring-1 ring-zinc-200 transition hover:bg-zinc-200"
+          >
+            Volver
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Detalle de mesa seleccionada ───────────────────────────────────────────
 
 function TableDetail({
@@ -1173,10 +1667,13 @@ function TableDetail({
   order,
   reservation,
   mozoName,
+  now,
   role,
   currentUserId,
   slug,
   pending,
+  onCargarPedido,
+  onPedirCuenta,
   onClose,
   onWalkIn,
   onSentarReserva,
@@ -1187,20 +1684,24 @@ function TableDetail({
   order: SalonOrderRef | undefined;
   reservation: SalonReservationRef | undefined;
   mozoName: string | null;
+  now: number | null;
   role: BusinessRole;
   currentUserId: string;
   slug: string;
   pending: boolean;
+  /** Abre "Cargar pedido" embebido en el panel (no navega a otra ruta). */
+  onCargarPedido: () => void;
+  /** Abre "Pedir cuenta" (propina/descuento/dividir → cobro) embebido. */
+  onPedirCuenta: () => void;
   onClose: () => void;
   onWalkIn: () => void;
   onSentarReserva: () => void;
   onTransfer: () => void;
   onAnular: () => void;
 }) {
-  const router = useRouter();
   const status = (table.operational_status ?? "libre") as OperationalStatus;
   const c = STATUS_COLORS[status];
-  const minutes = minutesSince(table.opened_at);
+  const minutes = minutesSince(table.opened_at, now);
 
   const canWalkIn = status === "libre";
   const canTransfer =
@@ -1373,6 +1874,10 @@ function TableDetail({
           // emerald-600 con shadow. button HTML, no Button shadcn.
           const primaryClass =
             "flex h-14 w-full items-center justify-center gap-2 rounded-2xl bg-emerald-600 text-base font-semibold text-white shadow-sm transition active:scale-[0.98] disabled:opacity-60";
+          // Cobrar pasa por el flujo de cuenta (propina/descuento/dividir →
+          // cobro), igual que el mozo. Un solo botón primario, naranja.
+          const primaryAmberClass =
+            "flex h-14 w-full items-center justify-center gap-2 rounded-2xl bg-amber-500 text-base font-semibold text-white shadow-sm transition active:scale-[0.98] disabled:opacity-60";
           if (canWalkIn && reservation) {
             return (
               <button
@@ -1399,33 +1904,16 @@ function TableDetail({
               </button>
             );
           }
-          if (status === "pidio_cuenta" && canShowCuenta) {
+          if (canShowCuenta && (status === "pidio_cuenta" || hasItems)) {
             return (
               <button
                 type="button"
                 disabled={pending}
-                className={primaryClass}
-                onClick={() =>
-                  router.push(`/${slug}/admin/mesa/${table.id}/cobrar`)
-                }
+                className={primaryAmberClass}
+                onClick={onPedirCuenta}
               >
                 <Receipt className="h-5 w-5" />
-                Cobrar mesa
-              </button>
-            );
-          }
-          if (hasItems && canShowCuenta) {
-            return (
-              <button
-                type="button"
-                disabled={pending}
-                className={primaryClass}
-                onClick={() =>
-                  router.push(`/${slug}/admin/mesa/${table.id}/cobrar`)
-                }
-              >
-                <Receipt className="h-5 w-5" />
-                Cobrar mesa
+                Pedir cuenta
               </button>
             );
           }
@@ -1436,7 +1924,7 @@ function TableDetail({
                 disabled={pending}
                 className={primaryClass}
                 onClick={() =>
-                  (window.location.href = `/${slug}/mozo/mesa/${table.id}/pedir`)
+                  onCargarPedido()
                 }
               >
                 <ClipboardList className="h-5 w-5" />
@@ -1454,8 +1942,6 @@ function TableDetail({
           const showWalkInSec = canWalkIn && !!reservation;
           const showVolverAPedir = status === "pidio_cuenta" && canPedir;
           const showCargarMas = status === "ocupada" && hasItems && canPedir;
-          const showPedirCuentaSec =
-            status === "ocupada" && !hasItems && canShowCuenta;
           const buttons: React.ReactNode[] = [];
           if (showWalkInSec) {
             buttons.push(
@@ -1477,7 +1963,7 @@ function TableDetail({
                 key="volver"
                 type="button"
                 onClick={() =>
-                  (window.location.href = `/${slug}/mozo/mesa/${table.id}/pedir`)
+                  onCargarPedido()
                 }
                 disabled={pending}
                 className="flex h-10 w-full items-center justify-center gap-1.5 rounded-xl bg-zinc-100 px-3 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-200 active:scale-[0.97] disabled:opacity-60"
@@ -1493,29 +1979,13 @@ function TableDetail({
                 key="cargar-mas"
                 type="button"
                 onClick={() =>
-                  (window.location.href = `/${slug}/mozo/mesa/${table.id}/pedir`)
+                  onCargarPedido()
                 }
                 disabled={pending}
                 className="flex h-10 w-full items-center justify-center gap-1.5 rounded-xl bg-emerald-50 px-3 text-sm font-semibold text-emerald-800 ring-1 ring-emerald-200 transition hover:bg-emerald-100 active:scale-[0.97] disabled:opacity-60"
               >
                 <ClipboardList className="h-3.5 w-3.5" />
                 Cargar más
-              </button>,
-            );
-          }
-          if (showPedirCuentaSec) {
-            buttons.push(
-              <button
-                key="pedir-cuenta"
-                type="button"
-                onClick={() =>
-                  (window.location.href = `/${slug}/mozo/mesa/${table.id}/cuenta`)
-                }
-                disabled={pending}
-                className="flex h-10 w-full items-center justify-center gap-1.5 rounded-xl bg-amber-50 px-3 text-sm font-semibold text-amber-800 ring-1 ring-amber-200 transition hover:bg-amber-100 active:scale-[0.97] disabled:opacity-60"
-              >
-                <Receipt className="h-3.5 w-3.5" />
-                Pedir cuenta
               </button>,
             );
           }

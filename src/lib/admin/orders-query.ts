@@ -106,6 +106,9 @@ export async function getPendingOrderCount(
     .from("orders")
     .select("id", { count: "exact", head: true })
     .eq("business_id", businessId)
+    // Excluimos dine_in: el badge cuenta pedidos online (mismo universo que
+    // el board), no mesas — así el número inicial coincide con la realtime.
+    .neq("delivery_type", "dine_in")
     .in("status", ACTIVE_STATUSES as unknown as string[])
     .gte("created_at", since);
   return count ?? 0;

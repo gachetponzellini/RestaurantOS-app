@@ -70,6 +70,7 @@ export type CuentaState = {
   order: {
     id: string;
     business_id: string;
+    order_number: number;
     table_id: string | null;
     tip_cents: number;
     discount_cents: number;

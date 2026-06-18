@@ -142,7 +142,7 @@ export function OrdersRealtimeBoard({
         created_at: data.created_at,
         customer_name: data.customer_name,
         customer_phone: data.customer_phone,
-        delivery_type: data.delivery_type as "delivery" | "pickup",
+        delivery_type: data.delivery_type as AdminOrder["delivery_type"],
         total_cents: Number(data.total_cents),
         status: data.status as OrderStatus,
         payment_method: data.payment_method,

@@ -60,11 +60,15 @@ export function ProductModal({
   open,
   onClose,
   onAdd,
+  embedded = false,
 }: {
   product: CatalogProduct | null;
   open: boolean;
   onClose: () => void;
   onAdd: (item: AddToCartItem) => void;
+  /** Embebido en un panel: el overlay se scopea al contenedor (`absolute`)
+   *  en vez de cubrir todo el viewport (`fixed`). */
+  embedded?: boolean;
 }) {
   const [selection, setSelection] = useState<Selection>({});
   const [quantity, setQuantity] = useState(1);
@@ -136,11 +140,11 @@ export function ProductModal({
   return (
     <div
       onClick={onClose}
-      className="fixed inset-0 z-50 flex items-end justify-center bg-black/45 backdrop-blur-sm"
+      className={`${embedded ? "absolute" : "fixed"} inset-0 z-50 flex items-end justify-center bg-black/45 backdrop-blur-sm`}
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-md max-h-[92dvh] overflow-y-auto rounded-t-3xl bg-white pb-[max(1.25rem,env(safe-area-inset-bottom))] shadow-2xl"
+        className={`w-full max-w-md ${embedded ? "max-h-full" : "max-h-[92dvh]"} overflow-y-auto rounded-t-3xl bg-white pb-[max(1.25rem,env(safe-area-inset-bottom))] shadow-2xl`}
       >
         {/* Handle */}
         <div className="flex justify-center py-2">

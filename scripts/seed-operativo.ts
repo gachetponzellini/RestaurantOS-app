@@ -479,10 +479,13 @@ async function main() {
       { value: "pickup" as const, weight: 10 },
     ]);
 
+    // Históricas = órdenes PASADAS (dayOffset 1-30): siempre terminales.
+    // Nunca `ready`/`open`, porque una orden dine_in abierta pegada a una mesa
+    // sin abrirla deja la mesa `libre` con orden activa (inconsistencia que se
+    // veía como "mesa Libre con orden #N"). Las mesas vivas se siembran aparte.
     const statusVal = pickWeighted([
-      { value: "delivered" as const, weight: 80 },
-      { value: "cancelled" as const, weight: 10 },
-      { value: "ready" as const, weight: 10 },
+      { value: "delivered" as const, weight: 85 },
+      { value: "cancelled" as const, weight: 15 },
     ]);
 
     const itemCount = randInt(2, 5);
@@ -505,9 +508,7 @@ async function main() {
 
     const cust = customers ? rand(customers) : null;
 
-    const lifecycleStatus = statusVal === "delivered" ? "closed"
-      : statusVal === "cancelled" ? "cancelled"
-      : "open";
+    const lifecycleStatus = statusVal === "delivered" ? "closed" : "cancelled";
 
     const orderRow: Record<string, unknown> = {
       business_id: BIZ,

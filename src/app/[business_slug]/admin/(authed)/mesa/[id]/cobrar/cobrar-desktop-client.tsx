@@ -13,6 +13,7 @@ import {
   QrCode,
   Trash2,
   Wallet,
+  X,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -62,6 +63,19 @@ type Props = {
   role: BusinessRole;
   cuenta: CuentaState;
   init: IniciarCobroResult;
+  /** Modo embebido: se renderiza dentro del panel del salón (no como página).
+   *  Sin PageShell/PageHeader; header de panel con cerrar; layout en una
+   *  columna; en vez de navegar a `/admin/operacion` usa los callbacks. */
+  embedded?: boolean;
+  /** Cerrar el panel manualmente (solo embebido). */
+  onClose?: () => void;
+  /** El cobro terminó (orden cerrada / anulada): el parent cierra y refresca. */
+  onClosed?: () => void;
+  /** Recargar los datos del cobro sin cerrar el panel (solo embebido). El
+   *  parent re-corre `loadCobroForTable`. Necesario tras dividir/limpiar o un
+   *  pago parcial, porque embebido el `init` viene de estado del cliente y
+   *  `router.refresh()` no lo actualiza. */
+  onReload?: () => void;
 };
 
 export function CobrarDesktopClient({
@@ -71,9 +85,24 @@ export function CobrarDesktopClient({
   role,
   cuenta,
   init,
+  embedded = false,
+  onClose,
+  onClosed,
+  onReload,
 }: Props) {
   void _tableId;
   const router = useRouter();
+  // Volver al salón: embebido cierra el panel via callback; página navega.
+  const goHome = () => {
+    if (embedded) onClosed?.();
+    else router.push(`/${slug}/admin/operacion`);
+  };
+  // Refrescar los datos del cobro: embebido re-fetchea via parent; página
+  // re-renderiza el server component.
+  const reloadData = () => {
+    if (embedded) onReload?.();
+    else router.refresh();
+  };
   const splits = init.hasImplicitSplit
     ? [
         implicitSplit(
@@ -101,19 +130,16 @@ export function CobrarDesktopClient({
   const progressPct = total === 0 ? 0 : Math.min(100, (totalPaid / total) * 100);
   const allPaid = totalPending === 0;
 
-  return (
-    <PageShell width="wide">
-      <PageHeader
-        eyebrow={tableLabel}
-        title="Cobrar mesa"
-        description="Registrá pagos por sub-cuenta o cobro completo. Cada confirmación queda asentada en la caja seleccionada."
-        size="compact"
-        back={{ href: `/${slug}/admin/operacion`, label: "Volver al salón" }}
-      />
-
-      <div className="grid gap-4 lg:grid-cols-[1fr_minmax(0,420px)]">
-        {/* ── Columna izquierda: KPI + caja + splits + anular ── */}
-        <div className="space-y-4">
+  const body = (
+    <div
+      className={cn(
+        embedded
+          ? "space-y-4"
+          : "grid gap-4 lg:grid-cols-[1fr_minmax(0,420px)]",
+      )}
+    >
+      {/* ── Columna izquierda: KPI + caja + splits + anular ── */}
+      <div className="space-y-4">
           {/* KPI principal */}
           <section
             className="rounded-2xl p-5"
@@ -193,7 +219,7 @@ export function CobrarDesktopClient({
             <AnularCobroSection
               orderId={cuenta.order.id}
               slug={slug}
-              onDone={() => router.push(`/${slug}/admin/operacion`)}
+              onDone={goHome}
             />
           )}
 
@@ -212,7 +238,7 @@ export function CobrarDesktopClient({
               </div>
               <button
                 type="button"
-                onClick={() => router.push(`/${slug}/admin/operacion`)}
+                onClick={goHome}
                 className="inline-flex items-center gap-1 rounded-full bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-emerald-700"
               >
                 Volver al salón
@@ -222,8 +248,8 @@ export function CobrarDesktopClient({
           )}
         </div>
 
-        {/* ── Columna derecha: form de cobro inline ── */}
-        <aside className="lg:sticky lg:top-4 lg:self-start">
+        {/* ── Columna derecha (página) / debajo (embebido): form de cobro ── */}
+        <aside className={cn(!embedded && "lg:sticky lg:top-4 lg:self-start")}>
           {activeSplit ? (
             <CobrarSplitPanel
               key={activeSplit.id}
@@ -236,11 +262,11 @@ export function CobrarDesktopClient({
               onPaid={({ orderClosed }) => {
                 if (orderClosed) {
                   toast.success("Mesa cobrada");
-                  router.push(`/${slug}/admin/operacion`);
+                  goHome();
                   return;
                 }
                 setActiveSplitId(null);
-                router.refresh();
+                reloadData();
               }}
               onClear={() => setActiveSplitId(null)}
             />
@@ -248,7 +274,47 @@ export function CobrarDesktopClient({
             <EmptyPanel allPaid={allPaid} />
           )}
         </aside>
+    </div>
+  );
+
+  // Embebido en el panel del salón: header de panel + cuerpo scrolleable.
+  if (embedded) {
+    return (
+      <div className="flex h-full min-h-0 flex-col">
+        <header className="border-border/60 flex items-center gap-3 border-b px-4 py-3">
+          <div className="min-w-0 flex-1">
+            <h3 className="text-foreground text-2xl font-extrabold leading-none tracking-tight">
+              {tableLabel}
+            </h3>
+            <p className="text-muted-foreground mt-1 text-[11px] font-semibold uppercase tracking-wider">
+              Cobrar mesa
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="hover:bg-muted/60 flex-shrink-0 rounded-full p-1.5 text-zinc-500"
+            aria-label="Cerrar cobro"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </header>
+        <div className="flex-1 overflow-y-auto p-4">{body}</div>
       </div>
+    );
+  }
+
+  // Página completa (fallback / deep-link).
+  return (
+    <PageShell width="wide">
+      <PageHeader
+        eyebrow={tableLabel}
+        title="Cobrar mesa"
+        description="Registrá pagos por sub-cuenta o cobro completo. Cada confirmación queda asentada en la caja seleccionada."
+        size="compact"
+        back={{ href: `/${slug}/admin/operacion`, label: "Volver al salón" }}
+      />
+      {body}
     </PageShell>
   );
 }
@@ -590,16 +656,17 @@ function CobrarSplitPanel({
         <p className="text-xs text-zinc-500">
           Auto-refresh cada 4 segundos. Si MP confirma, se cierra solo.
         </p>
-        <Button
-          variant="outline"
+        <button
+          type="button"
           onClick={() => {
             setMpInitPoint(null);
             setMpPaymentId(null);
             setMethod(null);
           }}
+          className="flex h-12 w-full items-center justify-center rounded-2xl text-sm font-semibold text-zinc-700 ring-1 ring-zinc-200 transition hover:bg-zinc-50"
         >
           Cancelar
-        </Button>
+        </button>
       </Surface>
     );
   }
@@ -801,8 +868,8 @@ function CobrarSplitPanel({
             </div>
           )}
 
-          <Button
-            className="w-full"
+          <button
+            type="button"
             disabled={
               amount <= 0 ||
               ((method === "other" || method === "transfer") && notes.trim() === "") ||
@@ -811,9 +878,11 @@ function CobrarSplitPanel({
                 lastFour.length !== 4)
             }
             onClick={handleConfirm}
+            className="flex h-14 w-full items-center justify-center gap-2 rounded-2xl bg-emerald-600 text-base font-semibold text-white shadow-sm transition hover:brightness-105 active:scale-[0.98] disabled:opacity-50"
           >
+            <Check className="size-5" />
             Confirmar {formatCurrency(amount)}
-          </Button>
+          </button>
         </div>
       )}
     </Surface>

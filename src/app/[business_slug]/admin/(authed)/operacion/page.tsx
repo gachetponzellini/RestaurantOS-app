@@ -9,7 +9,7 @@ import type {
 import { ensureAdminAccess } from "@/lib/admin/context";
 import { getFloorPlansForBusiness } from "@/lib/admin/floor-plan/queries";
 import { getActiveComandas, getStationsForLocal } from "@/lib/admin/local-query";
-import { getTodayOrders } from "@/lib/admin/orders-query";
+import { getTodayOrders, startOfTodayUtc } from "@/lib/admin/orders-query";
 import {
   getCajasConEstado,
   getCajaUserAssignments,
@@ -43,10 +43,11 @@ export default async function LocalEnVivoPage({
 
   const service = createSupabaseServiceClient() as unknown as SupabaseClient;
 
-  const todayStart = new Date();
-  todayStart.setHours(0, 0, 0, 0);
-  const tomorrowStart = new Date(todayStart);
-  tomorrowStart.setDate(tomorrowStart.getDate() + 1);
+  // Ventana "hoy" en la TZ del negocio (no la del server) para que las
+  // reservas no se corran en el borde de medianoche (mismo criterio que el
+  // board de pedidos via startOfTodayUtc).
+  const todayStart = startOfTodayUtc(business.timezone);
+  const tomorrowStart = new Date(todayStart.getTime() + 24 * 60 * 60 * 1000);
 
   const [
     initialOrders,
