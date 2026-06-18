@@ -221,6 +221,22 @@ async function main() {
   const { error: e11 } = await sb.from("promo_codes").delete().eq("business_id", BIZ);
   console.log(e11 ? `✗ promo_codes: ${e11.message}` : "✓ promo_codes deleted");
 
+  // 12. campañas, consumos de insumos, chatbot y rendiciones (idempotencia de re-runs)
+  const { data: campsToDel } = await sb.from("campaigns").select("id").eq("business_id", BIZ);
+  if (campsToDel?.length) {
+    await sb.from("campaign_messages").delete().in("campaign_id", campsToDel.map((c) => c.id));
+  }
+  await sb.from("campaigns").delete().eq("business_id", BIZ);
+  await sb.from("ingredient_consumptions").delete().eq("business_id", BIZ);
+  await sb.from("mozo_rendiciones").delete().eq("business_id", BIZ);
+  const { data: convsToDel } = await sb.from("chatbot_conversations").select("id").eq("business_id", BIZ);
+  if (convsToDel?.length) {
+    await sb.from("chatbot_messages").delete().in("conversation_id", convsToDel.map((c) => c.id));
+  }
+  await sb.from("chatbot_conversations").delete().eq("business_id", BIZ);
+  await sb.from("chatbot_contacts").delete().eq("business_id", BIZ);
+  console.log("✓ campañas/consumos/chatbot/rendiciones deleted");
+
   console.log("");
 
   // ══════════════════════════════════════════════════════════════════════
@@ -372,14 +388,15 @@ async function main() {
   const sofiaUser = usersByEmail.get("sofia@demo.test");
   const adminUser = usersByEmail.get("admin@demo.test");
 
-  // Caja
+  // Cajas (Principal + Bar). Principal es la default para cobros; el Bar recibe
+  // una parte de las ventas para que su período tampoco quede vacío.
   const { data: cajas } = await sb
     .from("cajas")
     .select("id, name")
     .eq("business_id", BIZ)
     .eq("is_active", true)
-    .limit(1);
-  let cajaId = cajas?.[0]?.id;
+    .order("sort_order", { ascending: true });
+  let cajaId = cajas?.find((c) => c.name === "Caja Principal")?.id ?? cajas?.[0]?.id;
   if (!cajaId) {
     const { data: newCaja } = await sb
       .from("cajas")
@@ -389,8 +406,9 @@ async function main() {
     cajaId = newCaja?.id;
     console.log("✓ Created Caja Principal");
   } else {
-    console.log(`✓ Caja: ${cajas![0].name} (${cajaId})`);
+    console.log(`✓ Caja principal: ${cajaId}`);
   }
+  const cajaBarId = cajas?.find((c) => c.name === "Caja Bar")?.id ?? null;
 
   // Reset stock_items quantities
   const { data: stockItems } = await sb
@@ -469,9 +487,17 @@ async function main() {
   const ORDER_COUNT = 60;
 
   for (let i = 0; i < ORDER_COUNT; i++) {
-    const dayOffset = randInt(1, 30);
-    const orderDate = daysAgo(dayOffset);
-    orderDate.setHours(randInt(11, 22), randInt(0, 59), 0, 0);
+    // ~35% de las ventas son de HOY y posteriores al corte de apertura (hace 8h,
+    // ver FASE 6), para que la caja del día muestre movimiento real. El resto se
+    // reparte en los últimos 30 días.
+    const isToday = Math.random() < 0.35;
+    let orderDate: Date;
+    if (isToday) {
+      orderDate = new Date(Date.now() - randInt(15, 420) * 60_000); // últimas 7h
+    } else {
+      orderDate = daysAgo(randInt(1, 30));
+      orderDate.setHours(randInt(11, 22), randInt(0, 59), 0, 0);
+    }
 
     const deliveryType = pickWeighted([
       { value: "dine_in" as const, weight: 70 },
@@ -572,10 +598,12 @@ async function main() {
       const tipCents = deliveryType === "dine_in" && Math.random() < 0.4
         ? Math.round(totalCents * (randInt(5, 15) / 100))
         : 0;
+      // ~25% de los cobros van a la Caja Bar (si existe) para que no quede vacía.
+      const payCajaId = cajaBarId && Math.random() < 0.25 ? cajaBarId : cajaId;
       await sb.from("payments").insert({
         order_id: ord!.id,
         business_id: BIZ,
-        caja_id: cajaId,
+        caja_id: payCajaId,
         method: payMethod,
         amount_cents: totalCents,
         tip_cents: tipCents,
@@ -1173,45 +1201,50 @@ async function main() {
   console.log("  FASE 6 — Caja");
   console.log("═══════════════════════════════════════════════════════════\n");
 
-  if (cajaId) {
-    const encargadoId = sofiaUser?.id ?? adminUser?.id;
+  const encargadoId = sofiaUser?.id ?? adminUser?.id;
+  // Corte de apertura para CADA caja (hace 8h): así el período actual de cada
+  // caja arranca esta mañana y los cobros de hoy (FASE 2, post-corte) entran.
+  const cajasApertura = [
+    { id: cajaId, opening: 5000000 },
+    ...(cajaBarId ? [{ id: cajaBarId, opening: 2000000 }] : []),
+  ].filter((c) => c.id);
 
-    if (encargadoId) {
-      // Create a corte (arqueo)
+  if (encargadoId && cajasApertura.length > 0) {
+    for (const c of cajasApertura) {
       const { error: corteErr } = await sb.from("caja_cortes").insert({
-        caja_id: cajaId,
+        caja_id: c.id,
         business_id: BIZ,
         encargado_id: encargadoId,
-        expected_cash_cents: 5000000,
-        closing_cash_cents: 5000000,
+        expected_cash_cents: c.opening,
+        closing_cash_cents: c.opening,
         difference_cents: 0,
         closing_notes: "Arqueo de apertura",
         created_at: hoursAgo(8),
       });
-      console.log(corteErr ? `  ✗ Corte: ${corteErr.message}` : "  ✓ Corte (arqueo de apertura)");
-
-      // Movimientos
-      const movimientos = [
-        { kind: "sangria", amount_cents: 200000, reason: "Cambio para mozo", hours: 5 },
-        { kind: "sangria", amount_cents: 150000, reason: "Propinas acumuladas", hours: 3 },
-        { kind: "ingreso", amount_cents: 50000, reason: "Venta kiosko", hours: 2 },
-      ];
-
-      for (const mov of movimientos) {
-        const { error: movErr } = await sb.from("caja_movimientos").insert({
-          caja_id: cajaId,
-          business_id: BIZ,
-          kind: mov.kind,
-          amount_cents: mov.amount_cents,
-          reason: mov.reason,
-          created_by: encargadoId,
-          created_at: hoursAgo(mov.hours),
-        });
-        console.log(movErr ? `  ✗ Mov: ${movErr.message}` : `  ✓ ${mov.kind}: $${(mov.amount_cents / 100).toLocaleString()} — ${mov.reason}`);
-      }
-    } else {
-      console.log("  ✗ No encargado user found for caja operations");
+      console.log(corteErr ? `  ✗ Corte: ${corteErr.message}` : `  ✓ Corte de apertura (caja ${c.id})`);
     }
+
+    // Movimientos sobre la caja principal (posteriores al corte)
+    const movimientos = [
+      { kind: "sangria", amount_cents: 200000, reason: "Cambio para mozo", hours: 5 },
+      { kind: "sangria", amount_cents: 150000, reason: "Propinas acumuladas", hours: 3 },
+      { kind: "ingreso", amount_cents: 50000, reason: "Venta kiosko", hours: 2 },
+    ];
+
+    for (const mov of movimientos) {
+      const { error: movErr } = await sb.from("caja_movimientos").insert({
+        caja_id: cajaId,
+        business_id: BIZ,
+        kind: mov.kind,
+        amount_cents: mov.amount_cents,
+        reason: mov.reason,
+        created_by: encargadoId,
+        created_at: hoursAgo(mov.hours),
+      });
+      console.log(movErr ? `  ✗ Mov: ${movErr.message}` : `  ✓ ${mov.kind}: $${(mov.amount_cents / 100).toLocaleString()} — ${mov.reason}`);
+    }
+  } else {
+    console.log("  ✗ No encargado user found for caja operations");
   }
 
   console.log("");
@@ -1384,6 +1417,233 @@ async function main() {
   console.log("");
 
   // ══════════════════════════════════════════════════════════════════════
+  // FASE 10 — CAMPAÑAS
+  // ══════════════════════════════════════════════════════════════════════
+  console.log("═══════════════════════════════════════════════════════════");
+  console.log("  FASE 10 — Campañas");
+  console.log("═══════════════════════════════════════════════════════════\n");
+
+  const { data: bizRow } = await sb.from("businesses").select("name").eq("id", BIZ).single();
+  const BIZ_NAME = (bizRow as { name?: string } | null)?.name ?? "el restaurante";
+
+  const campaignDefs = [
+    {
+      name: "Reactivación de inactivos",
+      description: "15% off para clientes que hace rato no vuelven.",
+      audience_type: "segment",
+      audience_segment: "inactive",
+      promo_template: { discount_type: "percentage", discount_value: 15, min_order_cents: 0, valid_for_days: 30, single_use: true, code_prefix: "VUELVE" },
+      message_template: "Hola {name}! Te extrañamos en {business} 🍽️ Usá {code} y tenés {discount}% off en tu próximo pedido.",
+      status: "sent",
+    },
+    {
+      name: "Promo fin de semana",
+      description: "Envío gratis sábado y domingo (borrador).",
+      audience_type: "all",
+      audience_segment: null,
+      promo_template: { discount_type: "free_shipping", discount_value: 0, min_order_cents: 500000, valid_for_days: 7, single_use: true, code_prefix: "FINDE" },
+      message_template: "{name}, este finde envío gratis en {business} con {code} 🛵",
+      status: "draft",
+    },
+  ];
+
+  let campaignCount = 0;
+  let campaignMsgCount = 0;
+  for (const def of campaignDefs) {
+    const isSent = def.status === "sent";
+    const audience = isSent ? pickN(customers ?? [], Math.min(8, customers?.length ?? 0)) : [];
+    const redeemed = isSent ? Math.floor(audience.length / 3) : 0;
+    const { data: camp, error: campErr } = await sb
+      .from("campaigns")
+      .insert({
+        business_id: BIZ,
+        name: def.name,
+        description: def.description,
+        audience_type: def.audience_type,
+        audience_segment: def.audience_segment,
+        promo_template: def.promo_template,
+        message_template: def.message_template,
+        channel: "manual",
+        status: def.status,
+        audience_count: audience.length,
+        sent_count: isSent ? audience.length : 0,
+        redeemed_count: redeemed,
+        launched_at: isSent ? hoursAgo(randInt(24, 240)) : null,
+      })
+      .select("id")
+      .single();
+    if (campErr || !camp) {
+      console.log(`  ✗ Campaña ${def.name}: ${campErr?.message}`);
+      continue;
+    }
+    campaignCount++;
+    if (isSent && audience.length > 0) {
+      const msgs = audience.map((cust: { id: string; name: string | null; phone: string | null }, idx: number) => {
+        const code = `${def.promo_template.code_prefix}-${1000 + idx}`;
+        const rendered = def.message_template
+          .replace("{name}", cust.name ?? "")
+          .replace("{business}", BIZ_NAME)
+          .replace("{discount}", String(def.promo_template.discount_value))
+          .replace("{code}", code);
+        return {
+          campaign_id: camp.id,
+          customer_id: cust.id,
+          customer_phone: cust.phone ?? "+5493415550000",
+          customer_name: cust.name ?? null,
+          rendered_message: rendered,
+          promo_code_text: code,
+          status: "sent",
+          sent_at: hoursAgo(randInt(1, 200)),
+          redeemed_at: idx < redeemed ? hoursAgo(randInt(1, 100)) : null,
+        };
+      });
+      const { error: msgErr } = await sb.from("campaign_messages").insert(msgs);
+      if (msgErr) console.log(`  ✗ Mensajes ${def.name}: ${msgErr.message}`);
+      else campaignMsgCount += msgs.length;
+    }
+    console.log(`  ✓ ${def.name} (${def.status})`);
+  }
+  console.log(`✓ ${campaignCount} campañas, ${campaignMsgCount} mensajes\n`);
+
+  // ══════════════════════════════════════════════════════════════════════
+  // FASE 11 — CONSUMOS DE INSUMOS (costeo + merma)
+  // ══════════════════════════════════════════════════════════════════════
+  console.log("═══════════════════════════════════════════════════════════");
+  console.log("  FASE 11 — Consumos de insumos (costeo + merma)");
+  console.log("═══════════════════════════════════════════════════════════\n");
+
+  const { data: ingsForConsumo } = await sb
+    .from("ingredients")
+    .select("id, name, unit, waste_percent")
+    .eq("business_id", BIZ)
+    .limit(30);
+  const ingList = (ingsForConsumo ?? []) as Array<{ id: string; waste_percent: number }>;
+
+  const unitCostById = new Map<string, number>(); // centavos por unidad
+  if (ingList.length > 0) {
+    const { data: presRows } = await sb
+      .from("ingredient_presentations")
+      .select("ingredient_id, net_quantity, cost_cents, is_default")
+      .in("ingredient_id", ingList.map((i) => i.id));
+    for (const p of (presRows ?? []) as Array<{ ingredient_id: string; net_quantity: number; cost_cents: number; is_default: boolean }>) {
+      const net = Number(p.net_quantity) || 1;
+      if (!unitCostById.has(p.ingredient_id) || p.is_default) {
+        unitCostById.set(p.ingredient_id, Math.round(Number(p.cost_cents) / net));
+      }
+    }
+  }
+
+  const consumoRows: Record<string, unknown>[] = [];
+  for (const ing of ingList) {
+    const unitCost = unitCostById.get(ing.id) ?? 0;
+    const entered = randInt(8, 40);
+    consumoRows.push({ business_id: BIZ, ingredient_id: ing.id, quantity: entered, cost_cents_snapshot: Math.round(unitCost * entered), kind: "compra", created_at: daysAgo(randInt(10, 28)).toISOString() });
+    const venta = Math.max(1, Math.round(entered * (randInt(60, 90) / 100)));
+    consumoRows.push({ business_id: BIZ, ingredient_id: ing.id, quantity: venta, cost_cents_snapshot: Math.round(unitCost * venta), kind: "venta", created_at: daysAgo(randInt(1, 9)).toISOString() });
+    if (Math.random() < 0.4) {
+      const merma = Math.max(1, Math.round(entered * (randInt(2, 8) / 100)));
+      consumoRows.push({ business_id: BIZ, ingredient_id: ing.id, quantity: merma, cost_cents_snapshot: Math.round(unitCost * merma), kind: "merma", created_at: daysAgo(randInt(1, 9)).toISOString() });
+    }
+  }
+  let consumosCount = 0;
+  if (consumoRows.length > 0) {
+    const { error: consErr } = await sb.from("ingredient_consumptions").insert(consumoRows);
+    if (consErr) console.log(`  ✗ consumos: ${consErr.message}`);
+    else consumosCount = consumoRows.length;
+  }
+  console.log(`✓ ${consumosCount} consumos de insumos (compra/venta/merma sobre ${ingList.length} insumos)\n`);
+
+  // ══════════════════════════════════════════════════════════════════════
+  // FASE 12 — CHATBOT (conversaciones)
+  // ══════════════════════════════════════════════════════════════════════
+  console.log("═══════════════════════════════════════════════════════════");
+  console.log("  FASE 12 — Chatbot (conversaciones)");
+  console.log("═══════════════════════════════════════════════════════════\n");
+
+  const chatbotDefs: Array<{ display: string; phone: string; closed: boolean; msgs: [string, string][] }> = [
+    {
+      display: "Lucía P.", phone: "5493415551234", closed: false,
+      msgs: [
+        ["user", "Hola! Tienen mesa para 4 esta noche?"],
+        ["assistant", "¡Hola! Sí, hay lugar a las 21:00 y 21:30 🍽️ ¿Te reservo alguna?"],
+        ["user", "21:30 va"],
+        ["assistant", "Genial, te paso el link para confirmar la reserva 👇"],
+      ],
+    },
+    {
+      display: "Martín G.", phone: "5493415555678", closed: true,
+      msgs: [
+        ["user", "Hacen delivery a Fisherton?"],
+        ["assistant", "Sí, el envío a Fisherton es $800 y el mínimo $5.000. ¿Querés ver la carta?"],
+        ["user", "Dale"],
+        ["assistant", "Acá va la carta 🛵 ¿Te ayudo a armar el pedido?"],
+        ["user", "Gracias, después veo"],
+        ["assistant", "¡Genial! Cualquier cosa avisame 😊"],
+      ],
+    },
+  ];
+
+  let chatbotConvoCount = 0;
+  for (const cb of chatbotDefs) {
+    const { data: contact } = await sb
+      .from("chatbot_contacts")
+      .insert({ business_id: BIZ, channel: "whatsapp", identifier: cb.phone, display_name: cb.display })
+      .select("id")
+      .single();
+    if (!contact) continue;
+    const startedAt = hoursAgo(randInt(2, 48));
+    const { data: convo } = await sb
+      .from("chatbot_conversations")
+      .insert({ business_id: BIZ, contact_id: contact.id, created_at: startedAt, closed_at: cb.closed ? hoursAgo(randInt(1, 2)) : null })
+      .select("id")
+      .single();
+    if (!convo) continue;
+    const base = new Date(startedAt).getTime();
+    const msgRows = cb.msgs.map(([role, content], i) => ({
+      conversation_id: convo.id,
+      role,
+      content,
+      created_at: new Date(base + i * 60_000).toISOString(),
+    }));
+    const { error: cmErr } = await sb.from("chatbot_messages").insert(msgRows);
+    if (cmErr) console.log(`  ✗ Mensajes chatbot: ${cmErr.message}`);
+    else chatbotConvoCount++;
+  }
+  console.log(`✓ ${chatbotConvoCount} conversaciones de chatbot\n`);
+
+  // ══════════════════════════════════════════════════════════════════════
+  // FASE 13 — RENDICIONES DE MOZO (historial)
+  // ══════════════════════════════════════════════════════════════════════
+  console.log("═══════════════════════════════════════════════════════════");
+  console.log("  FASE 13 — Rendiciones de mozo (historial)");
+  console.log("═══════════════════════════════════════════════════════════\n");
+
+  const rendMozos = [pedroUser, diegoUser, luciaUser].filter(Boolean);
+  const registradoPor = (sofiaUser ?? adminUser)?.id;
+  let rendicionCount = 0;
+  if (registradoPor) {
+    for (let idx = 0; idx < Math.min(2, rendMozos.length); idx++) {
+      const m = rendMozos[idx]!;
+      const efectivoCents = randInt(400, 1600) * 10000;
+      const diff = idx === 1 ? -200000 : 0;
+      const { error: rErr } = await sb.from("mozo_rendiciones").insert({
+        business_id: BIZ,
+        mozo_id: m.id,
+        registered_by: registradoPor,
+        expected_cash_cents: efectivoCents,
+        delivered_cash_cents: efectivoCents + diff,
+        difference_cents: diff,
+        notes: idx === 1 ? "Faltante chico, lo cubre mañana" : "Cierre de turno OK",
+        por_metodo: { cash: efectivoCents, card_manual: randInt(300, 900) * 10000, mp_qr: randInt(100, 500) * 10000 },
+        created_at: daysAgo(randInt(1, 6)).toISOString(),
+      });
+      if (rErr) console.log(`  ✗ Rendición: ${rErr.message}`);
+      else rendicionCount++;
+    }
+  }
+  console.log(`✓ ${rendicionCount} rendiciones de mozo\n`);
+
+  // ══════════════════════════════════════════════════════════════════════
   // SUMMARY
   // ══════════════════════════════════════════════════════════════════════
   console.log("═══════════════════════════════════════════════════════════");
@@ -1398,6 +1658,10 @@ async function main() {
   console.log(`  Clock entries:      ${clockCount}`);
   console.log(`  Stock items:        ${stockRefreshCount}`);
   console.log(`  Promo codes:        ${promoCodes.length}`);
+  console.log(`  Campañas:           ${campaignCount} (${campaignMsgCount} msgs)`);
+  console.log(`  Consumos insumos:   ${consumosCount}`);
+  console.log(`  Chatbot convos:     ${chatbotConvoCount}`);
+  console.log(`  Rendiciones mozo:   ${rendicionCount}`);
   console.log("═══════════════════════════════════════════════════════════");
   console.log("  ✓ seed-operativo complete");
   console.log("═══════════════════════════════════════════════════════════\n");
