@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 
 import { I } from "@/components/delivery/primitives";
+import { CustomerAuthForm } from "@/components/public/customer-auth-form";
 import { LoginWithGoogleButton } from "@/components/public/login-button";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { getBusiness } from "@/lib/tenant";
@@ -98,6 +99,21 @@ export default async function CustomerLoginPage({
         </div>
 
         <div>
+          <CustomerAuthForm business_slug={business_slug} next={safeNext} />
+
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 12,
+              margin: "20px 0",
+            }}
+          >
+            <div style={{ flex: 1, height: 1, background: "var(--hairline-2)" }} />
+            <span style={{ fontSize: 13, color: "var(--ink-3)" }}>o</span>
+            <div style={{ flex: 1, height: 1, background: "var(--hairline-2)" }} />
+          </div>
+
           <LoginWithGoogleButton nextPath={safeNext} />
 
           <div
