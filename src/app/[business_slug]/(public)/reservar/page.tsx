@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 
-import { VerifyAccountBanner } from "@/components/public/verify-account-banner";
+// SPEC 25 (PENDING): banner "Verificá tu cuenta" desactivado.
+// import { VerifyAccountBanner } from "@/components/public/verify-account-banner";
 import { ReservarFlow } from "@/components/reservations/reservar-flow";
 import {
   getBusinessSalones,
@@ -49,32 +50,31 @@ export default async function ReservarPage({
     getBusinessSalones(business.id, { useService: true }),
   ]);
 
-  const showVerifyBanner = !!user && user.user_metadata?.phone_verified !== true;
+  // SPEC 25 (PENDING) — gate suave desactivado:
+  // const showVerifyBanner = !!user && user.user_metadata?.phone_verified !== true;
+  // {showVerifyBanner && (
+  //   <VerifyAccountBanner
+  //     href={`/${business_slug}/verificar?next=${encodeURIComponent(
+  //       `/${business_slug}/reservar`,
+  //     )}`}
+  //   />
+  // )}
 
   return (
-    <>
-      {showVerifyBanner && (
-        <VerifyAccountBanner
-          href={`/${business_slug}/verificar?next=${encodeURIComponent(
-            `/${business_slug}/reservar`,
-          )}`}
-        />
-      )}
-      <ReservarFlow
-        slug={business_slug}
-        businessName={business.name}
-        tagline={tagline}
-        coverImageUrl={business.cover_image_url ?? business.logo_url ?? null}
-        logoUrl={business.logo_url ?? null}
-        settings={{
-          advance_days_max: reservationSettings.advance_days_max,
-          max_party_size: reservationSettings.max_party_size,
-          slot_duration_min: reservationSettings.slot_duration_min,
-          schedule: reservationSettings.schedule,
-        }}
-        salones={salones}
-        user={{ isLoggedIn: !!user, name, phone, email }}
-      />
-    </>
+    <ReservarFlow
+      slug={business_slug}
+      businessName={business.name}
+      tagline={tagline}
+      coverImageUrl={business.cover_image_url ?? business.logo_url ?? null}
+      logoUrl={business.logo_url ?? null}
+      settings={{
+        advance_days_max: reservationSettings.advance_days_max,
+        max_party_size: reservationSettings.max_party_size,
+        slot_duration_min: reservationSettings.slot_duration_min,
+        schedule: reservationSettings.schedule,
+      }}
+      salones={salones}
+      user={{ isLoggedIn: !!user, name, phone, email }}
+    />
   );
 }
