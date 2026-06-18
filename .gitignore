@@ -45,6 +45,8 @@ next-env.d.ts
 supabase/.branches
 supabase/.temp
 supabase/.env
+# volcado de data del cloud (db:clone) — tiene data/secretos de prod
+supabase/.clone
 
 # editors
 .idea
