@@ -78,3 +78,29 @@ export async function limitChatbotTurn(
   ]);
   return { success: contact.success && business.success };
 }
+
+// Verificación de teléfono por WhatsApp (spec 25): acota el envío de códigos
+// para proteger costo y abuso. Dos niveles por identidad (user_id|teléfono):
+// - cooldown corto (1 cada 60s) → el "Reenviar código" no spamea WhatsApp.
+// - techo horario (5/hora) → corta el envío repetido aunque pase el cooldown.
+// El máximo de intentos por código vive en la tabla (no acá).
+export async function limitPhoneVerificationSend(
+  identifier: string,
+): Promise<LimitResult> {
+  const cooldown = getLimiter(
+    "pedidos:phoneverify:cooldown",
+    Ratelimit.slidingWindow(1, "60 s"),
+  );
+  const hourly = getLimiter(
+    "pedidos:phoneverify:hour",
+    Ratelimit.slidingWindow(5, "1 h"),
+  );
+  // Sin Upstash configurado → degradación elegante (no limita).
+  if (!cooldown || !hourly) return { success: true };
+
+  const [a, b] = await Promise.all([
+    cooldown.limit(identifier),
+    hourly.limit(identifier),
+  ]);
+  return { success: a.success && b.success };
+}

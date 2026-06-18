@@ -68,3 +68,33 @@ describe("limitChatbotTurn", () => {
     expect((await limitChatbotTurn("b1", "5491100000000")).success).toBe(true);
   });
 });
+
+describe("limitPhoneVerificationSend", () => {
+  it("sin Upstash configurado → degradación elegante (deja pasar)", async () => {
+    const { limitPhoneVerificationSend } = await load({ upstash: false });
+    expect(await limitPhoneVerificationSend("user-1")).toEqual({
+      success: true,
+    });
+  });
+
+  it("cooldown excedido → no envía aunque el techo horario esté ok", async () => {
+    successByPrefix["pedidos:phoneverify:cooldown"] = false;
+    successByPrefix["pedidos:phoneverify:hour"] = true;
+    const { limitPhoneVerificationSend } = await load({ upstash: true });
+    expect((await limitPhoneVerificationSend("user-1")).success).toBe(false);
+  });
+
+  it("techo horario excedido → no envía aunque pase el cooldown", async () => {
+    successByPrefix["pedidos:phoneverify:cooldown"] = true;
+    successByPrefix["pedidos:phoneverify:hour"] = false;
+    const { limitPhoneVerificationSend } = await load({ upstash: true });
+    expect((await limitPhoneVerificationSend("user-1")).success).toBe(false);
+  });
+
+  it("ambos niveles ok → permite el envío", async () => {
+    successByPrefix["pedidos:phoneverify:cooldown"] = true;
+    successByPrefix["pedidos:phoneverify:hour"] = true;
+    const { limitPhoneVerificationSend } = await load({ upstash: true });
+    expect((await limitPhoneVerificationSend("user-1")).success).toBe(true);
+  });
+});

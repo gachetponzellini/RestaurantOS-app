@@ -1,6 +1,7 @@
 import { notFound, redirect } from "next/navigation";
 
 import { CheckoutForm } from "@/components/checkout/checkout-form";
+import { VerifyAccountBanner } from "@/components/public/verify-account-banner";
 import { listUserAddresses } from "@/lib/customers/addresses";
 import { getCustomerProfile } from "@/lib/customers/profile";
 import { getAssignedCoupon } from "@/lib/promos/assigned-coupon";
@@ -55,27 +56,38 @@ export default async function CheckoutPage({
     (user.user_metadata?.phone as string | undefined) ??
     "";
 
+  const showVerifyBanner = user.user_metadata?.phone_verified !== true;
+
   return (
-    <CheckoutForm
-      slug={business_slug}
-      businessName={business.name}
-      businessAddress={business.address}
-      deliveryFeeCents={Number(business.delivery_fee_cents)}
-      estimatedMinutes={business.estimated_delivery_minutes}
-      savedAddresses={savedAddresses}
-      mpEnabled={mpEnabled}
-      initialName={initialName}
-      initialEmail={initialEmail}
-      initialPhone={initialPhone}
-      initialPromo={
-        assignedCoupon
-          ? {
-              code: assignedCoupon.code,
-              discount_cents: assignedCoupon.discount_cents,
-              free_shipping: assignedCoupon.free_shipping,
-            }
-          : undefined
-      }
-    />
+    <>
+      {showVerifyBanner && (
+        <VerifyAccountBanner
+          href={`/${business_slug}/verificar?next=${encodeURIComponent(
+            `/${business_slug}/checkout`,
+          )}`}
+        />
+      )}
+      <CheckoutForm
+        slug={business_slug}
+        businessName={business.name}
+        businessAddress={business.address}
+        deliveryFeeCents={Number(business.delivery_fee_cents)}
+        estimatedMinutes={business.estimated_delivery_minutes}
+        savedAddresses={savedAddresses}
+        mpEnabled={mpEnabled}
+        initialName={initialName}
+        initialEmail={initialEmail}
+        initialPhone={initialPhone}
+        initialPromo={
+          assignedCoupon
+            ? {
+                code: assignedCoupon.code,
+                discount_cents: assignedCoupon.discount_cents,
+                free_shipping: assignedCoupon.free_shipping,
+              }
+            : undefined
+        }
+      />
+    </>
   );
 }
