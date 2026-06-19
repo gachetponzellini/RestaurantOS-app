@@ -7,7 +7,6 @@ import { BusinessHoursForm } from "@/components/admin/settings/business-hours-fo
 import { ClockOriginsForm } from "@/components/admin/settings/clock-origins-form";
 import { BusinessSettingsForm } from "@/components/admin/settings/business-settings-form";
 import { DeliveryTemplatesForm } from "@/components/admin/settings/delivery-templates-form";
-import { GenerateImagesCard } from "@/components/admin/settings/generate-images-card";
 import { NotificationPreferencesForm } from "@/components/admin/settings/notification-preferences-form";
 import { PaymentMethodsConfig } from "@/components/admin/settings/payment-methods-config";
 import { SettingsSection } from "@/components/admin/settings/settings-section";
@@ -235,9 +234,6 @@ export default async function ConfiguracionPage({
         </SettingsSection>
       </div>
 
-      <div className="mt-8">
-        <GenerateImagesCard slug={business_slug} />
-      </div>
     </PageShell>
   );
 }
