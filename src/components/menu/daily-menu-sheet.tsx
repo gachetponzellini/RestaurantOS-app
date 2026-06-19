@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { I, ImageTile } from "@/components/delivery/primitives";
 import { formatCurrency } from "@/lib/currency";
@@ -31,6 +31,17 @@ export function DailyMenuSheet({
   const [selections, setSelections] = useState<
     Map<string, CartSelectedChoice>
   >(new Map());
+
+  // Bloquear el scroll del fondo mientras el sheet está abierto (evita el
+  // scroll chaining a la carta de atrás). Mismo patrón que ProductSheet.
+  useEffect(() => {
+    if (!open) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, [open]);
 
   if (!open || !menu) return null;
 
@@ -122,7 +133,14 @@ export function DailyMenuSheet({
           />
         </div>
 
-        <div style={{ flex: 1, overflowY: "auto", position: "relative" }}>
+        <div
+          style={{
+            flex: 1,
+            overflowY: "auto",
+            overscrollBehavior: "contain",
+            position: "relative",
+          }}
+        >
           <div style={{ position: "relative" }}>
             {menu.image_url && (
               <ImageTile

@@ -55,6 +55,18 @@ export function ProductSheet({
     }
   }, [product?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Bloquear el scroll del fondo mientras el sheet está abierto: sin esto, al
+  // llegar al tope/fondo del scroll interno el gesto se propaga a la carta de
+  // atrás (scroll chaining) y "se bugea". Restaura el valor previo al cerrar.
+  useEffect(() => {
+    if (!open) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, [open]);
+
   const lineTotal = useMemo(() => {
     if (!product) return 0;
     const modsTotal = product.modifier_groups.reduce((acc, g) => {
@@ -140,7 +152,14 @@ export function ProductSheet({
           />
         </div>
 
-        <div style={{ flex: 1, overflowY: "auto", position: "relative" }}>
+        <div
+          style={{
+            flex: 1,
+            overflowY: "auto",
+            overscrollBehavior: "contain",
+            position: "relative",
+          }}
+        >
           <div style={{ position: "relative" }}>
             {product.image_url && (
               <ImageTile
