@@ -1,9 +1,13 @@
 "use server";
 
 import { redirect } from "next/navigation";
-import { z } from "zod";
 
 import { actionError, type ActionResult } from "@/lib/actions";
+import {
+  safeNextPath,
+  SignInCustomerInput,
+  SignUpCustomerInput,
+} from "@/lib/auth/customer-auth-shared";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 // ─────────────────────────────────────────────────────────────────────
@@ -14,32 +18,6 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 // import { requestPhoneCode, verifyPhoneCode } from "@/lib/auth/phone-verification";
 // import { getBusiness } from "@/lib/tenant";
 // ─────────────────────────────────────────────────────────────────────
-
-export function safeNextPath(next: string | undefined, slug: string): string {
-  if (next && next.startsWith("/") && !next.startsWith("//")) return next;
-  return `/${slug}/menu`;
-}
-
-export const SignInCustomerInput = z.object({
-  business_slug: z.string().min(1),
-  email: z.string().email("Ingresá un email válido."),
-  password: z.string().min(1, "Ingresá tu contraseña."),
-  next: z.string().optional(),
-});
-
-export const SignUpCustomerInput = z.object({
-  business_slug: z.string().min(1),
-  email: z.string().email("Ingresá un email válido."),
-  password: z
-    .string()
-    .min(8, "La contraseña debe tener al menos 8 caracteres."),
-  phone: z
-    .string()
-    .min(1, "Ingresá un teléfono válido.")
-    .transform((v) => v.replace(/\D/g, ""))
-    .refine((v) => v.length >= 8, "Ingresá un teléfono válido."),
-  next: z.string().optional(),
-});
 
 export async function signInCustomer(
   input: unknown,

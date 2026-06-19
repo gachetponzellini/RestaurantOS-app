@@ -4,7 +4,7 @@ import {
   safeNextPath,
   SignInCustomerInput,
   SignUpCustomerInput,
-} from "./customer-auth";
+} from "./customer-auth-shared";
 
 describe("safeNextPath", () => {
   it("devuelve next cuando es same-origin", () => {
