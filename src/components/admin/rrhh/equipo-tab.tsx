@@ -2,11 +2,14 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { Clock, Eye, EyeOff, Search, UserPlus, Users } from "lucide-react";
+import { Clock, Eye, EyeOff, UserPlus, Users } from "lucide-react";
 
 import { InviteUserForm } from "@/components/admin/users/invite-user-form";
 import { UserRow } from "@/components/admin/users/user-row";
 import { Surface } from "@/components/admin/shell/page-shell";
+import { RoleFilter } from "@/components/admin/rrhh/role-filter";
+import { SearchInput } from "@/components/admin/rrhh/search-input";
+import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
@@ -14,13 +17,9 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { RoleBadge } from "@/components/shared/role-badge";
 import type { BusinessMember } from "@/lib/admin/members-query";
 import type { MonthlySummaryRow } from "@/lib/rrhh/clock-queries";
-import { formatHours, formatHoursDecimal, relativeDate } from "@/lib/rrhh/format-utils";
-import { cn } from "@/lib/utils";
-
-const ALL_ROLES = ["admin", "encargado", "mozo", "personal"] as const;
+import { formatHours, formatHoursDecimal } from "@/lib/rrhh/format-utils";
 
 export function EquipoTab({
   slug,
@@ -83,13 +82,10 @@ export function EquipoTab({
           <Dialog>
             <DialogTrigger
               render={
-                <button
-                  type="button"
-                  className="inline-flex h-9 items-center gap-2 rounded-xl bg-zinc-900 px-4 text-sm font-semibold text-white transition hover:bg-zinc-800"
-                >
+                <Button size="lg">
                   <UserPlus className="size-3.5" />
                   Nuevo empleado
-                </button>
+                </Button>
               }
             />
             <DialogContent className="max-w-lg">
@@ -99,13 +95,19 @@ export function EquipoTab({
               <InviteUserForm slug={slug} businessName={businessName} />
             </DialogContent>
           </Dialog>
-          <Link
-            href={
-              includeDisabled
-                ? `/${slug}/admin/rrhh?tab=equipo`
-                : `/${slug}/admin/rrhh?tab=equipo&disabled=1`
+          <Button
+            variant="outline"
+            size="lg"
+            nativeButton={false}
+            render={
+              <Link
+                href={
+                  includeDisabled
+                    ? `/${slug}/admin/rrhh?tab=equipo`
+                    : `/${slug}/admin/rrhh?tab=equipo&disabled=1`
+                }
+              />
             }
-            className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-white px-3 text-sm font-medium text-zinc-600 ring-1 ring-zinc-200/70 transition hover:bg-zinc-50"
           >
             {includeDisabled ? (
               <>
@@ -118,39 +120,19 @@ export function EquipoTab({
                 Deshabilitados
               </>
             )}
-          </Link>
+          </Button>
         </div>
       </div>
 
       {/* Filters + search */}
       <div className="flex flex-wrap items-center gap-3">
-        <div className="flex flex-wrap gap-1.5">
-          <FilterChip
-            active={roleFilter === null}
-            onClick={() => setRoleFilter(null)}
-          >
-            Todos
-          </FilterChip>
-          {ALL_ROLES.map((r) => (
-            <FilterChip
-              key={r}
-              active={roleFilter === r}
-              onClick={() => setRoleFilter(roleFilter === r ? null : r)}
-            >
-              <RoleBadge role={r} size="xs" />
-            </FilterChip>
-          ))}
-        </div>
-        <div className="relative ml-auto">
-          <Search className="pointer-events-none absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-zinc-400" />
-          <input
-            type="text"
-            placeholder="Buscar..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="h-8 w-48 rounded-lg border-0 bg-zinc-100 pl-8 pr-3 text-xs text-zinc-900 outline-none ring-1 ring-zinc-200/60 placeholder:text-zinc-400 focus:ring-zinc-300"
-          />
-        </div>
+        <RoleFilter value={roleFilter} onChange={setRoleFilter} />
+        <SearchInput
+          value={search}
+          onChange={setSearch}
+          aria-label="Buscar empleado"
+          className="ml-auto w-full max-w-[12rem]"
+        />
       </div>
 
       {/* Employee list */}
@@ -210,62 +192,37 @@ function EmployeeCard({
   return (
     <div className="space-y-2">
       <UserRow
-          slug={slug}
-          member={member}
-          canManage={canManage}
-          isCurrentUser={isCurrentUser}
-          lastClockIn={clockData?.lastClockIn ?? null}
-        />
-        {/* Monthly stats bar */}
-        {clockData && (
-          <div className="ml-13 flex flex-wrap gap-x-5 gap-y-1 pl-[52px] text-xs text-zinc-500">
-            <span className="inline-flex items-center gap-1">
-              <Clock className="size-3 text-zinc-400" />
-              <span className="font-semibold tabular-nums text-zinc-700">
-                {formatHoursDecimal(clockData.totalMinutes)}
-              </span>{" "}
-              este mes
+        slug={slug}
+        member={member}
+        canManage={canManage}
+        isCurrentUser={isCurrentUser}
+        lastClockIn={clockData?.lastClockIn ?? null}
+      />
+      {/* Monthly stats bar */}
+      {clockData && (
+        <div className="flex flex-wrap gap-x-5 gap-y-1 pl-[52px] text-xs text-zinc-500">
+          <span className="inline-flex items-center gap-1">
+            <Clock className="size-3 text-zinc-400" />
+            <span className="font-semibold tabular-nums text-zinc-700">
+              {formatHoursDecimal(clockData.totalMinutes)}
+            </span>{" "}
+            este mes
+          </span>
+          <span>
+            <span className="font-semibold tabular-nums text-zinc-700">
+              {clockData.daysWorked}
+            </span>{" "}
+            días
+          </span>
+          <span>
+            Prom{" "}
+            <span className="font-semibold tabular-nums text-zinc-700">
+              {formatHours(clockData.avgMinutesPerDay)}
             </span>
-            <span>
-              <span className="font-semibold tabular-nums text-zinc-700">
-                {clockData.daysWorked}
-              </span>{" "}
-              días
-            </span>
-            <span>
-              Prom{" "}
-              <span className="font-semibold tabular-nums text-zinc-700">
-                {formatHours(clockData.avgMinutesPerDay)}
-              </span>
-              /día
-            </span>
-          </div>
-        )}
-    </div>
-  );
-}
-
-function FilterChip({
-  active,
-  onClick,
-  children,
-}: {
-  active: boolean;
-  onClick: () => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={cn(
-        "inline-flex items-center rounded-full px-3 py-1.5 text-xs font-semibold transition",
-        active
-          ? "bg-zinc-900 text-white"
-          : "bg-white text-zinc-600 ring-1 ring-zinc-200/70 hover:bg-zinc-50",
+            /día
+          </span>
+        </div>
       )}
-    >
-      {children}
-    </button>
+    </div>
   );
 }

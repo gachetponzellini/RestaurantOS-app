@@ -19,6 +19,7 @@ import {
 import { toast } from "sonner";
 
 import { Surface } from "@/components/admin/shell/page-shell";
+import { SegmentedSelector } from "@/components/admin/local/segmented-selector";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -177,11 +178,15 @@ export function CajaAdminBoard({ slug, cajas }: Props) {
     <div className="space-y-5">
       <div className="flex items-center justify-between gap-3">
         {cajas.length > 1 ? (
-          <CajaSelector
-            cajas={cajas}
-            statsByCaja={statsByCaja}
+          <SegmentedSelector
+            ariaLabel="Seleccionar caja"
             activeId={activeCajaId}
             onSelect={selectCaja}
+            items={cajas.map((c) => ({
+              id: c.id,
+              label: c.name,
+              count: statsByCaja[c.id]?.cobros_count || undefined,
+            }))}
           />
         ) : (
           <p className="text-[0.6rem] font-semibold uppercase tracking-[0.14em] text-zinc-500">
@@ -218,59 +223,6 @@ export function CajaAdminBoard({ slug, cajas }: Props) {
           <Settings className="size-3" />
           Configurar cajas
         </Link>
-      </div>
-    </div>
-  );
-}
-
-// ── Selector de caja (pills horizontales) ─────────────────────────
-
-function CajaSelector({
-  cajas,
-  statsByCaja,
-  activeId,
-  onSelect,
-}: {
-  cajas: CajaConEstado[];
-  statsByCaja: Record<string, CajaLiveStats | null>;
-  activeId: string;
-  onSelect: (id: string) => void;
-}) {
-  return (
-    <div className="-mx-1 overflow-x-auto px-1">
-      <div className="flex gap-1.5">
-        {cajas.map((c) => {
-          const cobros = statsByCaja[c.id]?.cobros_count ?? 0;
-          const isActive = c.id === activeId;
-          return (
-            <button
-              key={c.id}
-              type="button"
-              onClick={() => onSelect(c.id)}
-              aria-pressed={isActive}
-              className={cn(
-                "shrink-0 rounded-full px-3.5 py-1.5 text-sm font-semibold transition active:scale-[0.96]",
-                isActive
-                  ? "bg-zinc-900 text-white shadow-sm"
-                  : "bg-white text-zinc-700 ring-1 ring-zinc-200",
-              )}
-            >
-              {c.name}
-              {cobros > 0 && (
-                <span
-                  className={cn(
-                    "ml-1.5 rounded-full px-1.5 py-0.5 text-[10px] font-bold tabular-nums",
-                    isActive
-                      ? "bg-white/15 text-white"
-                      : "bg-zinc-100 text-zinc-600",
-                  )}
-                >
-                  {cobros}
-                </span>
-              )}
-            </button>
-          );
-        })}
       </div>
     </div>
   );
@@ -332,128 +284,124 @@ function CajaCard({
   ].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 
   return (
-    <article className="flex flex-col rounded-2xl bg-white ring-1 ring-zinc-200/70">
-      <header className="flex items-start justify-between gap-3 border-b border-zinc-100 p-5">
+    <div className="space-y-4">
+      <header className="flex flex-wrap items-center justify-between gap-3">
         <div className="min-w-0">
-          <h3 className="text-lg font-semibold tracking-tight text-zinc-900">
-            {caja.name}
-          </h3>
+          <div className="flex items-center gap-2.5">
+            <h3 className="text-lg font-semibold tracking-tight text-zinc-900">
+              {caja.name}
+            </h3>
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2 py-0.5 text-[0.65rem] font-semibold text-emerald-800">
+              <span className="inline-block size-1.5 rounded-full bg-emerald-500" />
+              Activa
+            </span>
+          </div>
           <p className="mt-0.5 text-xs text-zinc-500">
             Período activo {periodoLabel}
             {caja.ultimo_corte && " · último corte registrado"}
           </p>
         </div>
-        <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2 py-0.5 text-[0.65rem] font-semibold text-emerald-800">
-          <span className="inline-block size-1.5 rounded-full bg-emerald-500" />
-          Activa
-        </span>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setSangriaOpen(true)}
+            className="inline-flex items-center gap-1.5 rounded-full bg-zinc-100 px-3 py-2 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-200"
+          >
+            <ArrowDownToLine className="size-3.5" /> Sangría
+          </button>
+          <button
+            type="button"
+            onClick={() => setIngresoOpen(true)}
+            className="inline-flex items-center gap-1.5 rounded-full bg-zinc-100 px-3 py-2 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-200"
+          >
+            <ArrowUpFromLine className="size-3.5" /> Ingreso
+          </button>
+          <button
+            type="button"
+            onClick={() => setCorteOpen(true)}
+            className="inline-flex items-center gap-1.5 rounded-full px-4 py-2 text-xs font-semibold transition hover:brightness-95"
+            style={{
+              background: "var(--brand, #18181B)",
+              color: "var(--brand-foreground, white)",
+            }}
+          >
+            <Lock className="size-3.5" /> Hacer corte
+          </button>
+        </div>
       </header>
 
-      <div
-        className="border-b border-zinc-100 p-5"
-        style={{ background: "var(--brand-soft, #F4F4F5)" }}
-      >
-        <p className="text-[0.65rem] font-semibold uppercase tracking-[0.14em] text-zinc-600">
-          En la caja deberías tener
-        </p>
-        <p className="mt-1 text-3xl font-bold tracking-tight text-zinc-900 tabular-nums">
-          {formatCurrency(expected)}
-        </p>
-        <p className="mt-1 text-xs text-zinc-600">
-          {caja.ultimo_corte
-            ? `${formatCurrency(caja.ultimo_corte.closing_cash_cents)} del corte anterior`
-            : "$0 inicio"}{" "}
-          + movimientos del período
-        </p>
-      </div>
-
-      <div className="border-b border-zinc-100 p-5">
-        <div className="flex items-baseline justify-between gap-2">
-          <p className="text-[0.65rem] font-semibold uppercase tracking-[0.14em] text-zinc-500">
-            Cobros del período
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <div
+          className="rounded-2xl p-5 ring-1 ring-zinc-200/70"
+          style={{ background: "var(--brand-soft, #F4F4F5)" }}
+        >
+          <p className="text-[0.65rem] font-semibold uppercase tracking-[0.14em] text-zinc-600">
+            En la caja deberías tener
           </p>
-          <p className="text-sm font-bold tabular-nums text-zinc-900">
-            <span className="text-zinc-500">{cobros} · </span>
+          <p className="mt-1 text-3xl font-bold tracking-tight text-zinc-900 tabular-nums">
+            {formatCurrency(expected)}
+          </p>
+          <p className="mt-1 text-xs text-zinc-600">
+            {caja.ultimo_corte
+              ? `${formatCurrency(caja.ultimo_corte.closing_cash_cents)} del corte anterior`
+              : "$0 inicio"}{" "}
+            + movimientos del período
+          </p>
+        </div>
+        <div className="rounded-2xl bg-white p-5 ring-1 ring-zinc-200/70">
+          <p className="text-[0.65rem] font-semibold uppercase tracking-[0.14em] text-zinc-500">
+            Cobrado en el período
+          </p>
+          <p className="mt-1 text-3xl font-bold tracking-tight text-zinc-900 tabular-nums">
             {formatCurrency(ventas)}
           </p>
+          <p className="mt-1 text-xs text-zinc-600">
+            {cobros} {cobros === 1 ? "cobro" : "cobros"}
+            {propinas > 0 && ` · ${formatCurrency(propinas)} en propinas`}
+          </p>
         </div>
-        {porMetodo && cobros > 0 ? (
-          <ul className="mt-3 space-y-1.5">
-            <MethodRow label="Efectivo" icon={<Banknote className="size-3.5" />} amount={porMetodo.cash ?? 0} />
-            <MethodRow label="MercadoPago QR" icon={<QrCode className="size-3.5" />} amount={porMetodo.mp_qr ?? 0} />
-            <MethodRow label="MercadoPago link" icon={<Link2 className="size-3.5" />} amount={porMetodo.mp_link ?? 0} />
-            <MethodRow label="Tarjeta" icon={<CreditCard className="size-3.5" />} amount={porMetodo.card_manual ?? 0} />
-            <MethodRow label="Transferencia" icon={<Wallet className="size-3.5" />} amount={porMetodo.transfer ?? 0} />
-            <MethodRow label="Otro" icon={<MoreHorizontal className="size-3.5" />} amount={porMetodo.other ?? 0} />
-          </ul>
-        ) : (
-          <p className="mt-3 text-xs text-zinc-500">Todavía no hubo cobros.</p>
-        )}
-        {propinas > 0 && (
-          <div className="mt-3 flex items-baseline justify-between gap-2 border-t border-zinc-100 pt-3">
-            <span className="text-xs text-zinc-500">Propinas (aparte)</span>
-            <span className="text-sm font-semibold tabular-nums text-zinc-700">
-              {formatCurrency(propinas)}
-            </span>
-          </div>
-        )}
       </div>
 
-      <div className="border-b border-zinc-100 p-5">
-        <div className="flex items-baseline justify-between gap-2">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <section className="rounded-2xl bg-white p-5 ring-1 ring-zinc-200/70">
           <p className="text-[0.65rem] font-semibold uppercase tracking-[0.14em] text-zinc-500">
-            Movimientos del período
+            Cobros por método
           </p>
-          <p className="text-xs font-semibold tabular-nums text-zinc-700">
-            {entries.length}
-          </p>
-        </div>
-        {entries.length === 0 ? (
-          <p className="mt-3 text-xs text-zinc-500">
-            Todavía no hubo movimientos.
-          </p>
-        ) : (
-          <ul className="mt-3 max-h-64 divide-y divide-zinc-100 overflow-y-auto rounded-lg ring-1 ring-zinc-200/70">
-            {entries.map((e) =>
-              e.kind === "cobro" ? (
-                <CobroRow key={`p-${e.data.id}`} payment={e.data} />
-              ) : (
-                <MovimientoRow key={`m-${e.data.id}`} mov={e.data} />
-              ),
-            )}
-          </ul>
-        )}
+          {porMetodo && cobros > 0 ? (
+            <CobrosPorMetodo porMetodo={porMetodo} />
+          ) : (
+            <p className="mt-3 text-xs text-zinc-500">Todavía no hubo cobros.</p>
+          )}
+        </section>
+
+        <section className="rounded-2xl bg-white p-5 ring-1 ring-zinc-200/70">
+          <div className="flex items-baseline justify-between gap-2">
+            <p className="text-[0.65rem] font-semibold uppercase tracking-[0.14em] text-zinc-500">
+              Movimientos del período
+            </p>
+            <p className="text-xs font-semibold tabular-nums text-zinc-700">
+              {entries.length}
+            </p>
+          </div>
+          {entries.length === 0 ? (
+            <p className="mt-3 text-xs text-zinc-500">
+              Todavía no hubo movimientos.
+            </p>
+          ) : (
+            <ul className="mt-3 max-h-[28rem] divide-y divide-zinc-100 overflow-y-auto rounded-lg ring-1 ring-zinc-200/70">
+              {entries.map((e) =>
+                e.kind === "cobro" ? (
+                  <CobroRow key={`p-${e.data.id}`} payment={e.data} />
+                ) : (
+                  <MovimientoRow key={`m-${e.data.id}`} mov={e.data} />
+                ),
+              )}
+            </ul>
+          )}
+        </section>
       </div>
 
       {payments.length > 0 && <RendicionSection payments={payments} />}
-
-      <div className="flex items-center gap-2 p-3">
-        <button
-          type="button"
-          onClick={() => setSangriaOpen(true)}
-          className="inline-flex items-center gap-1.5 rounded-full bg-zinc-100 px-3 py-2 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-200"
-        >
-          <ArrowDownToLine className="size-3.5" /> Sangría
-        </button>
-        <button
-          type="button"
-          onClick={() => setIngresoOpen(true)}
-          className="inline-flex items-center gap-1.5 rounded-full bg-zinc-100 px-3 py-2 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-200"
-        >
-          <ArrowUpFromLine className="size-3.5" /> Ingreso
-        </button>
-        <button
-          type="button"
-          onClick={() => setCorteOpen(true)}
-          className="ml-auto inline-flex items-center gap-1.5 rounded-full px-4 py-2 text-xs font-semibold transition hover:brightness-95"
-          style={{
-            background: "var(--brand, #18181B)",
-            color: "var(--brand-foreground, white)",
-          }}
-        >
-          <Lock className="size-3.5" /> Hacer corte
-        </button>
-      </div>
 
       <MovimientoModal
         open={sangriaOpen}
@@ -513,32 +461,80 @@ function CajaCard({
           })
         }
       />
-    </article>
+    </div>
   );
 }
 
 // ── Sub-componentes ──────────────────────────────────────────────
 
-function MethodRow({
-  label,
-  icon,
-  amount,
+// Orden canónico de métodos para el desglose. Las filas con monto > 0 se
+// muestran como barras (ordenadas por monto desc); las que están en $0 se
+// colapsan en una sola línea al pie, para no competir con los cobros reales.
+const COBRO_METHOD_ORDER: PaymentMethod[] = [
+  "cash",
+  "mp_qr",
+  "mp_link",
+  "card_manual",
+  "transfer",
+  "other",
+];
+
+function CobrosPorMetodo({
+  porMetodo,
 }: {
-  label: string;
-  icon: React.ReactNode;
-  amount: number;
+  porMetodo: Record<PaymentMethod, number>;
 }) {
-  const empty = amount === 0;
+  const metodos = COBRO_METHOD_ORDER.map((key) => ({
+    key,
+    label: METHOD_LABEL[key],
+    Icon: methodIcon(key),
+    amount: porMetodo[key] ?? 0,
+  }));
+  const total = metodos.reduce((s, m) => s + m.amount, 0);
+  const activos = metodos
+    .filter((m) => m.amount > 0)
+    .sort((a, b) => b.amount - a.amount);
+  const vacios = metodos.filter((m) => m.amount === 0);
+
   return (
-    <li className="flex items-center justify-between gap-3 text-sm">
-      <span className={cn("inline-flex items-center gap-2", empty ? "text-zinc-400" : "text-zinc-700")}>
-        {icon}
-        {label}
-      </span>
-      <span className={cn("font-semibold tabular-nums", empty ? "text-zinc-400" : "text-zinc-900")}>
-        {empty ? "—" : formatCurrency(amount)}
-      </span>
-    </li>
+    <>
+      <ul className="mt-4 space-y-3.5">
+        {activos.map(({ key, label, Icon, amount }) => {
+          const pct = total > 0 ? (amount / total) * 100 : 0;
+          return (
+            <li key={key}>
+              <div className="flex items-baseline justify-between gap-3 text-sm">
+                <span className="inline-flex items-baseline gap-2 text-zinc-700">
+                  <Icon className="size-3.5 shrink-0 translate-y-px text-zinc-400" />
+                  <span className="font-medium">{label}</span>
+                  <span className="font-semibold tabular-nums text-zinc-900">
+                    {formatCurrency(amount)}
+                  </span>
+                </span>
+                <span className="shrink-0 text-xs font-medium tabular-nums text-zinc-400">
+                  {pct.toFixed(0)}%
+                </span>
+              </div>
+              <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-zinc-100">
+                <div
+                  className="h-full rounded-full"
+                  style={{
+                    width: `${Math.max(pct, 2)}%`,
+                    background: "var(--brand, #18181B)",
+                  }}
+                />
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+      {vacios.length > 0 && (
+        <p className="mt-4 border-t border-zinc-100 pt-3 text-[0.7rem] leading-relaxed text-zinc-400">
+          <span className="font-medium text-zinc-500">Sin movimientos:</span>{" "}
+          {vacios.map((m) => m.label).join(", ")}
+        </p>
+      )}
+    </>
   );
 }
 
@@ -681,7 +677,10 @@ function MovimientoModal({
         <div className="mt-3 grid gap-4">
           <div className="grid gap-1.5">
             <Label>Monto</Label>
-            <Input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0.00" autoFocus inputMode="decimal" />
+            <div className="relative">
+              <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-base font-semibold text-zinc-400">$</span>
+              <Input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0" autoFocus inputMode="decimal" className="pl-7 text-base tabular-nums" />
+            </div>
           </div>
           <div className="grid gap-1.5">
             <Label>Motivo{requiereMotivo && <span className="ml-1 text-rose-600">*</span>}</Label>
@@ -824,7 +823,7 @@ function RendicionSection({ payments }: { payments: CajaPayment[] }) {
   const mozos = Array.from(new Set(rows.map((r) => r.mozo_name)));
 
   return (
-    <div className="border-b border-zinc-100 p-5">
+    <section className="rounded-2xl bg-white p-5 ring-1 ring-zinc-200/70">
       <p className="text-[0.65rem] font-semibold uppercase tracking-[0.14em] text-zinc-500">
         Rendición por empleado
       </p>
@@ -859,6 +858,6 @@ function RendicionSection({ payments }: { payments: CajaPayment[] }) {
           </tbody>
         </table>
       </div>
-    </div>
+    </section>
   );
 }

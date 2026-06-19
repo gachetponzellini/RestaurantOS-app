@@ -7,7 +7,6 @@ import {
   ChevronLeft,
   ChevronRight,
   Clock,
-  Search,
   TrendingUp,
   Trophy,
   Users,
@@ -28,10 +27,18 @@ import {
   formatTime,
   relativeDate,
 } from "@/lib/rrhh/format-utils";
+import { RoleFilter } from "@/components/admin/rrhh/role-filter";
+import { SearchInput } from "@/components/admin/rrhh/search-input";
 import { RoleBadge } from "@/components/shared/role-badge";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
-const ALL_ROLES = ["admin", "encargado", "mozo", "personal"] as const;
+const KPI_ACCENTS = {
+  hours: "bg-emerald-50 text-emerald-600 ring-emerald-100",
+  employees: "bg-blue-50 text-blue-600 ring-blue-100",
+  average: "bg-violet-50 text-violet-600 ring-violet-100",
+  top: "bg-amber-50 text-amber-600 ring-amber-100",
+} as const;
 
 export function AsistenciaTab({
   overview,
@@ -106,24 +113,26 @@ export function AsistenciaTab({
     <div className="space-y-8">
       {/* Month selector */}
       <div className="flex items-center gap-3">
-        <button
-          type="button"
+        <Button
+          variant="outline"
+          size="icon-lg"
           onClick={() => navigateMonth(-1)}
-          className="flex size-9 items-center justify-center rounded-xl bg-white text-zinc-600 ring-1 ring-zinc-200/70 transition hover:bg-zinc-50"
+          aria-label="Mes anterior"
         >
           <ChevronLeft className="size-4" />
-        </button>
+        </Button>
         <h2 className="min-w-[10rem] text-center text-xl font-bold capitalize text-zinc-900">
           {monthName}
         </h2>
-        <button
-          type="button"
+        <Button
+          variant="outline"
+          size="icon-lg"
           onClick={() => navigateMonth(1)}
           disabled={isCurrentMonth}
-          className="flex size-9 items-center justify-center rounded-xl bg-white text-zinc-600 ring-1 ring-zinc-200/70 transition hover:bg-zinc-50 disabled:opacity-30"
+          aria-label="Mes siguiente"
         >
           <ChevronRight className="size-4" />
-        </button>
+        </Button>
       </div>
 
       {/* KPI cards */}
@@ -133,21 +142,21 @@ export function AsistenciaTab({
           label="Horas trabajadas"
           value={formatHoursDecimal(filteredStats.totalMinutes)}
           sub={`${overview.daysWithActivity} ${overview.daysWithActivity === 1 ? "día" : "días"} con actividad`}
-          accent="bg-emerald-50 text-emerald-600 ring-emerald-100"
+          accent={KPI_ACCENTS.hours}
         />
         <KpiCard
           icon={<Users className="size-5" />}
           label="Empleados activos"
           value={String(filteredStats.count)}
           sub="ficharon al menos una vez"
-          accent="bg-blue-50 text-blue-600 ring-blue-100"
+          accent={KPI_ACCENTS.employees}
         />
         <KpiCard
           icon={<TrendingUp className="size-5" />}
           label="Promedio por persona"
           value={formatHoursDecimal(filteredStats.avgMinutes)}
           sub="horas totales / empleado"
-          accent="bg-violet-50 text-violet-600 ring-violet-100"
+          accent={KPI_ACCENTS.average}
         />
         <KpiCard
           icon={<Trophy className="size-5" />}
@@ -158,7 +167,7 @@ export function AsistenciaTab({
               ? `${formatHoursDecimal(topPerformer.totalMinutes)} en ${topPerformer.daysWorked} ${topPerformer.daysWorked === 1 ? "día" : "días"}`
               : "sin datos"
           }
-          accent="bg-amber-50 text-amber-600 ring-amber-100"
+          accent={KPI_ACCENTS.top}
           valueSize="lg"
         />
       </div>
@@ -193,33 +202,13 @@ export function AsistenciaTab({
 
       {/* Role filters + search */}
       <div className="flex flex-wrap items-center gap-3">
-        <div className="flex flex-wrap gap-1.5">
-          <FilterChip
-            active={roleFilter === null}
-            onClick={() => setRoleFilter(null)}
-          >
-            Todos
-          </FilterChip>
-          {ALL_ROLES.map((r) => (
-            <FilterChip
-              key={r}
-              active={roleFilter === r}
-              onClick={() => setRoleFilter(roleFilter === r ? null : r)}
-            >
-              <RoleBadge role={r} size="xs" />
-            </FilterChip>
-          ))}
-        </div>
-        <div className="relative ml-auto">
-          <Search className="pointer-events-none absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-zinc-400" />
-          <input
-            type="text"
-            placeholder="Buscar..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="h-8 rounded-lg border-0 bg-zinc-100 pl-8 pr-3 text-xs text-zinc-900 outline-none ring-1 ring-zinc-200/60 placeholder:text-zinc-400 focus:ring-zinc-300"
-          />
-        </div>
+        <RoleFilter value={roleFilter} onChange={setRoleFilter} />
+        <SearchInput
+          value={search}
+          onChange={setSearch}
+          aria-label="Buscar empleado"
+          className="ml-auto w-full max-w-[12rem]"
+        />
       </div>
 
       {/* Employee table */}
@@ -244,31 +233,6 @@ export function AsistenciaTab({
 
 /* ── Sub-components ──────────────────────────────────────── */
 
-function FilterChip({
-  active,
-  onClick,
-  children,
-}: {
-  active: boolean;
-  onClick: () => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={cn(
-        "inline-flex items-center rounded-full px-3 py-1.5 text-xs font-semibold transition",
-        active
-          ? "bg-zinc-900 text-white"
-          : "bg-white text-zinc-600 ring-1 ring-zinc-200/70 hover:bg-zinc-50",
-      )}
-    >
-      {children}
-    </button>
-  );
-}
-
 function KpiCard({
   icon,
   label,
@@ -285,7 +249,7 @@ function KpiCard({
   valueSize?: "default" | "lg";
 }) {
   return (
-    <div className="rounded-2xl bg-white p-5 ring-1 ring-zinc-200/60">
+    <div className="rounded-2xl bg-white p-5 ring-1 ring-zinc-200/70">
       <div className="flex items-center justify-between">
         <p className="text-xs font-medium uppercase tracking-wider text-zinc-500">
           {label}
@@ -334,7 +298,7 @@ function DailyChart({
   const maxMinutes = Math.max(...data.map((d) => d.totalMinutes), 1);
 
   return (
-    <div className="rounded-2xl bg-white p-5 ring-1 ring-zinc-200/60">
+    <div className="rounded-2xl bg-white p-5 ring-1 ring-zinc-200/70">
       <div className="flex h-40 items-end gap-1">
         {data.map((d) => {
           const heightPct = (d.totalMinutes / maxMinutes) * 100;
@@ -345,6 +309,8 @@ function DailyChart({
               key={d.date}
               type="button"
               onClick={() => onSelectDay(isSelected ? null : d.date)}
+              aria-pressed={isSelected}
+              aria-label={`${formatDateShort(d.date)}: ${formatHours(d.totalMinutes)}, ${d.employeesCount} ${d.employeesCount === 1 ? "persona" : "personas"}`}
               className="group relative flex flex-1 flex-col items-center"
             >
               <div
@@ -414,7 +380,7 @@ function DayDetailPanel({
   );
 
   return (
-    <div className="rounded-2xl bg-white ring-1 ring-zinc-200/60">
+    <div className="rounded-2xl bg-white ring-1 ring-zinc-200/70">
       <div className="flex items-center justify-between border-b border-zinc-100 px-5 py-4">
         <div>
           <p className="text-sm font-semibold capitalize text-zinc-900">
@@ -425,13 +391,14 @@ function DayDetailPanel({
             {formatHours(totalMinutes)} totales
           </p>
         </div>
-        <button
-          type="button"
+        <Button
+          variant="ghost"
+          size="icon"
           onClick={onClose}
-          className="flex size-8 items-center justify-center rounded-lg text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600"
+          aria-label="Cerrar detalle del día"
         >
           <X className="size-4" />
-        </button>
+        </Button>
       </div>
 
       {entries.length === 0 ? (
@@ -489,7 +456,7 @@ function EmployeeTable({ rows }: { rows: MonthlySummaryRow[] }) {
   const maxMinutes = Math.max(...rows.map((r) => r.totalMinutes), 1);
 
   return (
-    <div className="overflow-hidden rounded-2xl bg-white ring-1 ring-zinc-200/60">
+    <div className="overflow-x-auto rounded-2xl bg-white ring-1 ring-zinc-200/70">
       <table className="w-full text-sm">
         <thead>
           <tr className="border-b border-zinc-100 bg-zinc-50/60 text-left text-[0.7rem] font-semibold uppercase tracking-wider text-zinc-500">
@@ -497,8 +464,10 @@ function EmployeeTable({ rows }: { rows: MonthlySummaryRow[] }) {
             <th className="px-5 py-3">Rol</th>
             <th className="px-5 py-3 text-right">Horas mes</th>
             <th className="px-5 py-3 text-right">Días</th>
-            <th className="px-5 py-3 text-right">Prom/día</th>
-            <th className="px-5 py-3 text-right">Última</th>
+            <th className="hidden px-5 py-3 text-right sm:table-cell">
+              Prom/día
+            </th>
+            <th className="hidden px-5 py-3 text-right sm:table-cell">Última</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-zinc-100">
@@ -539,10 +508,10 @@ function EmployeeTable({ rows }: { rows: MonthlySummaryRow[] }) {
                 <td className="px-5 py-3 text-right tabular-nums text-zinc-600">
                   {row.daysWorked}
                 </td>
-                <td className="px-5 py-3 text-right tabular-nums text-zinc-600">
+                <td className="hidden px-5 py-3 text-right tabular-nums text-zinc-600 sm:table-cell">
                   {formatHours(row.avgMinutesPerDay)}
                 </td>
-                <td className="px-5 py-3 text-right text-xs text-zinc-500">
+                <td className="hidden px-5 py-3 text-right text-xs text-zinc-500 sm:table-cell">
                   {row.lastClockIn ? relativeDate(row.lastClockIn) : "—"}
                 </td>
               </tr>

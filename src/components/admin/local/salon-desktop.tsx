@@ -19,6 +19,7 @@ import { toast } from "sonner";
 
 import { NewReservationModal } from "@/components/admin/local/new-reservation-modal";
 import { ReservationsPanel } from "@/components/admin/local/reservations-panel";
+import { SegmentedSelector } from "@/components/admin/local/segmented-selector";
 import { AsignarMozosPanel } from "@/components/mozo/asignar-mozos-panel";
 import { FloorPlanViewer } from "@/components/mozo/floor-plan-viewer";
 import { OrderSummaryCard } from "@/components/mozo/order-summary-card";
@@ -809,10 +810,15 @@ export function SalonDesktop({
     <div className="flex h-full flex-col gap-4">
       {/* ── Selector de salón (solo si hay >1) ── */}
       {floorPlans.length > 1 && (
-        <SalonSelector
-          plans={floorPlans}
+        <SegmentedSelector
+          ariaLabel="Seleccionar salón"
           activeId={activePlanId}
           onSelect={setActivePlan}
+          items={floorPlans.map(({ plan, tables }) => ({
+            id: plan.id,
+            label: plan.name,
+            count: tables.filter((t) => t.status === "active").length,
+          }))}
         />
       )}
 
@@ -1148,55 +1154,6 @@ export function SalonDesktop({
 
       {/* El overlay "Distribuir mozos" vive en LocalShell para alinear el
           trigger con las tabs del header. No se monta acá. */}
-    </div>
-  );
-}
-
-// ─── Selector de salón ─────────────────────────────────────────────────────
-
-function SalonSelector({
-  plans,
-  activeId,
-  onSelect,
-}: {
-  plans: FloorPlanWithTables[];
-  activeId: string;
-  onSelect: (id: string) => void;
-}) {
-  return (
-    <div className="bg-card ring-border/60 -mx-1 overflow-x-auto rounded-2xl px-1 ring-1">
-      <div className="flex gap-1 p-1.5">
-        {plans.map(({ plan, tables }) => {
-          const activeMesas = tables.filter((t) => t.status === "active").length;
-          const isActive = plan.id === activeId;
-          return (
-            <button
-              key={plan.id}
-              type="button"
-              onClick={() => onSelect(plan.id)}
-              aria-pressed={isActive}
-              className={cn(
-                "shrink-0 rounded-xl px-3 py-1.5 text-sm font-semibold transition active:scale-[0.97]",
-                isActive
-                  ? "bg-zinc-900 text-white shadow-sm"
-                  : "text-zinc-700 hover:bg-zinc-100",
-              )}
-            >
-              <span>{plan.name}</span>
-              <span
-                className={cn(
-                  "ml-2 rounded-full px-1.5 py-0.5 text-[10px] font-bold tabular-nums",
-                  isActive
-                    ? "bg-white/15 text-white"
-                    : "bg-zinc-200 text-zinc-700",
-                )}
-              >
-                {activeMesas}
-              </span>
-            </button>
-          );
-        })}
-      </div>
     </div>
   );
 }

@@ -3,22 +3,12 @@
 import { useCallback, useEffect, useState } from "react";
 import { Clock } from "lucide-react";
 
-import {
-  clockPunch,
-  type ClockResult,
-  type PresentEmployee,
-} from "@/lib/rrhh/clock-actions";
-import { formatTime, formatDuration } from "@/lib/rrhh/format-utils";
-import { cn } from "@/lib/utils";
+import { clockPunch, type PresentEmployee } from "@/lib/rrhh/clock-actions";
 
+import { ClockFeedback, type FeedbackState } from "./clock-feedback";
 import { Numpad } from "./numpad";
+import { PinDisplay } from "./pin-display";
 import { PresentList } from "./present-list";
-
-type FeedbackState =
-  | { status: "idle" }
-  | { status: "loading" }
-  | { status: "success"; result: ClockResult }
-  | { status: "error"; message: string };
 
 function useLiveClock() {
   const [time, setTime] = useState(() =>
@@ -108,9 +98,6 @@ export function ClockScreen({
     });
   }, [pin, slug]);
 
-  const isIn = feedback.status === "success" && feedback.result.type === "in";
-  const isOut = feedback.status === "success" && feedback.result.type === "out";
-
   const pinSection = (
     <div className="flex flex-col items-center gap-6">
       {/* Live clock */}
@@ -127,66 +114,11 @@ export function ClockScreen({
       </div>
 
       {/* PIN display */}
-      <div className="flex gap-3">
-        {Array.from({ length: 4 }).map((_, i) => (
-          <div
-            key={i}
-            className={cn(
-              "flex size-14 items-center justify-center rounded-xl border-2 text-2xl font-bold transition-all",
-              i < pin.length
-                ? "border-white bg-white/10 text-white"
-                : "border-zinc-700 text-zinc-700",
-            )}
-          >
-            {i < pin.length ? "•" : ""}
-          </div>
-        ))}
-      </div>
+      <PinDisplay length={pin.length} size="lg" />
 
       {/* Feedback */}
       <div className="h-24 w-full">
-        {feedback.status === "loading" && (
-          <div className="flex items-center justify-center gap-2 text-zinc-400">
-            <div className="size-4 animate-spin rounded-full border-2 border-zinc-600 border-t-white" />
-            <span className="text-sm">Procesando…</span>
-          </div>
-        )}
-
-        {feedback.status === "error" && (
-          <div className="rounded-2xl bg-red-500/10 px-6 py-4 text-center ring-1 ring-red-500/30">
-            <p className="text-lg font-semibold text-red-400">
-              {feedback.message}
-            </p>
-          </div>
-        )}
-
-        {isIn && (
-          <div className="rounded-2xl bg-emerald-500/10 px-6 py-4 text-center ring-1 ring-emerald-500/30">
-            <p className="text-3xl font-bold text-emerald-400">
-              {feedback.result.employeeName[0]?.toUpperCase()}
-            </p>
-            <p className="mt-1 text-sm font-semibold text-emerald-400">
-              ¡Bienvenido/a, {feedback.result.employeeName}!
-            </p>
-            <p className="text-xs text-emerald-400/70">
-              Entrada: {formatTime(feedback.result.time)}
-            </p>
-          </div>
-        )}
-
-        {isOut && (
-          <div className="rounded-2xl bg-blue-500/10 px-6 py-4 text-center ring-1 ring-blue-500/30">
-            <p className="text-3xl font-bold text-blue-400">
-              {feedback.result.employeeName[0]?.toUpperCase()}
-            </p>
-            <p className="mt-1 text-sm font-semibold text-blue-400">
-              Hasta mañana, {feedback.result.employeeName}!
-            </p>
-            <p className="text-xs text-blue-400/70">
-              Turno: {formatDuration(feedback.result.durationMinutes ?? 0)}
-            </p>
-          </div>
-        )}
+        <ClockFeedback feedback={feedback} size="lg" />
       </div>
 
       {/* Numpad */}

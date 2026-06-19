@@ -6,21 +6,19 @@ import { Clock, Fingerprint, LogOut, UserX, X } from "lucide-react";
 import {
   clockPunch,
   getCurrentPresent,
-  type ClockResult,
   type PresentEmployee,
 } from "@/lib/rrhh/clock-actions";
 import type { TodaySummary } from "@/lib/rrhh/clock-queries";
-import { formatTime, formatDuration } from "@/lib/rrhh/format-utils";
+import { formatDuration } from "@/lib/rrhh/format-utils";
 import { PresentEmployeeCard } from "@/components/shared/present-employee-card";
 import { RoleBadge } from "@/components/shared/role-badge";
+import { Button } from "@/components/ui/button";
+import {
+  ClockFeedback,
+  type FeedbackState,
+} from "@/components/fichar/clock-feedback";
 import { Numpad } from "@/components/fichar/numpad";
-import { cn } from "@/lib/utils";
-
-type FeedbackState =
-  | { status: "idle" }
-  | { status: "loading" }
-  | { status: "success"; result: ClockResult }
-  | { status: "error"; message: string };
+import { PinDisplay } from "@/components/fichar/pin-display";
 
 export function FichajeTab({
   slug,
@@ -98,11 +96,8 @@ export function FichajeTab({
     });
   }, [pin, slug]);
 
-  const isIn = feedback.status === "success" && feedback.result.type === "in";
-  const isOut = feedback.status === "success" && feedback.result.type === "out";
-
   return (
-    <div className="flex h-full gap-6">
+    <div className="flex h-full flex-col gap-6 lg:flex-row">
       {/* Left: Presentes + action */}
       <div className="flex flex-1 flex-col gap-5">
         <div className="flex items-center justify-between">
@@ -116,14 +111,10 @@ export function FichajeTab({
               ahora
             </p>
           </div>
-          <button
-            type="button"
-            onClick={() => setDialogOpen(true)}
-            className="inline-flex items-center gap-2 rounded-xl bg-zinc-900 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-zinc-800"
-          >
+          <Button size="lg" onClick={() => setDialogOpen(true)}>
             <Fingerprint className="size-4" />
             Marcar asistencia
-          </button>
+          </Button>
         </div>
 
         {present.length === 0 ? (
@@ -145,9 +136,9 @@ export function FichajeTab({
         )}
       </div>
 
-      {/* Right sidebar: finished + absent */}
+      {/* Sidebar: finished + absent (apilado debajo en <lg) */}
       {(finished.length > 0 || absent.length > 0) && (
-        <aside className="hidden w-72 shrink-0 space-y-5 overflow-y-auto rounded-2xl bg-white p-5 ring-1 ring-zinc-200/60 lg:block">
+        <aside className="w-full shrink-0 space-y-5 overflow-y-auto rounded-2xl bg-white p-5 ring-1 ring-zinc-200/70 lg:w-72">
           {finished.length > 0 && (
             <section className="space-y-2">
               <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-zinc-500">
@@ -205,7 +196,8 @@ export function FichajeTab({
                 setPin("");
                 setFeedback({ status: "idle" });
               }}
-              className="absolute right-4 top-4 rounded-lg p-1 text-zinc-400 hover:text-white"
+              aria-label="Cerrar"
+              className="absolute right-4 top-4 rounded-lg p-1 text-zinc-400 transition hover:text-white"
             >
               <X className="size-5" />
             </button>
@@ -218,57 +210,10 @@ export function FichajeTab({
                 </span>
               </div>
 
-              <div className="flex gap-3">
-                {Array.from({ length: 4 }).map((_, i) => (
-                  <div
-                    key={i}
-                    className={cn(
-                      "flex size-12 items-center justify-center rounded-xl border-2 text-xl font-bold transition-all",
-                      i < pin.length
-                        ? "border-white bg-white/10 text-white"
-                        : "border-zinc-700 text-zinc-700",
-                    )}
-                  >
-                    {i < pin.length ? "•" : ""}
-                  </div>
-                ))}
-              </div>
+              <PinDisplay length={pin.length} size="md" />
 
               <div className="h-16 w-full">
-                {feedback.status === "loading" && (
-                  <div className="flex items-center justify-center gap-2 text-zinc-400">
-                    <div className="size-4 animate-spin rounded-full border-2 border-zinc-600 border-t-white" />
-                    <span className="text-sm">Procesando…</span>
-                  </div>
-                )}
-                {feedback.status === "error" && (
-                  <div className="rounded-xl bg-red-500/10 px-4 py-3 text-center ring-1 ring-red-500/30">
-                    <p className="text-sm font-semibold text-red-400">
-                      {feedback.message}
-                    </p>
-                  </div>
-                )}
-                {isIn && (
-                  <div className="rounded-xl bg-emerald-500/10 px-4 py-3 text-center ring-1 ring-emerald-500/30">
-                    <p className="text-sm font-semibold text-emerald-400">
-                      ¡Entrada registrada, {feedback.result.employeeName}!
-                    </p>
-                    <p className="text-xs text-emerald-400/70">
-                      {formatTime(feedback.result.time)}
-                    </p>
-                  </div>
-                )}
-                {isOut && (
-                  <div className="rounded-xl bg-blue-500/10 px-4 py-3 text-center ring-1 ring-blue-500/30">
-                    <p className="text-sm font-semibold text-blue-400">
-                      Salida registrada, {feedback.result.employeeName}
-                    </p>
-                    <p className="text-xs text-blue-400/70">
-                      Turno:{" "}
-                      {formatDuration(feedback.result.durationMinutes ?? 0)}
-                    </p>
-                  </div>
-                )}
+                <ClockFeedback feedback={feedback} size="md" />
               </div>
 
               <Numpad

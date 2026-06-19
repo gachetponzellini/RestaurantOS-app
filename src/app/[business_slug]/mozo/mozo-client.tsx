@@ -478,17 +478,15 @@ export function MozoClient({
       <main className="mx-auto max-w-screen-md px-4 pt-4">
         {activeTab === "salon" && (
           <>
-            <div className="mb-3 flex items-center justify-between gap-2">
-              {floorPlans.length > 1 ? (
+            {floorPlans.length > 1 && (
+              <div className="mb-2">
                 <MozoSalonSelector
                   plans={floorPlans}
                   activeId={activePlanId}
                   onSelect={setActivePlan}
                 />
-              ) : (
-                <div />
-              )}
-            </div>
+              </div>
+            )}
             <SalonSection
               tables={activePlanTables}
               reservationByTable={reservationByTable}
@@ -994,6 +992,15 @@ const FILTER_ORDER: SalonFilter[] = [
   "pidio_cuenta",
 ];
 
+// Estado activo del chip: "Todas" = oscuro; los de estado se rellenan con su
+// color semántico suave (mismo lenguaje visual que el filtro por rol de RRHH).
+const FILTER_ACTIVE: Record<SalonFilter, string> = {
+  todas: "bg-zinc-900 text-white ring-zinc-900",
+  libre: "bg-zinc-100 text-zinc-700 ring-zinc-200",
+  ocupada: "bg-emerald-50 text-emerald-700 ring-emerald-200",
+  pidio_cuenta: "bg-amber-50 text-amber-700 ring-amber-200",
+};
+
 // ─── Selector multi-salón (mobile) ──────────────────────────────────────────
 function MozoSalonSelector({
   plans,
@@ -1005,7 +1012,7 @@ function MozoSalonSelector({
   onSelect: (id: string) => void;
 }) {
   return (
-    <div className="-mx-1 mb-3 overflow-x-auto px-1">
+    <div className="-mx-1 overflow-x-auto px-1 py-1">
       <div className="flex gap-1.5">
         {plans.map(({ plan, tables }) => {
           const activeMesas = tables.filter((t) => t.status === "active").length;
@@ -1106,7 +1113,7 @@ function SalonSection({
   return (
     <div className="space-y-4">
       {/* Chips de filtro scroll horizontal */}
-      <div className="-mx-4 overflow-x-auto px-4 pb-1">
+      <div className="-mx-4 overflow-x-auto px-4 py-1">
         <div className="flex gap-2 whitespace-nowrap">
           {FILTER_ORDER.map((f) => {
             const isActive = filter === f;
@@ -1116,17 +1123,18 @@ function SalonSection({
                 key={f}
                 type="button"
                 onClick={() => setFilter(f)}
-                className={`inline-flex h-9 items-center gap-1.5 rounded-full px-3.5 text-sm font-semibold transition active:scale-95 ${
+                aria-pressed={isActive}
+                className={`inline-flex h-9 items-center gap-1.5 rounded-full px-3.5 text-sm font-semibold ring-1 transition active:scale-95 ${
                   isActive
-                    ? "bg-zinc-900 text-white"
-                    : "bg-white text-zinc-700 ring-1 ring-zinc-200 active:bg-zinc-50"
+                    ? FILTER_ACTIVE[f]
+                    : "bg-white text-zinc-600 ring-zinc-200/70 active:bg-zinc-50"
                 }`}
               >
-                {dot && <span className={`h-1.5 w-1.5 pt-1 rounded-full ${dot}`} />}
+                {dot && <span className={`size-1.5 rounded-full ${dot}`} />}
                 {FILTER_LABEL[f]}
                 <span
                   className={`tabular-nums ${
-                    isActive ? "text-zinc-300" : "text-zinc-400"
+                    isActive ? "opacity-60" : "text-zinc-400"
                   }`}
                 >
                   {counts[f]}

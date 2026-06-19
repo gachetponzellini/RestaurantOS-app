@@ -5,7 +5,6 @@ import { useRouter } from "next/navigation";
 import { RotateCcw, UserMinus } from "lucide-react";
 import { toast } from "sonner";
 
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -15,27 +14,13 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import { RoleBadge } from "@/components/shared/role-badge";
 import {
   disableBusinessMember,
   enableBusinessMember,
 } from "@/lib/admin/members-actions";
 import type { BusinessMember } from "@/lib/admin/members-query";
 import { cn } from "@/lib/utils";
-
-const ROLE_LABELS: Record<BusinessMember["role"], string> = {
-  admin: "Admin",
-  encargado: "Encargado",
-  mozo: "Mozo",
-  personal: "Personal",
-};
-
-const ROLE_STYLES: Record<BusinessMember["role"], string> = {
-  admin:
-    "bg-[color-mix(in_srgb,var(--brand)_15%,transparent)] text-[var(--brand)] border-transparent",
-  encargado: "bg-zinc-100 text-zinc-700 border-transparent",
-  mozo: "bg-amber-50 text-amber-700 border-transparent",
-  personal: "bg-violet-50 text-violet-700 border-transparent",
-};
 
 export function UserRow({
   slug,
@@ -159,12 +144,7 @@ export function UserRow({
         </div>
       </div>
       <div className="flex items-center gap-2">
-        <Badge
-          variant="secondary"
-          className={`text-[0.65rem] uppercase tracking-wider ${ROLE_STYLES[member.role]}`}
-        >
-          {ROLE_LABELS[member.role]}
-        </Badge>
+        <RoleBadge role={member.role} size="sm" />
         {canManage && !isCurrentUser && !isDisabled && (
           <Dialog open={open} onOpenChange={setOpen}>
             <DialogTrigger

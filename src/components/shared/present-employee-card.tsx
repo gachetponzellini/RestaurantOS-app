@@ -29,7 +29,7 @@ export function PresentEmployeeCard({
       className={cn(
         "flex items-center gap-3 rounded-2xl p-4",
         variant === "light"
-          ? "bg-white ring-1 ring-zinc-200/60"
+          ? "bg-white ring-1 ring-zinc-200/70"
           : "bg-zinc-800/50 ring-1 ring-zinc-700/40",
       )}
     >
