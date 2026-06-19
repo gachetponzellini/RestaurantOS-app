@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
 import { actionError, actionOk, type ActionResult } from "@/lib/actions";
+import { createNotification } from "@/lib/notifications/create";
 import { refundPayment } from "@/lib/payments/mercadopago";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
@@ -48,7 +49,7 @@ export async function cancelOrderByCustomer(
   const { data: order } = await service
     .from("orders")
     .select(
-      "id, business_id, status, payment_status, mp_payment_id, customer_id, customers!inner(user_id)",
+      "id, business_id, order_number, status, payment_status, mp_payment_id, customer_id, customers!inner(user_id)",
     )
     .eq("id", order_id)
     .maybeSingle();
@@ -114,6 +115,14 @@ export async function cancelOrderByCustomer(
     console.error("cancelOrderByCustomer", error);
     return actionError("No pudimos cancelar el pedido.");
   }
+
+  // spec 27 — avisar al encargado que el cliente canceló su pedido.
+  await createNotification({
+    businessId: order.business_id,
+    targetRole: "encargado",
+    type: "order.cancelled_by_customer",
+    payload: { orderNumber: order.order_number },
+  });
 
   revalidatePath(`/${business_slug}/confirmacion/${order_id}`);
   revalidatePath(`/${business_slug}/perfil/pedidos`);

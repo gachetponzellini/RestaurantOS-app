@@ -7,8 +7,13 @@ import {
   AlertTriangle,
   ArrowLeftRight,
   Ban,
+  CalendarPlus,
+  CalendarX2,
   CheckCircle2,
+  PackageX,
+  ReceiptText,
   ShoppingBag,
+  Trash2,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
@@ -103,6 +108,60 @@ export function viewForNotification(n: Notification): NotiView {
       icon: CheckCircle2,
       title: `Comanda lista · Mesa ${tableLabel}`,
       body: `${stationName} — ${itemCount} plato(s) para servir`,
+    };
+  }
+  // ── spec 27 ───────────────────────────────────────────────────────
+  if (n.type === "reserva.nueva") {
+    const hora = (p.hora as string | undefined) ?? "";
+    const personas = p.personas as number | undefined;
+    const nombre = (p.nombre as string | undefined) ?? "cliente";
+    return {
+      tone: "info",
+      icon: CalendarPlus,
+      title: hora ? `Reserva nueva · ${hora}` : "Reserva nueva",
+      body: [personas ? `${personas}p` : null, nombre].filter(Boolean).join(" — "),
+    };
+  }
+  if (n.type === "reserva.cancelada_cliente") {
+    const nombre = (p.nombre as string | undefined) ?? "El cliente";
+    const fecha = (p.fecha as string | undefined) ?? "";
+    const hora = (p.hora as string | undefined) ?? "";
+    const cuando = [fecha, hora].filter(Boolean).join(" ");
+    return {
+      tone: "warning",
+      icon: CalendarX2,
+      title: "Reserva cancelada",
+      body: cuando ? `${nombre} canceló ${cuando}` : `${nombre} canceló su reserva`,
+    };
+  }
+  if (n.type === "order.cancelled_by_customer") {
+    const num = (p.orderNumber as number | undefined) ?? "?";
+    const customer = p.customerName as string | undefined;
+    return {
+      tone: "warning",
+      icon: PackageX,
+      title: `Pedido #${num} cancelado`,
+      body: customer ? `${customer} canceló el pedido` : "El cliente canceló el pedido",
+    };
+  }
+  if (n.type === "mesa.pidio_cuenta") {
+    const tableLabel = (p.tableLabel as string | undefined) ?? "?";
+    return {
+      tone: "info",
+      icon: ReceiptText,
+      title: `Mesa ${tableLabel} pidió la cuenta`,
+      body: "Pasar a cobrar.",
+    };
+  }
+  if (n.type === "item.cancelado") {
+    const tableLabel = (p.tableLabel as string | undefined) ?? "?";
+    const itemName = p.itemName as string | undefined;
+    const reason = p.reason as string | undefined;
+    return {
+      tone: "warning",
+      icon: Trash2,
+      title: `Ítem anulado · Mesa ${tableLabel}`,
+      body: [itemName, reason].filter(Boolean).join(" — ") || "Se anuló un ítem.",
     };
   }
 

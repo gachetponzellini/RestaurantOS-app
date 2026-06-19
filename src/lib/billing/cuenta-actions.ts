@@ -5,6 +5,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { actionError, actionOk, type ActionResult } from "@/lib/actions";
 import { requireMozoActionContext } from "@/lib/mozo/auth";
+import { notifyItemCancelled } from "@/lib/notifications/events";
 import { canApplyDiscount, canCancelItem } from "@/lib/permissions/can";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 import { getBusiness } from "@/lib/tenant";
@@ -223,6 +224,15 @@ export async function cancelarItemEnCuenta(
   // Splits previos quedan inválidos.
   await deleteSplitsAndItems(service, orderId);
   const { total_cents } = await recalcOrderTotals(service, orderId, {});
+
+  // spec 27 — avisar al mozo de la mesa que se anuló un ítem.
+  await notifyItemCancelled({
+    businessId: business.id,
+    orderId,
+    reason: motivo.trim(),
+    actorUserId: ctx.userId,
+    actorRole: ctx.role,
+  });
 
   revalidatePath(`/${businessSlug}/mozo`);
   return actionOk({ total_cents });

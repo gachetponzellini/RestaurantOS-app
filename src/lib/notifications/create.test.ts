@@ -132,4 +132,42 @@ describe("createNotification (ruteo por preferencias)", () => {
       }),
     ).resolves.toBeUndefined();
   });
+
+  // ── Principio "no notificar al actor" (spec 27) ──────────────────────
+  it("omite la notif si el destinatario puntual es el propio actor", async () => {
+    currentFake = makeFakeService({ prefs: [] });
+    await createNotification({
+      businessId: "b1",
+      userId: "u1",
+      actorUserId: "u1",
+      type: "mesa.cancelled",
+      payload: {},
+    });
+    expect(currentFake.captured.notifications).toHaveLength(0);
+    expect(currentFake.captured.whatsapp_outbox).toHaveLength(0);
+  });
+
+  it("crea la notif si el destinatario puntual no es el actor", async () => {
+    currentFake = makeFakeService({ prefs: [] });
+    await createNotification({
+      businessId: "b1",
+      userId: "u1",
+      actorUserId: "u2",
+      type: "mesa.cancelled",
+      payload: {},
+    });
+    expect(currentFake.captured.notifications).toHaveLength(1);
+  });
+
+  it("no excluye al actor en broadcasts por rol (limitación del modelo)", async () => {
+    currentFake = makeFakeService({ prefs: [] });
+    await createNotification({
+      businessId: "b1",
+      targetRole: "encargado",
+      actorUserId: "u1",
+      type: "mesa.cancelled",
+      payload: {},
+    });
+    expect(currentFake.captured.notifications).toHaveLength(1);
+  });
 });

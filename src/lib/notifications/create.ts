@@ -50,7 +50,20 @@ export async function createNotification(params: {
   targetRole?: string | null;
   type: string;
   payload: Record<string, unknown>;
+  /**
+   * Usuario que ejecutó la acción. Si coincide con el destinatario puntual
+   * (`userId`), la notificación se omite: no tiene sentido avisarle a alguien
+   * de algo que acaba de hacer. Solo aplica a destinatarios `userId` — los
+   * broadcast por `targetRole` insertan una fila para todo el rol y no pueden
+   * excluir a un usuario puntual (limitación del modelo, ver spec 27).
+   */
+  actorUserId?: string | null;
 }): Promise<void> {
+  // Principio "no notificar al actor": destinatario puntual == actor → no se crea nada.
+  if (params.userId && params.actorUserId && params.userId === params.actorUserId) {
+    return;
+  }
+
   const service = createSupabaseServiceClient() as unknown as GenericClient;
 
   const recipient: NotificationRecipient | null = params.userId

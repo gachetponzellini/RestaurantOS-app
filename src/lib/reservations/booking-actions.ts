@@ -5,6 +5,7 @@ import { fromZonedTime } from "date-fns-tz";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { actionError, actionOk, type ActionResult } from "@/lib/actions";
+import { createNotification } from "@/lib/notifications/create";
 import { canManageReservations } from "@/lib/permissions/can";
 import { isTableAvailableForReservation, pickTableExcluding } from "@/lib/reservations/assign-table";
 import {
@@ -250,6 +251,18 @@ export async function createReservationFromCustomer(
   if (result.ok) {
     revalidatePath(`/${parsed.data.business_slug}/reservar`);
     revalidatePath(`/${parsed.data.business_slug}/admin/reservas`);
+    // spec 27 — avisar al encargado que entró una reserva nueva.
+    await createNotification({
+      businessId: business.id,
+      targetRole: "encargado",
+      type: "reserva.nueva",
+      payload: {
+        fecha: parsed.data.date,
+        hora: parsed.data.slot,
+        personas: parsed.data.party_size,
+        nombre: parsed.data.customer_name,
+      },
+    });
   }
   return result;
 }
@@ -286,6 +299,18 @@ export async function createReservationFromAdmin(
   });
   if (result.ok) {
     revalidatePath(`/${parsed.data.business_slug}/admin/reservas`);
+    // spec 27 — avisar al encargado que se cargó una reserva nueva.
+    await createNotification({
+      businessId: business.id,
+      targetRole: "encargado",
+      type: "reserva.nueva",
+      payload: {
+        fecha: parsed.data.date,
+        hora: parsed.data.slot,
+        personas: parsed.data.party_size,
+        nombre: parsed.data.customer_name,
+      },
+    });
   }
   return result;
 }
@@ -563,10 +588,10 @@ export async function cancelOwnReservation(
   const service = createSupabaseServiceClient() as unknown as GenericClient;
   const { data: reservation } = await service
     .from("reservations")
-    .select("id, business_id, user_id, starts_at, status")
+    .select("id, business_id, user_id, starts_at, status, customer_name")
     .eq("id", parsed.data.id)
     .maybeSingle();
-  const r = reservation as Pick<Reservation, "id" | "business_id" | "user_id" | "starts_at" | "status"> | null;
+  const r = reservation as Pick<Reservation, "id" | "business_id" | "user_id" | "starts_at" | "status" | "customer_name"> | null;
   if (!r) return actionError("Reserva no encontrada.");
   if (r.user_id !== user.id) return actionError("Permiso denegado.");
   if (r.status === "cancelled" || r.status === "completed" || r.status === "no_show") {
@@ -585,5 +610,14 @@ export async function cancelOwnReservation(
     .eq("id", r.id)
     .eq("user_id", user.id);
   if (error) return actionError("No pudimos cancelar la reserva.");
+
+  // spec 27 — avisar al encargado que el cliente canceló su reserva.
+  await createNotification({
+    businessId: r.business_id,
+    targetRole: "encargado",
+    type: "reserva.cancelada_cliente",
+    payload: { nombre: r.customer_name },
+  });
+
   return actionOk(null);
 }

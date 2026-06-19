@@ -295,6 +295,16 @@ export async function pedirCuenta(
       toValue: "pidio_cuenta",
       byUserId: ctx.userId,
     });
+
+    // spec 27 — avisar al encargado que la mesa pidió la cuenta (no al mozo
+    // que la marcó: actorUserId lo excluye si justo es el destinatario).
+    await createNotification({
+      businessId: business.id,
+      targetRole: "encargado",
+      type: "mesa.pidio_cuenta",
+      payload: { tableLabel: table.label },
+      actorUserId: ctx.userId,
+    });
   }
 
   revalidatePath(`/${businessSlug}/mozo`);
@@ -453,6 +463,7 @@ export async function anularMesa(
       userId: table.mozo_id,
       type: "mesa.cancelled",
       payload: cancelPayload,
+      actorUserId: ctx.userId,
     });
   }
   // Broadcast to encargado so the manager always sees cancellations.
@@ -461,6 +472,7 @@ export async function anularMesa(
     targetRole: "encargado",
     type: "mesa.cancelled",
     payload: cancelPayload,
+    actorUserId: ctx.userId,
   });
 
   revalidatePath(`/${businessSlug}/mozo`);
@@ -620,17 +632,15 @@ export async function transferTable(
     reason: reason?.trim() || null,
   };
 
-  const { error: notifErr } = await service.from("notifications").insert({
-    business_id: business.id,
-    user_id: null,
-    target_role: "encargado",
+  // Broadcast al encargado (T5 CU-09) — vía createNotification para respetar
+  // las preferencias de canal del negocio (spec 27, antes era INSERT directo).
+  await createNotification({
+    businessId: business.id,
+    targetRole: "encargado",
     type: "mesa.transferred",
     payload: transferPayload,
+    actorUserId: ctx.userId,
   });
-  if (notifErr) {
-    console.error("transferTable notification", notifErr);
-    // No bloqueamos: la transferencia ya se hizo. El audit log queda como source of truth.
-  }
 
   // Notify the destination mozo directly so they see the new table.
   await createNotification({
@@ -638,15 +648,18 @@ export async function transferTable(
     userId: toMozoId,
     type: "mesa.transferred",
     payload: transferPayload,
+    actorUserId: ctx.userId,
   });
 
-  // Notify the original mozo that their table was taken.
-  if (fromMozoId && fromMozoId !== ctx.userId) {
+  // Notify the original mozo that their table was taken. `actorUserId` ya omite
+  // la notif si el origen es quien transfiere (no hace falta el guard manual).
+  if (fromMozoId) {
     await createNotification({
       businessId: business.id,
       userId: fromMozoId,
       type: "mesa.transferred",
       payload: transferPayload,
+      actorUserId: ctx.userId,
     });
   }
 

@@ -3,6 +3,7 @@ import "server-only";
 import { actionError, actionOk, type ActionResult } from "@/lib/actions";
 import { currentDayOfWeek } from "@/lib/day-of-week";
 import { formatCurrency } from "@/lib/currency";
+import { createNotification } from "@/lib/notifications/create";
 import { createPreference } from "@/lib/payments/mercadopago";
 import { validatePromoCode } from "@/lib/promos/validate";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
@@ -610,9 +611,9 @@ export async function persistOrder(
   // Notif al encargado: hay un pedido nuevo esperando confirmación. Best
   // effort — si falla el insert, el pedido sigue OK; el encargado lo verá
   // igual al recargar la lista de `/admin/pedidos`.
-  await supabase.from("notifications").insert({
-    business_id: business.id,
-    target_role: "encargado",
+  await createNotification({
+    businessId: business.id,
+    targetRole: "encargado",
     type: "order.pending",
     payload: {
       orderId: order.id,

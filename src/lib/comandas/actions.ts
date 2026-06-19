@@ -6,6 +6,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { actionError, actionOk, type ActionResult } from "@/lib/actions";
 import { requireMozoActionContext } from "@/lib/mozo/auth";
 import { createNotification } from "@/lib/notifications/create";
+import { notifyItemCancelled } from "@/lib/notifications/events";
 import { canCancelItem } from "@/lib/permissions/can";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
@@ -839,6 +840,16 @@ export async function cancelarItem(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     .update({ subtotal_cents: newSubtotal, total_cents: newTotal } as any)
     .eq("id", orderId);
+
+  // spec 27 — avisar al mozo de la mesa que se anuló un ítem (el actor
+  // encargado/admin no se autoavisa; resuelve mesa + destinatario en el helper).
+  await notifyItemCancelled({
+    businessId: business.id,
+    orderId,
+    reason: trimmed,
+    actorUserId: ctxResult.data.userId,
+    actorRole: ctxResult.data.role,
+  });
 
   revalidatePath(`/${slug}/cocina`);
   revalidatePath(`/${slug}/mozo`);

@@ -37,6 +37,12 @@ export const NOTIFICATION_EVENTS = [
   { type: "mesa.transferred", label: "Mesa transferida" },
   { type: "mesa.cancelled", label: "Mesa anulada" },
   { type: "comanda.entregada", label: "Comanda entregada" },
+  // spec 27 — ampliación de eventos (solo a encargado/mozo, no admin)
+  { type: "reserva.nueva", label: "Reserva nueva" },
+  { type: "reserva.cancelada_cliente", label: "Reserva cancelada por el cliente" },
+  { type: "order.cancelled_by_customer", label: "Pedido cancelado por el cliente" },
+  { type: "mesa.pidio_cuenta", label: "Mesa pidió la cuenta" },
+  { type: "item.cancelado", label: "Ítem anulado" },
 ] as const;
 
 export type NotificationEventType = (typeof NOTIFICATION_EVENTS)[number]["type"];
