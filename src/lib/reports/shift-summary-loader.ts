@@ -1,0 +1,368 @@
+import "server-only";
+
+import type { SupabaseClient } from "@supabase/supabase-js";
+import { formatInTimeZone, toZonedTime } from "date-fns-tz";
+import { es } from "date-fns/locale";
+
+import { getInvoiceKPIs } from "@/lib/afip/queries";
+import type { PaymentMethod } from "@/lib/caja/types";
+import { createSupabaseServiceClient } from "@/lib/supabase/service";
+
+import type {
+  CancellationRow,
+  ShiftCorte,
+  ShiftMozo,
+  ShiftSummaryData,
+} from "./shift-summary";
+
+// Cliente service-role con tipos laxos: el loader corre tanto en el cron (sin
+// sesión → RLS no aplica, por eso service) como en la server action manual.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type AnyClient = SupabaseClient<any, any, any>;
+const db = () => createSupabaseServiceClient() as unknown as AnyClient;
+
+const EMPTY_METODO: Record<PaymentMethod, number> = {
+  cash: 0,
+  card_manual: 0,
+  mp_link: 0,
+  mp_qr: 0,
+  transfer: 0,
+  other: 0,
+};
+
+/** Inicio del día (en `timezone`) traducido a instante UTC. Igual que reports. */
+function startOfDayInTz(date: Date, timezone: string): Date {
+  const zoned = toZonedTime(date, timezone);
+  zoned.setHours(0, 0, 0, 0);
+  const offsetMs = toZonedTime(date, timezone).getTime() - date.getTime();
+  return new Date(zoned.getTime() - offsetMs);
+}
+
+function tipoLabel(tipo: string): string {
+  switch (tipo) {
+    case "factura_a":
+      return "Factura A";
+    case "factura_b":
+      return "Factura B";
+    case "nota_credito_a":
+      return "Nota de crédito A";
+    case "nota_credito_b":
+      return "Nota de crédito B";
+    default:
+      return "Comprobante";
+  }
+}
+
+async function resolveUserNames(
+  service: AnyClient,
+  ids: (string | null)[],
+): Promise<Map<string, string>> {
+  const unique = Array.from(new Set(ids.filter((x): x is string => Boolean(x))));
+  if (unique.length === 0) return new Map();
+  const { data } = await service
+    .from("users")
+    .select("id, full_name")
+    .in("id", unique);
+  return new Map(
+    ((data ?? []) as { id: string; full_name: string | null }[]).map((u) => [
+      u.id,
+      u.full_name ?? "—",
+    ]),
+  );
+}
+
+/**
+ * Junta las fuentes del resumen de cierre para un negocio en su **día operativo**
+ * (timezone AR). Multi-tenant: todo scopeado por `business_id` con service client.
+ *
+ * Recaudación + por-mozo salen de `payments` del día (misma tabla/campos que
+ * caja, scopeada al día → total consistente con la suma por mozo). AFIP reusa
+ * `getInvoiceKPIs`. Operación/cortes/anulaciones son lecturas acotadas al rango.
+ */
+export async function loadShiftSummaryData(
+  businessId: string,
+  now: Date = new Date(),
+): Promise<ShiftSummaryData | null> {
+  const service = db();
+
+  const { data: biz } = await service
+    .from("businesses")
+    .select("id, name, timezone")
+    .eq("id", businessId)
+    .maybeSingle();
+  if (!biz) return null;
+
+  const timezone = (biz as { timezone: string }).timezone;
+  const businessName = (biz as { name: string }).name;
+
+  const start = startOfDayInTz(now, timezone);
+  const startIso = start.toISOString();
+  const endIso = now.toISOString();
+  const rangeLabel = formatInTimeZone(now, timezone, "EEEE dd/MM/yyyy", {
+    locale: es,
+  });
+
+  // ── Recaudación + por mozo (payments del día) ─────────────────────────
+  const { data: payRows } = await service
+    .from("payments")
+    .select("method, amount_cents, tip_cents, attributed_mozo_id")
+    .eq("business_id", businessId)
+    .eq("payment_status", "paid")
+    .gte("created_at", startIso)
+    .lte("created_at", endIso);
+
+  const payments = (payRows ?? []) as {
+    method: PaymentMethod;
+    amount_cents: number;
+    tip_cents: number;
+    attributed_mozo_id: string | null;
+  }[];
+
+  const por_metodo: Record<PaymentMethod, number> = { ...EMPTY_METODO };
+  let total_cents = 0;
+  let propinas_cents = 0;
+  const mozoAgg = new Map<
+    string,
+    { ventas: number; propinas: number; count: number }
+  >();
+  for (const p of payments) {
+    por_metodo[p.method] = (por_metodo[p.method] ?? 0) + p.amount_cents;
+    total_cents += p.amount_cents;
+    propinas_cents += p.tip_cents;
+    if (p.attributed_mozo_id) {
+      const cur = mozoAgg.get(p.attributed_mozo_id) ?? {
+        ventas: 0,
+        propinas: 0,
+        count: 0,
+      };
+      cur.ventas += p.amount_cents;
+      cur.propinas += p.tip_cents;
+      cur.count += 1;
+      mozoAgg.set(p.attributed_mozo_id, cur);
+    }
+  }
+
+  const mozoNames = await resolveUserNames(service, [...mozoAgg.keys()]);
+  const porMozo: ShiftMozo[] = [...mozoAgg.entries()]
+    .map(([id, v]) => ({
+      mozo_name: mozoNames.get(id) ?? "—",
+      ventas_cents: v.ventas,
+      propinas_cents: v.propinas,
+      cobros_count: v.count,
+    }))
+    .sort((a, b) => b.ventas_cents - a.ventas_cents);
+
+  // ── AFIP (reuse) ──────────────────────────────────────────────────────
+  const afip = await getInvoiceKPIs(businessId, startIso, endIso);
+
+  // ── Operación del día (orders) ────────────────────────────────────────
+  const { data: orderRows } = await service
+    .from("orders")
+    .select(
+      "id, total_cents, status, lifecycle_status, delivery_type, cancelled_at, cancelled_reason, cancelled_by, table_id, order_number",
+    )
+    .eq("business_id", businessId)
+    .gte("created_at", startIso)
+    .lte("created_at", endIso);
+
+  const orders = (orderRows ?? []) as {
+    id: string;
+    total_cents: number;
+    status: string;
+    lifecycle_status: string | null;
+    delivery_type: string;
+    cancelled_at: string | null;
+    cancelled_reason: string | null;
+    cancelled_by: string | null;
+    table_id: string | null;
+    order_number: number;
+  }[];
+
+  const isCancelled = (o: (typeof orders)[number]) =>
+    o.status === "cancelled" || o.lifecycle_status === "cancelled";
+  const live = orders.filter((o) => !isCancelled(o));
+  const orderCount = live.length;
+  const revenueCents = live.reduce((acc, o) => acc + Number(o.total_cents), 0);
+  const deliveryCount = live.filter((o) => o.delivery_type === "delivery").length;
+  const pickupCount = live.filter((o) => o.delivery_type === "pickup").length;
+  const dineInCount = live.filter((o) => o.delivery_type === "dine_in").length;
+  const cancelledOrders = orders.filter(isCancelled);
+
+  // ── Cortes del día (diferencia + encargado + hora) ────────────────────
+  const { data: corteRows } = await service
+    .from("caja_cortes")
+    .select("caja_id, encargado_id, difference_cents, closing_cash_cents, expected_cash_cents, created_at, cajas(name)")
+    .eq("business_id", businessId)
+    .gte("created_at", startIso)
+    .lte("created_at", endIso)
+    .order("created_at", { ascending: true });
+
+  const corteRaw = (corteRows ?? []) as {
+    encargado_id: string;
+    difference_cents: number;
+    closing_cash_cents: number;
+    expected_cash_cents: number;
+    created_at: string;
+    cajas: { name: string } | { name: string }[] | null;
+  }[];
+  const encargadoNames = await resolveUserNames(
+    service,
+    corteRaw.map((c) => c.encargado_id),
+  );
+  const cortes: ShiftCorte[] = corteRaw.map((c) => ({
+    caja_name: Array.isArray(c.cajas)
+      ? (c.cajas[0]?.name ?? "Caja")
+      : (c.cajas?.name ?? "Caja"),
+    encargado_name: encargadoNames.get(c.encargado_id) ?? null,
+    difference_cents: c.difference_cents,
+    closing_cash_cents: c.closing_cash_cents,
+    expected_cash_cents: c.expected_cash_cents,
+    at: c.created_at,
+  }));
+
+  // ── Anulaciones (mesa + ítem + factura) con motivo + responsable ──────
+  const anulaciones = await loadCancellations(service, businessId, {
+    startIso,
+    endIso,
+    cancelledOrders,
+  });
+
+  return {
+    businessName,
+    timezone,
+    rangeLabel,
+    recaudacion: {
+      total_cents,
+      propinas_cents,
+      por_metodo,
+      cobros_count: payments.length,
+    },
+    afip,
+    operacion: {
+      orderCount,
+      revenueCents,
+      averageTicketCents:
+        orderCount > 0 ? Math.round(revenueCents / orderCount) : 0,
+      deliveryCount,
+      pickupCount,
+      dineInCount,
+      cancelledCount: cancelledOrders.length,
+    },
+    cortes,
+    porMozo,
+    anulaciones,
+  };
+}
+
+async function loadCancellations(
+  service: AnyClient,
+  businessId: string,
+  ctx: {
+    startIso: string;
+    endIso: string;
+    cancelledOrders: {
+      cancelled_at: string | null;
+      cancelled_reason: string | null;
+      cancelled_by: string | null;
+      table_id: string | null;
+      order_number: number;
+    }[];
+  },
+): Promise<CancellationRow[]> {
+  const { startIso, endIso, cancelledOrders } = ctx;
+  const rows: CancellationRow[] = [];
+  const actorIds: (string | null)[] = [];
+
+  // Mesas anuladas (orders ya cargadas) — label por etiqueta de mesa.
+  const mesaAnuladas = cancelledOrders.filter((o) => o.cancelled_at);
+  const tableIds = Array.from(
+    new Set(mesaAnuladas.map((o) => o.table_id).filter((x): x is string => !!x)),
+  );
+  const tableLabels = new Map<string, string>();
+  if (tableIds.length > 0) {
+    const { data: tbls } = await service
+      .from("tables")
+      .select("id, label")
+      .in("id", tableIds);
+    for (const t of (tbls ?? []) as { id: string; label: string }[]) {
+      tableLabels.set(t.id, t.label);
+    }
+  }
+  for (const o of mesaAnuladas) {
+    actorIds.push(o.cancelled_by);
+    rows.push({
+      kind: "mesa",
+      label: o.table_id
+        ? `Mesa ${tableLabels.get(o.table_id) ?? "?"}`
+        : `Pedido #${o.order_number}`,
+      reason: o.cancelled_reason,
+      responsable: null, // se resuelve abajo vía el array paralelo `actorIds`
+      at: o.cancelled_at as string,
+    });
+  }
+
+  // Ítems anulados.
+  const { data: itemRows } = await service
+    .from("order_items")
+    .select("product_name, cancelled_at, cancelled_reason, cancelled_by, orders!inner(business_id)")
+    .not("cancelled_at", "is", null)
+    .gte("cancelled_at", startIso)
+    .lte("cancelled_at", endIso)
+    .eq("orders.business_id", businessId);
+  const items = (itemRows ?? []) as {
+    product_name: string;
+    cancelled_at: string;
+    cancelled_reason: string | null;
+    cancelled_by: string | null;
+  }[];
+  for (const it of items) {
+    actorIds.push(it.cancelled_by);
+    rows.push({
+      kind: "item",
+      label: it.product_name,
+      reason: it.cancelled_reason,
+      responsable: null,
+      at: it.cancelled_at,
+    });
+  }
+
+  // Facturas anuladas (sin timestamp de anulación → se usa created_at).
+  const { data: invRows } = await service
+    .from("invoices")
+    .select("punto_venta, numero, tipo_comprobante, cancelled_reason, cancelled_by, created_at")
+    .eq("business_id", businessId)
+    .eq("status", "cancelled")
+    .gte("created_at", startIso)
+    .lte("created_at", endIso);
+  const invoices = (invRows ?? []) as {
+    punto_venta: number;
+    numero: number | null;
+    tipo_comprobante: string;
+    cancelled_reason: string | null;
+    cancelled_by: string | null;
+    created_at: string;
+  }[];
+  for (const inv of invoices) {
+    actorIds.push(inv.cancelled_by);
+    const pv = String(inv.punto_venta).padStart(4, "0");
+    const nro = inv.numero ? String(inv.numero).padStart(8, "0") : "—";
+    rows.push({
+      kind: "factura",
+      label: `${tipoLabel(inv.tipo_comprobante)} ${pv}-${nro}`,
+      reason: inv.cancelled_reason,
+      responsable: null,
+      at: inv.created_at,
+    });
+  }
+
+  // Resolver nombres de responsables (staff). Clientes/null → "—".
+  const names = await resolveUserNames(service, actorIds);
+  // Re-map manteniendo el orden de inserción de actorIds == orden de rows.
+  rows.forEach((r, i) => {
+    const actor = actorIds[i];
+    r.responsable = actor ? (names.get(actor) ?? null) : null;
+  });
+
+  // Orden cronológico.
+  return rows.sort((a, b) => a.at.localeCompare(b.at));
+}

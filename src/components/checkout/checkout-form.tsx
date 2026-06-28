@@ -1,22 +1,32 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { fromZonedTime } from "date-fns-tz";
 import { toast } from "sonner";
 
 import { I } from "@/components/delivery/primitives";
+import type { BusinessHourSlot } from "@/lib/business-hours/schema";
 import { formatCurrency } from "@/lib/currency";
 import { createOrder } from "@/lib/orders/create-order";
+import {
+  SCHEDULED_MAX_WINDOW_DAYS,
+  SCHEDULED_MIN_LEAD_MIN,
+  validateScheduledOrder,
+} from "@/lib/orders/scheduled";
 import { previewPromoCode } from "@/lib/promos/preview-action";
 import { cartTotal, useCart } from "@/stores/cart";
 
 type PaymentId = "mp" | "cash" | "pickup-cash";
+type When = "now" | "scheduled";
 
 export function CheckoutForm({
   slug,
   businessName,
   businessAddress,
+  businessTimezone,
+  businessHours = [],
   deliveryFeeCents,
   estimatedMinutes,
   savedAddresses = [],
@@ -29,6 +39,8 @@ export function CheckoutForm({
   slug: string;
   businessName: string;
   businessAddress: string | null;
+  businessTimezone: string;
+  businessHours?: BusinessHourSlot[];
   deliveryFeeCents: number;
   estimatedMinutes: number | null;
   savedAddresses?: { id: string; street: string }[];
@@ -55,6 +67,11 @@ export function CheckoutForm({
   const [phone, setPhone] = useState(initialPhone);
   const [email] = useState(initialEmail);
   const [payment, setPayment] = useState<PaymentId>(mpEnabled ? "mp" : "cash");
+  // Pedido diferido (spec 31): "¿para cuándo?" → ahora / programar. Solo retiro
+  // y solo si el negocio cobra con MP (el programado se paga por adelantado).
+  const [when, setWhen] = useState<When>("now");
+  const [schedDate, setSchedDate] = useState("");
+  const [schedTime, setSchedTime] = useState("");
   const [summaryOpen, setSummaryOpen] = useState(false);
   const [errors, setErrors] = useState<{
     address?: string;
@@ -76,6 +93,9 @@ export function CheckoutForm({
   const [promoError, setPromoError] = useState<string | null>(null);
 
   const isPickup = mode === "pickup";
+  // Programar requiere retiro + MP (pago adelantado). Sin MP no se ofrece.
+  const canSchedule = isPickup && mpEnabled;
+  const isScheduled = canSchedule && when === "scheduled";
   const subtotal = cartTotal(items);
   const baseDeliveryFee = isPickup ? 0 : deliveryFeeCents;
   // free_shipping: el descuento se "absorbe" haciendo el envío 0
@@ -149,28 +169,66 @@ export function CheckoutForm({
     else if (!isPickup && payment === "pickup-cash") setPayment("cash");
   }, [isPickup, payment]);
 
-  const paymentOptions: { id: PaymentId; label: string; sub: string }[] = [
-    ...(mpEnabled
+  // "Programar" solo existe en pickup+MP y fuerza el método MP (adelantado).
+  useEffect(() => {
+    if (!canSchedule && when !== "now") setWhen("now");
+  }, [canSchedule, when]);
+  useEffect(() => {
+    if (when === "scheduled" && payment !== "mp") setPayment("mp");
+  }, [when, payment]);
+
+  // Límites del input de fecha (YYYY-MM-DD en el TZ del local): de hoy hasta la
+  // ventana máxima. El helper revalida horario/anticipación igual.
+  const { todayStr, maxDateStr } = useMemo(() => {
+    const fmt = (d: Date) =>
+      new Intl.DateTimeFormat("en-CA", {
+        timeZone: businessTimezone,
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+      }).format(d);
+    const nowMs = Date.now();
+    return {
+      todayStr: fmt(new Date(nowMs)),
+      maxDateStr: fmt(
+        new Date(nowMs + SCHEDULED_MAX_WINDOW_DAYS * 24 * 60 * 60 * 1000),
+      ),
+    };
+  }, [businessTimezone]);
+
+  // Un pedido programado se paga sí o sí con MP adelantado (spec 31): no se
+  // ofrece efectivo.
+  const paymentOptions: { id: PaymentId; label: string; sub: string }[] =
+    isScheduled
       ? [
           {
             id: "mp" as const,
             label: "Mercado Pago",
-            sub: "Pagás ahora desde la app",
+            sub: "Pago adelantado del pedido programado",
           },
         ]
-      : []),
-    isPickup
-      ? {
-          id: "pickup-cash" as const,
-          label: "Efectivo al retirar",
-          sub: "Pagás en el local",
-        }
-      : {
-          id: "cash" as const,
-          label: "Efectivo al recibir",
-          sub: "Indicá con cuánto abonás",
-        },
-  ];
+      : [
+          ...(mpEnabled
+            ? [
+                {
+                  id: "mp" as const,
+                  label: "Mercado Pago",
+                  sub: "Pagás ahora desde la app",
+                },
+              ]
+            : []),
+          isPickup
+            ? {
+                id: "pickup-cash" as const,
+                label: "Efectivo al retirar",
+                sub: "Pagás en el local",
+              }
+            : {
+                id: "cash" as const,
+                label: "Efectivo al recibir",
+                sub: "Indicá con cuánto abonás",
+              },
+        ];
 
   const phoneOk = /^\+?[\d\s-]{8,}$/.test(phone);
 
@@ -187,6 +245,30 @@ export function CheckoutForm({
       toast.error("Tu carrito está vacío.");
       return;
     }
+
+    // Pedido diferido (spec 31): armamos el instante en el TZ del local y lo
+    // validamos client-side para feedback; persist-order revalida en el server.
+    let scheduledAtIso: string | undefined;
+    if (isScheduled) {
+      if (!schedDate || !schedTime) {
+        toast.error("Elegí el día y la hora del retiro.");
+        return;
+      }
+      const dt = fromZonedTime(`${schedDate}T${schedTime}:00`, businessTimezone);
+      const v = validateScheduledOrder({
+        scheduledAt: dt,
+        deliveryType: "pickup",
+        paymentMethod: "mp",
+        businessHours,
+        timezone: businessTimezone,
+      });
+      if (!v.ok) {
+        toast.error(v.error);
+        return;
+      }
+      scheduledAtIso = dt.toISOString();
+    }
+
     setSubmitting(true);
     const result = await createOrder({
       business_slug: slug,
@@ -199,6 +281,7 @@ export function CheckoutForm({
         : `${address.trim()}${apt.trim() ? ` · ${apt.trim()}` : ""}`,
       delivery_notes: notes.trim() || undefined,
       payment_method: payment === "mp" ? "mp" : "cash",
+      scheduled_at: scheduledAtIso,
       promo_code: appliedPromo?.code,
       items: items.map((i) =>
         i.kind === "daily_menu" && i.daily_menu_id
@@ -207,6 +290,15 @@ export function CheckoutForm({
               daily_menu_id: i.daily_menu_id,
               quantity: i.quantity,
               notes: i.notes,
+              // Opciones elegidas del combo. El server deriva el adicional
+              // (spec 29) desde la DB; acá sólo informamos QUÉ se eligió.
+              selected_choices: (i.selected_choices ?? []).map((sc) => ({
+                choice_group_id: sc.choice_group_id,
+                choice_group_label: sc.choice_group_label,
+                product_id: sc.product_id,
+                product_name: sc.product_name,
+                modifier_ids: sc.modifiers.map((m) => m.modifier_id),
+              })),
             }
           : {
               // Back-compat: ítems sin kind se tratan como producto normal.
@@ -648,6 +740,93 @@ export function CheckoutForm({
               style={inputStyle()}
             />
           </Field>
+        </Section>
+      )}
+
+      {canSchedule && (
+        <Section title="¿Para cuándo?">
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "1fr 1fr",
+              gap: 8,
+              marginBottom: isScheduled ? 14 : 4,
+            }}
+          >
+            {([
+              { id: "now", label: "Lo antes posible", sub: "15–20 min" },
+              { id: "scheduled", label: "Programar", sub: "Elegí día y hora" },
+            ] as const).map((o) => {
+              const sel = when === o.id;
+              return (
+                <button
+                  key={o.id}
+                  type="button"
+                  onClick={() => setWhen(o.id)}
+                  style={{
+                    padding: "14px 12px",
+                    borderRadius: 12,
+                    border: `1.5px solid ${sel ? "var(--accent)" : "var(--hairline-2)"}`,
+                    background: sel ? "var(--accent-soft)" : "#fff",
+                    cursor: "pointer",
+                    textAlign: "left",
+                  }}
+                >
+                  <div
+                    style={{ fontSize: 13, fontWeight: 600, color: "var(--ink)" }}
+                  >
+                    {o.label}
+                  </div>
+                  <div
+                    style={{ fontSize: 11, color: "var(--ink-3)", marginTop: 3 }}
+                  >
+                    {o.sub}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+          {isScheduled && (
+            <>
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "1fr 1fr",
+                  gap: 8,
+                }}
+              >
+                <Field label="Día">
+                  <input
+                    type="date"
+                    value={schedDate}
+                    min={todayStr}
+                    max={maxDateStr}
+                    onChange={(e) => setSchedDate(e.target.value)}
+                    style={inputStyle()}
+                  />
+                </Field>
+                <Field label="Hora">
+                  <input
+                    type="time"
+                    value={schedTime}
+                    onChange={(e) => setSchedTime(e.target.value)}
+                    style={inputStyle()}
+                  />
+                </Field>
+              </div>
+              <div
+                style={{
+                  fontSize: 12,
+                  color: "var(--ink-3)",
+                  lineHeight: 1.4,
+                }}
+              >
+                Se paga con Mercado Pago por adelantado. Dentro del horario del
+                local, con al menos {SCHEDULED_MIN_LEAD_MIN} min de anticipación
+                y hasta {SCHEDULED_MAX_WINDOW_DAYS} días.
+              </div>
+            </>
+          )}
         </Section>
       )}
 

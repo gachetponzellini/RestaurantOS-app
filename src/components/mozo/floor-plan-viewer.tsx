@@ -1,5 +1,8 @@
 "use client";
 
+import { useState } from "react";
+
+import { DELAY_COLORS } from "@/lib/comandas/mesa-demora";
 import type { FloorPlan, FloorTable, OperationalStatus } from "@/lib/reservations/types";
 
 const STATUS_COLORS: Record<OperationalStatus, { fill: string; stroke: string }> = {
@@ -23,6 +26,19 @@ export type TableExtra = {
   mozoInitial?: string;
   /** HSL determinístico por user_id — pinta el badge con el color del mozo. */
   mozoColor?: string;
+  /**
+   * Demora de cocina (spec 30): la comanda más demorada de la mesa sobre su
+   * tiempo esperado. `level 0`/undefined = sin punto. Lo calcula el parent con
+   * el `now` del ticker; acá se pinta el punto + el tooltip al hover.
+   */
+  delay?: {
+    /** Nivel 0–4 (escalón cada 10' de exceso). */
+    level: number;
+    /** Exceso real en minutos (para el "+N min" del tooltip). */
+    excessMinutes: number;
+    /** Sector de la comanda demorada (cocina, parrilla, …). */
+    station: string;
+  };
 };
 
 type Props = {
@@ -68,6 +84,8 @@ export function FloorPlanViewer({ plan, tables, extras = {}, onTableClick, paint
             table={table}
             extra={extras[table.id]}
             paintMode={paintMode}
+            planWidth={plan.width}
+            planHeight={plan.height}
             onClick={() => onTableClick?.(table)}
           />
         ))}
@@ -102,13 +120,18 @@ function ViewerTable({
   table,
   extra,
   paintMode,
+  planWidth,
+  planHeight,
   onClick,
 }: {
   table: FloorTable;
   extra?: TableExtra;
   paintMode: boolean;
+  planWidth: number;
+  planHeight: number;
   onClick: () => void;
 }) {
+  const [showDelayTip, setShowDelayTip] = useState(false);
   const cx = table.width / 2;
   const cy = table.height / 2;
   const transform = `translate(${table.x} ${table.y}) rotate(${table.rotation} ${cx} ${cy})`;
@@ -134,6 +157,25 @@ function ViewerTable({
   // Qué mostrar debajo del label
   const hasReservation = !!extra?.reservation;
   const minutesOpen = extra?.minutesOpen;
+
+  // Punto de demora de cocina (spec 30). En paint mode no va: el encargado
+  // está distribuyendo mozos, no mirando demoras.
+  const delay = paintMode ? undefined : extra?.delay;
+  const delayColor = delay && delay.level >= 1 ? DELAY_COLORS[delay.level] : null;
+
+  // Geometría del tooltip de demora (se dibuja dentro del SVG al hover, a la
+  // misma escala que el resto del plano). Sector + minutos reales de exceso.
+  const tipFont = Math.max(11, subSize);
+  const tipLine1 = delay?.station ?? "";
+  const tipLine2 = delay ? `+${Math.round(delay.excessMinutes)} min de demora` : "";
+  const tipChars = Math.max(tipLine1.length, tipLine2.length);
+  const tipPadX = tipFont * 0.7;
+  const tipW = tipChars * tipFont * 0.56 + tipPadX * 2 + 6;
+  const tipH = tipFont * 2.6 + 8;
+  // El punto vive en la esquina sup-izq; el tooltip crece hacia el interior y
+  // se "flipea" si tocaría el borde del plano (derecha / abajo).
+  const tipX = table.x + 16 + tipW > planWidth ? 4 - tipW : 16;
+  const tipY = table.y + 16 + tipH > planHeight ? -tipH - 2 : 16;
 
   // Línea secundaria bajo el label (oculta en paint mode para no saturar).
   let subLine: string | null = null;
@@ -251,6 +293,60 @@ function ViewerTable({
         </>
       )}
 
+      {/* Punto de demora de cocina (esquina sup-izq) + tooltip al hover. El
+          color encodea cuánto se PASÓ del tiempo esperado; no toca el fill. */}
+      {delayColor && delay && (
+        <g>
+          <circle
+            cx={10}
+            cy={10}
+            r={7.5}
+            fill={delayColor}
+            stroke="white"
+            strokeWidth={1.5}
+            onMouseEnter={() => setShowDelayTip(true)}
+            onMouseLeave={() => setShowDelayTip(false)}
+            style={{ cursor: "pointer" }}
+          />
+          {showDelayTip && (
+            <g
+              transform={`translate(${tipX} ${tipY})`}
+              style={{ pointerEvents: "none" }}
+            >
+              <rect
+                x={0}
+                y={0}
+                width={tipW}
+                height={tipH}
+                rx={tipFont * 0.4}
+                fill="#18181b"
+                opacity={0.96}
+                style={{ filter: "drop-shadow(0 2px 6px rgb(0 0 0 / 0.35))" }}
+              />
+              <rect x={0} y={0} width={4} height={tipH} rx={2} fill={delayColor} />
+              <text
+                x={tipPadX}
+                y={tipFont * 1.25}
+                fontSize={tipFont}
+                fontWeight={700}
+                fill="#ffffff"
+                style={{ userSelect: "none", pointerEvents: "none", fontFamily: "inherit" }}
+              >
+                {tipLine1}
+              </text>
+              <text
+                x={tipPadX}
+                y={tipFont * 2.25}
+                fontSize={tipFont * 0.85}
+                fill="#e4e4e7"
+                style={{ userSelect: "none", pointerEvents: "none", fontFamily: "inherit" }}
+              >
+                {tipLine2}
+              </text>
+            </g>
+          )}
+        </g>
+      )}
     </g>
   );
 }

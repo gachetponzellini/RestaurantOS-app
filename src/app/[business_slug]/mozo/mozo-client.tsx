@@ -29,6 +29,7 @@ import { signOut } from "@/lib/auth/sign-out";
 import { anularMesa, transferTable, volverAPedir } from "@/lib/mozo/actions";
 import type { MozoMember, MozoAttendance } from "@/lib/mozo/queries";
 import { type OperationalStatus } from "@/lib/mozo/state-machine";
+import { DELAY_COLORS, tableDelay } from "@/lib/comandas/mesa-demora";
 import { useTablesRealtime } from "@/lib/mozo/use-tables-realtime";
 import { NotificationsToastHost } from "@/components/notifications/notifications-toast-host";
 import { useNotificationsRealtime } from "@/components/notifications/use-notifications-realtime";
@@ -64,7 +65,7 @@ export type ComandaForMozo = {
   station_name: string;
   emitted_at: string;
   delivered_at: string | null;
-  items: { product_name: string; quantity: number }[];
+  items: { product_name: string; quantity: number; prep_time_minutes: number | null }[];
 };
 
 export type OrderForMozo = {
@@ -1425,6 +1426,10 @@ function ActiveTableCard({
   const status = (table.operational_status ?? "libre") as OperationalStatus;
   const min = minutesSince(table.opened_at ?? undefined);
   const isUrgent = status === "pidio_cuenta";
+  // Demora de cocina (spec 30): comanda pendiente más pasada de su tiempo
+  // esperado. Como `min`, se evalúa al render con Date.now() (sin ticker).
+  const delay = order ? tableDelay(order.comandas, Date.now()) : null;
+  const delayLvl = delay && delay.level >= 1 ? delay.level : 0;
   // Nombre de quién está en la mesa: prefiere reserva (más rico, tiene
   // party_size), cae al snapshot de la order (walk-in con nombre cargado),
   // sino muestra "Walk-in". Filtra placeholders de orders viejas.
@@ -1447,7 +1452,7 @@ function ActiveTableCard({
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <span className="font-heading text-2xl font-extrabold leading-none tracking-tight text-zinc-900">
               {table.label}
             </span>
@@ -1459,6 +1464,16 @@ function ActiveTableCard({
               />
               {STATUS_LABEL[status]}
             </span>
+            {delayLvl >= 1 && delay && (
+              <span
+                className="inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[11px] font-bold text-white"
+                style={{ background: DELAY_COLORS[delayLvl] }}
+                title={`${delay.station} demorada`}
+              >
+                <Clock className="h-3 w-3" />
+                +{Math.round(delay.excessMinutes)}m
+              </span>
+            )}
           </div>
           <p className="mt-1.5 truncate text-sm font-semibold text-zinc-800">
             {partyName ?? "Walk-in"}

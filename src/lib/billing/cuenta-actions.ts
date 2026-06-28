@@ -218,6 +218,7 @@ export async function cancelarItemEnCuenta(
     .update({
       cancelled_at: new Date().toISOString(),
       cancelled_reason: motivo.trim(),
+      cancelled_by: ctx.userId, // spec 34 — responsable de la anulación
     })
     .eq("id", orderItemId);
 

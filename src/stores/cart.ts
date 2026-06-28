@@ -21,6 +21,12 @@ export type CartSelectedChoice = {
   choice_group_label: string;
   product_id: string;
   product_name: string;
+  /**
+   * Adicional de esta opción dentro del combo (spec 29). Se suma al subtotal
+   * de la línea junto al precio base del menú. Default 0 = incluida. El server
+   * lo re-valida contra la DB; el cliente nunca fija el precio.
+   */
+  extra_price_cents: number;
   modifiers: CartModifier[];
 };
 
@@ -107,7 +113,12 @@ export function cartItemSubtotal(item: CartItem): number {
     (acc, m) => acc + m.price_delta_cents,
     0,
   );
-  return (item.unit_price_cents + modsTotal) * item.quantity;
+  // Combos: cada opción elegida puede sumar un adicional (spec 29).
+  const choicesTotal = (item.selected_choices ?? []).reduce(
+    (acc, sc) => acc + (sc.extra_price_cents ?? 0),
+    0,
+  );
+  return (item.unit_price_cents + modsTotal + choicesTotal) * item.quantity;
 }
 
 export function cartTotal(items: CartItem[]): number {

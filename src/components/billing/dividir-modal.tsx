@@ -74,6 +74,7 @@ export function DividirModal({
   orderId,
   slug,
   parentStartTransition,
+  isPending,
   onDone,
 }: {
   open: boolean;
@@ -82,6 +83,8 @@ export function DividirModal({
   orderId: string;
   slug: string;
   parentStartTransition: (cb: () => void | Promise<void>) => void;
+  /** Hay una división (u otro refresh) en vuelo: bloquea re-envíos. */
+  isPending: boolean;
   onDone: () => void;
 }) {
   const startTransition = parentStartTransition;
@@ -167,6 +170,7 @@ export function DividirModal({
             </div>
             <button
               type="button"
+              disabled={isPending}
               className="mt-1 inline-flex h-12 w-full items-center justify-center gap-2 rounded-full bg-primary text-sm font-bold text-primary-foreground transition hover:bg-primary/90 active:translate-y-px disabled:opacity-50"
               onClick={() =>
                 startTransition(async () => {
@@ -179,7 +183,7 @@ export function DividirModal({
                 })
               }
             >
-              Confirmar división
+              {isPending ? "Dividiendo…" : "Confirmar división"}
             </button>
           </TabsContent>
           <TabsContent value="items" className="space-y-3">
@@ -261,7 +265,7 @@ export function DividirModal({
             <button
               type="button"
               className="mt-1 inline-flex h-12 w-full items-center justify-center gap-2 rounded-full bg-primary text-sm font-bold text-primary-foreground transition hover:bg-primary/90 active:translate-y-px disabled:opacity-50"
-              disabled={!allAssigned}
+              disabled={!allAssigned || isPending}
               onClick={() =>
                 startTransition(async () => {
                   const grouped: Record<number, string[]> = {};
@@ -281,7 +285,11 @@ export function DividirModal({
                 })
               }
             >
-              {allAssigned ? "Confirmar" : "Asigná todos los items"}
+              {isPending
+                ? "Dividiendo…"
+                : allAssigned
+                  ? "Confirmar"
+                  : "Asigná todos los items"}
             </button>
           </TabsContent>
           {hasSeatNumbers && (
@@ -331,6 +339,7 @@ export function DividirModal({
               </ul>
               <button
                 type="button"
+                disabled={isPending}
                 className="mt-1 inline-flex h-12 w-full items-center justify-center gap-2 rounded-full bg-primary text-sm font-bold text-primary-foreground transition hover:bg-primary/90 active:translate-y-px disabled:opacity-50"
                 onClick={() =>
                   startTransition(async () => {
@@ -343,7 +352,7 @@ export function DividirModal({
                   })
                 }
               >
-                Confirmar división por comensal
+                {isPending ? "Dividiendo…" : "Confirmar división por comensal"}
               </button>
             </TabsContent>
           )}

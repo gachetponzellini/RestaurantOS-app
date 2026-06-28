@@ -96,11 +96,31 @@ export function WalkInModal({
         </div>
 
         <form className="mt-4 space-y-4" onSubmit={handleSubmit(onSubmit)}>
-          {/* Party size stepper */}
+          {/* Party size: quick-pick directo + stepper */}
           <div>
             <label className="text-[11px] font-bold uppercase tracking-wider text-zinc-500">
               Personas
             </label>
+            {/* Toque directo a las cantidades más comunes */}
+            <div className="mt-2 grid grid-cols-6 gap-1.5">
+              {[1, 2, 3, 4, 5, 6].map((n) => (
+                <button
+                  key={n}
+                  type="button"
+                  aria-label={`${n} personas`}
+                  aria-pressed={partySize === n}
+                  onClick={() => setValue("partySize", n)}
+                  className={`flex h-12 items-center justify-center rounded-xl text-lg font-extrabold tabular-nums transition active:scale-95 ${
+                    partySize === n
+                      ? "bg-emerald-600 text-white shadow-sm"
+                      : "bg-zinc-50 text-zinc-700 ring-1 ring-zinc-200"
+                  }`}
+                >
+                  {n}
+                </button>
+              ))}
+            </div>
+            {/* Stepper para ajustar o más de 6 */}
             <div className="mt-2 flex items-center justify-between rounded-2xl bg-zinc-50 p-2 ring-1 ring-zinc-200">
               <button
                 type="button"

@@ -27,9 +27,15 @@ export default async function CheckoutPage({
     redirect(`/${business_slug}/login?next=${next}`);
   }
 
-  const [savedAddresses, profile] = await Promise.all([
+  const [savedAddresses, profile, { data: businessHours }] = await Promise.all([
     listUserAddresses(user.id, business.id),
     getCustomerProfile(user.id, business.id),
+    // Horarios del local para el selector "¿para cuándo?" del pedido diferido
+    // (spec 31). El server revalida igual en persist-order.
+    supabase
+      .from("business_hours")
+      .select("day_of_week, opens_at, closes_at")
+      .eq("business_id", business.id),
   ]);
 
   const mpEnabled = Boolean(
@@ -72,6 +78,8 @@ export default async function CheckoutPage({
       slug={business_slug}
       businessName={business.name}
       businessAddress={business.address}
+      businessTimezone={business.timezone}
+      businessHours={businessHours ?? []}
       deliveryFeeCents={Number(business.delivery_fee_cents)}
       estimatedMinutes={business.estimated_delivery_minutes}
       savedAddresses={savedAddresses}

@@ -29,6 +29,11 @@ export async function updateOrderStatus(
   }
 
   const supabase = await createSupabaseServerClient();
+  // spec 34 — actor de la anulación (para el resumen de cierre). Es una acción
+  // del panel admin, así que hay sesión; si por algún motivo no, queda null.
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
 
   const { data: current, error: fetchErr } = await supabase
     .from("orders")
@@ -50,6 +55,7 @@ export async function updateOrderStatus(
       status: next_status,
       cancelled_reason:
         next_status === "cancelled" ? (cancelled_reason ?? null) : null,
+      cancelled_by: next_status === "cancelled" ? (user?.id ?? null) : null,
     })
     .eq("id", order_id);
   if (updateErr) {

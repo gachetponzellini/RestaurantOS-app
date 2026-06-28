@@ -567,11 +567,13 @@ describe.skipIf(!dbAvailable)("comandas (integration)", () => {
 
     const { data: cancelled } = await supabase
       .from("order_items")
-      .select("cancelled_at, cancelled_reason")
+      .select("cancelled_at, cancelled_reason, cancelled_by")
       .eq("id", choriItem.id)
       .single();
     expect(cancelled!.cancelled_at).not.toBeNull();
     expect(cancelled!.cancelled_reason).toBe("Sin stock");
+    // spec 34 — se persiste el responsable de la anulación (el encargado actor).
+    expect(cancelled!.cancelled_by).toBe(TEST_ENCARGADO_ID);
 
     const after = await supabase
       .from("orders")

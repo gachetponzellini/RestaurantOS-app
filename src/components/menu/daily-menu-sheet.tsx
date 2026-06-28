@@ -4,7 +4,11 @@ import { useEffect, useState } from "react";
 
 import { I, ImageTile } from "@/components/delivery/primitives";
 import { formatCurrency } from "@/lib/currency";
-import type { MenuDailyMenu, MenuDailyMenuChoiceGroup } from "@/lib/menu";
+import type {
+  MenuDailyMenu,
+  MenuDailyMenuChoiceGroup,
+  MenuDailyMenuComponent,
+} from "@/lib/menu";
 import { useCart } from "@/stores/cart";
 import type { CartSelectedChoice } from "@/stores/cart";
 
@@ -45,7 +49,12 @@ export function DailyMenuSheet({
 
   if (!open || !menu) return null;
 
-  const lineTotal = menu.price_cents * quantity;
+  // Adicional de las opciones elegidas (spec 29): se suma al precio base.
+  const choicesDelta = [...selections.values()].reduce(
+    (acc, sc) => acc + (sc.extra_price_cents ?? 0),
+    0,
+  );
+  const lineTotal = (menu.price_cents + choicesDelta) * quantity;
 
   const allChoicesResolved =
     menu.choice_groups.length === 0 ||
@@ -53,16 +62,16 @@ export function DailyMenuSheet({
 
   const handleSelect = (
     group: MenuDailyMenuChoiceGroup,
-    productId: string,
-    productName: string,
+    opt: MenuDailyMenuComponent,
   ) => {
     setSelections((prev) => {
       const next = new Map(prev);
       next.set(group.choice_group_id, {
         choice_group_id: group.choice_group_id,
         choice_group_label: group.label,
-        product_id: productId,
-        product_name: productName,
+        product_id: opt.product_id!,
+        product_name: opt.product_name ?? opt.label,
+        extra_price_cents: opt.extra_price_cents ?? 0,
         modifiers: [],
       });
       return next;
@@ -337,13 +346,7 @@ export function DailyMenuSheet({
                         <button
                           key={opt.id}
                           type="button"
-                          onClick={() =>
-                            handleSelect(
-                              group,
-                              opt.product_id!,
-                              opt.product_name ?? opt.label,
-                            )
-                          }
+                          onClick={() => handleSelect(group, opt)}
                           style={{
                             display: "flex",
                             alignItems: "center",
@@ -376,10 +379,23 @@ export function DailyMenuSheet({
                               fontSize: 14,
                               fontWeight: isSelected ? 600 : 400,
                               color: "var(--ink)",
+                              flex: 1,
                             }}
                           >
                             {opt.product_name ?? opt.label}
                           </span>
+                          {opt.extra_price_cents > 0 && (
+                            <span
+                              style={{
+                                fontSize: 13,
+                                fontWeight: 600,
+                                color: "var(--ink-2)",
+                                flexShrink: 0,
+                              }}
+                            >
+                              +{formatCurrency(opt.extra_price_cents)}
+                            </span>
+                          )}
                         </button>
                       );
                     })}

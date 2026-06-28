@@ -21,7 +21,7 @@ import { NewReservationModal } from "@/components/admin/local/new-reservation-mo
 import { ReservationsPanel } from "@/components/admin/local/reservations-panel";
 import { SegmentedSelector } from "@/components/admin/local/segmented-selector";
 import { AsignarMozosPanel } from "@/components/mozo/asignar-mozos-panel";
-import { FloorPlanViewer } from "@/components/mozo/floor-plan-viewer";
+import { FloorPlanViewer, type TableExtra } from "@/components/mozo/floor-plan-viewer";
 import { OrderSummaryCard } from "@/components/mozo/order-summary-card";
 import { TransferTableModal } from "@/components/mozo/transfer-table-modal";
 import { WalkInModal } from "@/components/mozo/walk-in-modal";
@@ -38,6 +38,11 @@ import {
   type CuentaPanelData,
 } from "@/lib/billing/cobro-panel-data";
 import type { ComandaConItems } from "@/lib/comandas/queries";
+import {
+  DELAY_COLORS,
+  tableDelay,
+  type TableDelay,
+} from "@/lib/comandas/mesa-demora";
 import { anularMesa, assignMozoToTable } from "@/lib/mozo/actions";
 import {
   loadPedirCatalog,
@@ -71,7 +76,7 @@ export type SalonOrderRef = {
     station_name: string;
     emitted_at: string;
     delivered_at: string | null;
-    items: { product_name: string; quantity: number }[];
+    items: { product_name: string; quantity: number; prep_time_minutes: number | null }[];
   }[];
 };
 
@@ -573,6 +578,41 @@ export function SalonDesktop({
     return m;
   }, [dineInOrders, tableStatusById]);
 
+  // Demora de cocina por mesa (spec 30): la comanda pendiente más demorada de
+  // cada mesa con orden. Recalcula con el `now` del ticker → el punto avanza
+  // solo. En SSR/primer render (now == null) queda vacío para que server y
+  // cliente coincidan (mismo criterio que `minutesOpen`).
+  const delayByTable = useMemo(() => {
+    const m: Record<string, TableDelay> = {};
+    if (now == null) return m;
+    for (const t of activeTables) {
+      const order = orderByTable[t.id];
+      if (!order) continue;
+      const d = tableDelay(order.comandas, now);
+      if (d) m[t.id] = d;
+    }
+    return m;
+  }, [activeTables, orderByTable, now]);
+
+  // Lista accionable de demoras: mesas con nivel ≥ 1, ordenadas por exceso
+  // descendente (la más demorada arriba). Es "lo que de verdad se mira".
+  const demoras = useMemo(() => {
+    return activeTables
+      .map((t) => {
+        const d = delayByTable[t.id];
+        if (!d || d.level < 1) return null;
+        return {
+          tableId: t.id,
+          label: t.label,
+          station: d.station,
+          excessMin: Math.round(d.excessMinutes),
+          level: d.level,
+        };
+      })
+      .filter((x): x is NonNullable<typeof x> => x !== null)
+      .sort((a, b) => b.excessMin - a.excessMin);
+  }, [activeTables, delayByTable]);
+
   const mozoNameById = useMemo(() => {
     const m = new Map<string, string>();
     for (const x of mozos) {
@@ -732,19 +772,11 @@ export function SalonDesktop({
 
   // Extras para el FloorPlanViewer.
   const extras = useMemo(() => {
-    const out: Record<
-      string,
-      {
-        reservation?: { customer_name: string; party_size: number; starts_at: string };
-        order?: { order_number: number; total_cents: number; delivery_type: string };
-        minutesOpen?: number;
-        mozoInitial?: string;
-        mozoColor?: string;
-      }
-    > = {};
+    const out: Record<string, TableExtra> = {};
     for (const t of activeTables) {
       const order = orderByTable[t.id];
       const reservation = reservationByTable[t.id];
+      const delay = delayByTable[t.id];
       // En paint mode usamos `localAssign` (optimistic) para que el tap
       // pinte la mesa de inmediato sin esperar al server.
       const effectiveMozoId = distribuirOpen
@@ -773,6 +805,14 @@ export function SalonDesktop({
           : undefined,
         mozoInitial: mozoName ? initialsFromName(mozoName) : undefined,
         mozoColor: effectiveMozoId ? mozoColor(effectiveMozoId) : undefined,
+        delay:
+          delay && delay.level >= 1
+            ? {
+                level: delay.level,
+                excessMinutes: delay.excessMinutes,
+                station: delay.station,
+              }
+            : undefined,
       };
     }
     return out;
@@ -780,6 +820,7 @@ export function SalonDesktop({
     activeTables,
     orderByTable,
     reservationByTable,
+    delayByTable,
     mozoNameById,
     distribuirOpen,
     localAssign,
@@ -1004,6 +1045,10 @@ export function SalonDesktop({
             />
           ) : (
             <>
+              <DemorasPanel
+                demoras={demoras}
+                onSelect={(id) => setSelectedId(id)}
+              />
               <ReservationsPanel
                 reservations={reservations}
                 slug={slug}
@@ -1242,6 +1287,61 @@ function MozosLegend({
         </span>
       )}
     </div>
+  );
+}
+
+// ─── Lista de demoras (cocina pasada de su tiempo esperado) ─────────────────
+
+function DemorasPanel({
+  demoras,
+  onSelect,
+}: {
+  demoras: {
+    tableId: string;
+    label: string;
+    station: string;
+    excessMin: number;
+    level: number;
+  }[];
+  onSelect: (id: string) => void;
+}) {
+  // Sin demoras → no ocupa lugar (en hora normal el panel no se ensucia).
+  if (demoras.length === 0) return null;
+  return (
+    <section className="border-border/60 border-b">
+      <header className="flex items-center gap-2 px-4 pb-1.5 pt-3">
+        <Clock className="size-3.5 text-red-600" />
+        <h3 className="text-[0.65rem] font-semibold uppercase tracking-[0.14em] text-red-700">
+          Cocina demorada · {demoras.length}
+        </h3>
+      </header>
+      <ul className="pb-2">
+        {demoras.map((d) => (
+          <li key={d.tableId}>
+            <button
+              type="button"
+              onClick={() => onSelect(d.tableId)}
+              className="flex w-full items-center gap-2.5 px-4 py-1.5 text-left transition hover:bg-zinc-50"
+            >
+              <span
+                aria-hidden
+                className="size-2.5 shrink-0 rounded-full"
+                style={{ background: DELAY_COLORS[d.level] }}
+              />
+              <span className="font-heading min-w-0 flex-1 truncate text-sm font-bold text-zinc-900">
+                {d.label}
+              </span>
+              <span className="max-w-[7rem] truncate text-[11px] text-zinc-500">
+                {d.station}
+              </span>
+              <span className="shrink-0 text-[11px] font-semibold tabular-nums text-red-700">
+                +{d.excessMin} min
+              </span>
+            </button>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
 

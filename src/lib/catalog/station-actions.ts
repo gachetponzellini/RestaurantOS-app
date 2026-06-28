@@ -3,10 +3,12 @@
 import { revalidatePath } from "next/cache";
 
 import { actionError, actionOk, type ActionResult } from "@/lib/actions";
+import { canManageBusiness, ensureAdminAccess } from "@/lib/admin/context";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
+import { getBusiness } from "@/lib/tenant";
 
-import { StationInput } from "./schemas";
+import { StationInput, StationPrinterInput } from "./schemas";
 
 async function getBusinessIdBySlug(slug: string): Promise<string | null> {
   const service = createSupabaseServiceClient();
@@ -113,6 +115,58 @@ export async function deleteStation(
     return actionError("No pudimos borrar el sector.");
   }
   revalidatePath(`/${businessSlug}/admin/catalogo`);
+  return actionOk(null);
+}
+
+/**
+ * Configura la comandera (impresora térmica) de un sector (spec 28). La IP vive
+ * en `stations` (no es secreto: LAN). Gate `canManageBusiness` (admin/platform,
+ * igual que el resto de `/admin/configuracion`); update scopeado por
+ * `business_id` para no tocar sectores de otro negocio. IP vacía → null = sector
+ * sin impresora (el print agent lo saltea).
+ */
+export async function setStationPrinter(
+  businessSlug: string,
+  stationId: string,
+  input: unknown,
+): Promise<ActionResult<null>> {
+  const parsed = StationPrinterInput.safeParse(input);
+  if (!parsed.success) {
+    console.error("setStationPrinter · invalid input", {
+      input,
+      issues: parsed.error.issues,
+    });
+    const first = parsed.error.issues[0];
+    return actionError(
+      first ? `${first.path.join(".") || "campo"}: ${first.message}` : "Datos inválidos.",
+    );
+  }
+
+  const business = await getBusiness(businessSlug);
+  if (!business) return actionError("Negocio no encontrado.");
+
+  const ctx = await ensureAdminAccess(business.id, businessSlug);
+  if (!canManageBusiness(ctx)) {
+    return actionError("No tenés permisos para configurar las comanderas.");
+  }
+
+  const service = createSupabaseServiceClient();
+  const { error } = await service
+    .from("stations")
+    .update({
+      printer_ip: parsed.data.printer_ip,
+      printer_port: parsed.data.printer_port,
+      printer_enabled: parsed.data.printer_enabled,
+    })
+    .eq("id", stationId)
+    .eq("business_id", business.id);
+
+  if (error) {
+    console.error("setStationPrinter", error);
+    return actionError("No pudimos guardar la comandera.");
+  }
+
+  revalidatePath(`/${businessSlug}/admin/configuracion`);
   return actionOk(null);
 }
 

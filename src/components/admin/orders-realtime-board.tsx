@@ -1,12 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Bell } from "lucide-react";
+import { Bell, Clock } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import type { AdminOrder } from "@/lib/admin/orders-query";
 import { confirmarPedido } from "@/lib/orders/confirm-order";
+import { isScheduledForLater } from "@/lib/orders/scheduled";
 import type { OrderStatus } from "@/lib/orders/status";
 import { updateOrderStatus } from "@/lib/orders/update-status";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
@@ -128,7 +129,7 @@ export function OrdersRealtimeBoard({
       const { data } = await supabase
         .from("orders")
         .select(
-          "id, order_number, created_at, customer_name, customer_phone, delivery_type, total_cents, status, payment_method, payment_status, cancelled_reason, order_items(product_name, quantity)",
+          "id, order_number, created_at, customer_name, customer_phone, delivery_type, total_cents, status, payment_method, payment_status, cancelled_reason, scheduled_at, order_items(product_name, quantity)",
         )
         .eq("id", orderId)
         .maybeSingle();
@@ -148,6 +149,7 @@ export function OrdersRealtimeBoard({
         payment_method: data.payment_method,
         payment_status: data.payment_status,
         cancelled_reason: data.cancelled_reason,
+        scheduled_at: data.scheduled_at,
         items: (data.order_items ?? []).map((i) => ({
           product_name: i.product_name,
           quantity: i.quantity,
@@ -279,15 +281,34 @@ export function OrdersRealtimeBoard({
     setSoundUnlocked(true);
   };
 
-  const byColumn = useMemo(() => {
+  // Agendados (spec 31): pedidos diferidos pagados que todavía no marcharon
+  // (scheduled_at futuro + pending). Van a la sección "Próximos", NO al kanban
+  // — recién entran a las columnas cuando marchan (status → preparing, por el
+  // cron ~40 min antes o "marchar ahora").
+  const { agendados, byColumn } = useMemo(() => {
+    const now = new Date();
+    const isAgendadoPending = (o: AdminOrder) =>
+      !!o.scheduled_at &&
+      o.status === "pending" &&
+      isScheduledForLater(o.scheduled_at, now);
+
+    const proximos = orders
+      .filter((o) => isAgendadoPending(o) && o.payment_status === "paid")
+      .sort((a, b) =>
+        (a.scheduled_at ?? "").localeCompare(b.scheduled_at ?? ""),
+      );
+
     const groups: Record<string, AdminOrder[]> = {};
     for (const col of COLUMNS) groups[col.key] = [];
     for (const order of orders) {
+      // Un agendado-pendiente (pago o impago) no va al kanban: o está en
+      // Próximos (pago) o esperando el pago (no ensucia la operación de hoy).
+      if (isAgendadoPending(order)) continue;
       const col = COLUMNS.find((c) => c.statuses.includes(order.status));
       if (col) groups[col.key].push(order);
     }
     groups["delivered"] = groups["delivered"].slice(0, 20);
-    return groups;
+    return { agendados: proximos, byColumn: groups };
   }, [orders]);
 
   const cancelledOrders = useMemo(
@@ -306,6 +327,35 @@ export function OrdersRealtimeBoard({
             Activar sonido
           </Button>
         </div>
+      )}
+
+      {/* Próximos / agendados (spec 31): diferidos pagados esperando su hora.
+          Entran al kanban cuando marchan (cron ~40 min antes o "marchar ahora"). */}
+      {agendados.length > 0 && (
+        <section className="ring-border/60 rounded-2xl bg-violet-50/40 p-4 ring-1">
+          <div className="mb-3 flex items-center gap-2">
+            <Clock className="size-4 text-violet-600" />
+            <h2 className="text-foreground text-base font-bold tracking-tight">
+              Próximos
+            </h2>
+            <span className="inline-flex h-6 min-w-6 items-center justify-center rounded-full bg-violet-100 px-2 text-xs font-bold tabular-nums text-violet-700">
+              {agendados.length}
+            </span>
+            <span className="text-muted-foreground text-xs">
+              programados para retirar
+            </span>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {agendados.map((order) => (
+              <ScheduledOrderCard
+                key={order.id}
+                order={order}
+                timezone={timezone}
+                onMarchNow={() => handleConfirm(order)}
+              />
+            ))}
+          </div>
+        </section>
       )}
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
@@ -377,6 +427,73 @@ export function OrdersRealtimeBoard({
           </div>
         </details>
       )}
+    </div>
+  );
+}
+
+/** "vie 26/06 · 13:00 hs" en el TZ del negocio. */
+function formatScheduled(iso: string, timezone: string): string {
+  const d = new Date(iso);
+  const date = new Intl.DateTimeFormat("es-AR", {
+    timeZone: timezone,
+    weekday: "short",
+    day: "2-digit",
+    month: "2-digit",
+  }).format(d);
+  const time = new Intl.DateTimeFormat("es-AR", {
+    timeZone: timezone,
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(d);
+  return `${date} · ${time} hs`;
+}
+
+function ScheduledOrderCard({
+  order,
+  timezone,
+  onMarchNow,
+}: {
+  order: AdminOrder;
+  timezone: string;
+  onMarchNow: () => void;
+}) {
+  const [marching, setMarching] = useState(false);
+  const itemsLabel = order.items
+    .map((i) => `${i.quantity}× ${i.product_name}`)
+    .join(" · ");
+  return (
+    <div className="ring-border/60 flex flex-col gap-2 rounded-xl bg-white p-3 ring-1">
+      <div className="flex items-center justify-between gap-2">
+        <span className="inline-flex items-center gap-1.5 text-sm font-bold text-violet-700">
+          <Clock className="size-3.5" />
+          {order.scheduled_at ? formatScheduled(order.scheduled_at, timezone) : ""}
+        </span>
+        <span className="text-muted-foreground text-xs font-medium tabular-nums">
+          #{order.order_number}
+        </span>
+      </div>
+      <div className="text-foreground text-sm font-semibold">
+        {order.customer_name}
+      </div>
+      {itemsLabel && (
+        <div className="text-muted-foreground line-clamp-2 text-xs">
+          {itemsLabel}
+        </div>
+      )}
+      <div className="flex items-center justify-between gap-2 pt-1">
+        <span className="text-xs font-medium text-emerald-700">Pagado</span>
+        <Button
+          size="sm"
+          onClick={() => {
+            setMarching(true);
+            onMarchNow();
+          }}
+          disabled={marching}
+        >
+          {marching ? "Marchando…" : "Marchar ahora"}
+        </Button>
+      </div>
     </div>
   );
 }

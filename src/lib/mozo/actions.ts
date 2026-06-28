@@ -212,6 +212,7 @@ export async function updateTableOperationalStatus(
         lifecycle_status: "cancelled",
         cancelled_at: new Date().toISOString(),
         cancelled_reason: "Mesa liberada",
+        cancelled_by: ctx.userId, // spec 34 — responsable de la anulación
       })
       .eq("table_id", tableId)
       .eq("business_id", business.id)
@@ -418,6 +419,7 @@ export async function anularMesa(
       lifecycle_status: "cancelled",
       cancelled_at: nowIso,
       cancelled_reason: reason,
+      cancelled_by: ctx.userId, // spec 34 — responsable de la anulación
     })
     .eq("table_id", tableId)
     .eq("business_id", business.id)

@@ -258,21 +258,21 @@ export function ProductModal({
             <button
               onClick={() => setQuantity((q) => Math.max(1, q - 1))}
               disabled={quantity <= 1}
-              className="rounded-full bg-white p-2.5 shadow-sm ring-1 ring-zinc-200 active:scale-[0.95] disabled:opacity-40"
+              className="flex h-12 w-12 items-center justify-center rounded-full bg-white shadow-sm ring-1 ring-zinc-200 active:scale-[0.95] disabled:opacity-40"
               aria-label="Restar"
             >
-              <Minus className="h-4 w-4" />
+              <Minus className="h-5 w-5" />
             </button>
-            <span className="w-8 text-center text-lg font-bold tabular-nums">
+            <span className="w-10 text-center text-xl font-bold tabular-nums">
               {quantity}
             </span>
             <button
               onClick={() => setQuantity((q) => Math.min(99, q + 1))}
               disabled={quantity >= 99}
-              className="rounded-full bg-white p-2.5 shadow-sm ring-1 ring-zinc-200 active:scale-[0.95] disabled:opacity-40"
+              className="flex h-12 w-12 items-center justify-center rounded-full bg-white shadow-sm ring-1 ring-zinc-200 active:scale-[0.95] disabled:opacity-40"
               aria-label="Sumar"
             >
-              <Plus className="h-4 w-4" />
+              <Plus className="h-5 w-5" />
             </button>
           </div>
         </div>

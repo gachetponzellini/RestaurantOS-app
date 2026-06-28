@@ -11,6 +11,7 @@ import {
   CalendarX2,
   CheckCircle2,
   PackageX,
+  Printer,
   ReceiptText,
   ShoppingBag,
   Trash2,
@@ -162,6 +163,23 @@ export function viewForNotification(n: Notification): NotiView {
       icon: Trash2,
       title: `Ítem anulado · Mesa ${tableLabel}`,
       body: [itemName, reason].filter(Boolean).join(" — ") || "Se anuló un ítem.",
+    };
+  }
+  // ── spec 33 ───────────────────────────────────────────────────────
+  if (n.type === "comanda.impresion_fallida") {
+    const tableLabel = p.tableLabel as string | undefined;
+    const orderNumber = p.orderNumber as number | undefined;
+    const stationName = (p.stationName as string | undefined) ?? "Cocina";
+    const origen = tableLabel
+      ? `Mesa ${tableLabel}`
+      : orderNumber
+        ? `Pedido #${orderNumber}`
+        : "Pedido";
+    return {
+      tone: "danger",
+      icon: Printer,
+      title: `No se imprimió · ${origen}`,
+      body: `${stationName} — revisá la comandera`,
     };
   }
 

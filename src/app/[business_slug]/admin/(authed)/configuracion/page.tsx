@@ -1,6 +1,6 @@
 import { notFound, redirect } from "next/navigation";
 
-import { Bell, Clock, CreditCard, Fingerprint, MessageCircle, Receipt, Smartphone } from "lucide-react";
+import { Bell, Clock, CreditCard, Fingerprint, Mail, MessageCircle, Printer, Receipt, Smartphone } from "lucide-react";
 
 import { AfipConfigForm } from "@/components/admin/settings/afip-config-form";
 import { BusinessHoursForm } from "@/components/admin/settings/business-hours-form";
@@ -10,6 +10,11 @@ import { DeliveryTemplatesForm } from "@/components/admin/settings/delivery-temp
 import { NotificationPreferencesForm } from "@/components/admin/settings/notification-preferences-form";
 import { PaymentMethodsConfig } from "@/components/admin/settings/payment-methods-config";
 import { SettingsSection } from "@/components/admin/settings/settings-section";
+import { ShiftSummaryForm } from "@/components/admin/settings/shift-summary-form";
+import {
+  StationPrintersForm,
+  type StationPrinterRow,
+} from "@/components/admin/settings/station-printers-form";
 import { WhatsappConfigForm } from "@/components/admin/settings/whatsapp-config-form";
 import { PageHeader, PageShell } from "@/components/admin/shell/page-shell";
 import {
@@ -38,7 +43,7 @@ export default async function ConfiguracionPage({
 
   const settings = getBusinessSettings(business);
   const service = createSupabaseServiceClient();
-  const [menu, methodConfigs, { data: businessHours }, clockOrigins] =
+  const [menu, methodConfigs, { data: businessHours }, clockOrigins, { data: stations }] =
     await Promise.all([
       getMenu(business.id, currentDayOfWeek(business.timezone)),
       getAllPaymentMethodConfigs(business.id),
@@ -49,6 +54,11 @@ export default async function ConfiguracionPage({
         .order("day_of_week")
         .order("opens_at"),
       listClockOrigins(business.id),
+      service
+        .from("stations")
+        .select("id, name, is_active, printer_ip, printer_port, printer_enabled")
+        .eq("business_id", business.id)
+        .order("sort_order"),
     ]);
   const sampleProducts = menu.categories
     .flatMap((c) => c.products)
@@ -172,6 +182,19 @@ export default async function ConfiguracionPage({
 
       <div className="mt-8">
         <SettingsSection
+          icon={<Printer className="size-5" />}
+          title="Comanderas"
+          description="Asigná a cada sector la IP de su impresora térmica en la red del local. Dejá la IP vacía para un sector sin comandera (no se imprime). Puerto por defecto 9100."
+        >
+          <StationPrintersForm
+            slug={business_slug}
+            stations={(stations ?? []) as StationPrinterRow[]}
+          />
+        </SettingsSection>
+      </div>
+
+      <div className="mt-8">
+        <SettingsSection
           icon={<CreditCard className="size-5" />}
           title="Métodos de pago"
           description="Configurá recargos o descuentos por método de pago. Se aplican automáticamente al cobrar."
@@ -231,6 +254,23 @@ export default async function ConfiguracionPage({
           description="Personalizá el mensaje que recibe el cliente en cada cambio de estado de su pedido."
         >
           <DeliveryTemplatesForm slug={business_slug} />
+        </SettingsSection>
+      </div>
+
+      <div className="mt-8">
+        <SettingsSection
+          icon={<Mail className="size-5" />}
+          title="Resumen de cierre por email"
+          description="Recibí por mail el resumen del día (recaudación, facturación, mesas, por mozo y anulaciones) a la hora de cierre. Vacío en destinatarios = los admins del negocio."
+        >
+          <ShiftSummaryForm
+            slug={business_slug}
+            initial={{
+              enabled: settings.closing_summary_enabled ?? false,
+              hour: settings.closing_summary_hour ?? 23,
+              recipients: settings.closing_summary_recipients ?? [],
+            }}
+          />
         </SettingsSection>
       </div>
 

@@ -63,7 +63,7 @@ export function ProductCard({
           </div>
         )}
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <span style={{ fontSize: 14, fontWeight: 600, color: "var(--ink)" }}>
+          <span style={{ fontSize: 14, fontWeight: 300, color: "var(--ink)" }}>
             {formatCurrency(product.price_cents)}
           </span>
           {soldOut && (

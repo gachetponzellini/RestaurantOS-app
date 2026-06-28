@@ -219,3 +219,15 @@ export function canConfigureReservations(role: BusinessRole | null): boolean {
 export function canManageNotificationPrefs(role: BusinessRole): boolean {
   return role === "admin" || role === "encargado";
 }
+
+// ── Bandeja de conversaciones / handoff (spec 32) ───────────────
+
+/**
+ * Ver la bandeja de conversaciones de WhatsApp, tomar una conversación
+ * (apagar/prender el agente) y escribirle al cliente como humano. Es atención
+ * al cliente del mostrador: admin/encargado. El mozo está en salón, no opera
+ * la bandeja. El platform admin entra con rol funcional 'admin'.
+ */
+export function canManageConversations(role: BusinessRole): boolean {
+  return role === "admin" || role === "encargado";
+}

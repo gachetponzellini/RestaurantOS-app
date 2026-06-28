@@ -52,6 +52,13 @@ export const CreateOrderInput = z
      * treated as "no code" by persist-order.
      */
     promo_code: z.string().trim().max(40).optional(),
+    /**
+     * Pedido diferido (spec 31): instante ISO de retiro futuro. Ausente = "para
+     * ahora". Las reglas contextuales (horario, anticipación, ventana) se
+     * validan server-side con los `business_hours` del negocio en persist-order;
+     * acá sólo la coherencia que no necesita contexto.
+     */
+    scheduled_at: z.string().datetime({ offset: true }).optional(),
     items: z.array(OrderItemInput).min(1),
   })
   .superRefine((data, ctx) => {
@@ -61,6 +68,23 @@ export const CreateOrderInput = z
         message: "Ingresá una dirección de entrega.",
         path: ["delivery_address"],
       });
+    }
+    if (data.scheduled_at) {
+      // Programar es solo retiro (R1.2) y fuerza MP adelantado (R2.3).
+      if (data.delivery_type !== "pickup") {
+        ctx.addIssue({
+          code: "custom",
+          message: "Solo se pueden programar pedidos de retiro.",
+          path: ["scheduled_at"],
+        });
+      }
+      if (data.payment_method !== "mp") {
+        ctx.addIssue({
+          code: "custom",
+          message: "Un pedido programado se paga con Mercado Pago.",
+          path: ["payment_method"],
+        });
+      }
     }
   });
 

@@ -98,10 +98,13 @@ export async function cancelOrderByCustomer(
   const update: {
     status: string;
     cancelled_reason: string;
+    cancelled_by: string;
     payment_status?: string;
   } = {
     status: "cancelled",
     cancelled_reason: "Cancelado por el cliente",
+    // spec 34 — quién anuló. Acá el actor es el propio cliente (auth.users).
+    cancelled_by: user.id,
   };
   if (refundOutcome === "refunded") {
     update.payment_status = "refunded";

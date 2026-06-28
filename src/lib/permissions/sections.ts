@@ -28,6 +28,7 @@ export type AdminSection =
   | "promociones"
   | "campanas"
   | "chatbot"
+  | "conversaciones"
   | "reportes"
   | "proveedores"
   | "facturacion"
@@ -56,6 +57,9 @@ const MATRIX: Record<AdminSection, Record<BusinessRole, SectionAccess>> = {
   promociones: { admin: "full", encargado: "full", mozo: "none", personal: "none" },
   campanas: { admin: "full", encargado: "full", mozo: "none", personal: "none" },
   chatbot: { admin: "full", encargado: "limited", mozo: "none", personal: "none" },
+  // Bandeja de conversaciones + handoff humano (spec 32): atención al cliente
+  // del mostrador. Admin/encargado la operan; mozo está en salón.
+  conversaciones: { admin: "full", encargado: "full", mozo: "none", personal: "none" },
   reportes: { admin: "full", encargado: "none", mozo: "none", personal: "none" },
   proveedores: { admin: "full", encargado: "full", mozo: "none", personal: "none" },
   facturacion: { admin: "full", encargado: "none", mozo: "none", personal: "none" },

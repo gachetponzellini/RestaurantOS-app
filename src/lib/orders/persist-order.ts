@@ -8,7 +8,11 @@ import { createPreference } from "@/lib/payments/mercadopago";
 import { validatePromoCode } from "@/lib/promos/validate";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 
+import type { BusinessHourSlot } from "@/lib/business-hours/schema";
+
+import { resolveComboUpcharge } from "./combo-pricing";
 import { routeOrderToCocina } from "./route-to-cocina";
+import { isScheduledForLater, validateScheduledOrder } from "./scheduled";
 import type { CreateOrderInput } from "./schema";
 
 export type CreateOrderResult = {
@@ -55,6 +59,30 @@ export async function persistOrder(
     return actionError("Este negocio no acepta Mercado Pago por ahora.");
   }
   const paymentMethod = wantsMp ? "mp" : "cash";
+
+  // ── Pedido diferido (spec 31) ───────────────────────────────────────────
+  // Con `scheduled_at` validamos contra el horario del negocio + reglas fijas
+  // (retiro, MP adelantado, anticipación, ventana). Server es la fuente de
+  // verdad: el checkout reusa el mismo helper sólo para feedback. El "agendado"
+  // es un estado derivado (futuro + pago aprobado + sin comandas), no marcha
+  // hasta ~40 min antes (cron) o "marchar ahora".
+  let scheduledAtIso: string | null = null;
+  if (data.scheduled_at) {
+    const scheduledAt = new Date(data.scheduled_at);
+    const { data: hoursRows } = await supabase
+      .from("business_hours")
+      .select("day_of_week, opens_at, closes_at")
+      .eq("business_id", business.id);
+    const validation = validateScheduledOrder({
+      scheduledAt,
+      deliveryType: data.delivery_type,
+      paymentMethod,
+      businessHours: (hoursRows ?? []) as BusinessHourSlot[],
+      timezone: business.timezone,
+    });
+    if (!validation.ok) return actionError(validation.error);
+    scheduledAtIso = scheduledAt.toISOString();
+  }
 
   // Separamos ítems por tipo. Un carrito puede mezclar productos y menús.
   const productItems = data.items.filter(
@@ -133,6 +161,7 @@ export async function persistOrder(
     product_id: string | null;
     choice_group_id: string | null;
     choice_group_label: string | null;
+    extra_price_cents: number;
   };
   type DailyMenuRow = {
     id: string;
@@ -151,7 +180,7 @@ export async function persistOrder(
     const { data: menus } = await supabase
       .from("daily_menus")
       .select(
-        "id, name, price_cents, image_url, available_days, is_active, is_available, business_id, daily_menu_components(id, label, description, sort_order, kind, product_id, choice_group_id, choice_group_label)",
+        "id, name, price_cents, image_url, available_days, is_active, is_available, business_id, daily_menu_components(id, label, description, sort_order, kind, product_id, choice_group_id, choice_group_label, extra_price_cents)",
       )
       .in("id", menuIds);
     if (!menus || menus.length !== menuIds.length) {
@@ -211,6 +240,13 @@ export async function persistOrder(
           name: string;
           image_url: string | null;
           components: { label: string; description: string | null; kind?: string; product_id?: string | null }[];
+          // Desglose de opciones elegidas con su adicional (spec 29), para que
+          // el detalle de la orden explique el "+$X".
+          selected_choices: {
+            choice_group_label: string;
+            product_name: string;
+            extra_price_cents: number;
+          }[];
         };
         product_name: string;
         unit_price_cents: number;
@@ -222,12 +258,34 @@ export async function persistOrder(
         selected_choices: { product_id: string; modifier_ids: string[] }[];
       };
 
+  // `for…of` (no `.map`) para poder cortar con `actionError` si una opción de
+  // combo no es válida (validación server-side del adicional, spec 29).
   let subtotalCents = 0;
-  const lines: OrderLine[] = data.items.map((inputItem): OrderLine => {
+  const lines: OrderLine[] = [];
+  for (const inputItem of data.items) {
     if (inputItem.kind === "daily_menu") {
       const menu = menuById.get(inputItem.daily_menu_id)!;
-      const lineSubtotal = menu.price_cents * inputItem.quantity;
+
+      // Adicional por opción: la fuente de verdad es la DB, NO el payload. El
+      // cliente sólo informa QUÉ eligió (choice_group_id + product_id).
+      const upcharge = resolveComboUpcharge(
+        (menu.daily_menu_components ?? []).map((c) => ({
+          kind: c.kind ?? "text",
+          choice_group_id: c.choice_group_id,
+          product_id: c.product_id,
+          extra_price_cents: Number(c.extra_price_cents ?? 0),
+        })),
+        (inputItem.selected_choices ?? []).map((sc) => ({
+          choice_group_id: sc.choice_group_id,
+          product_id: sc.product_id,
+        })),
+      );
+      if (!upcharge.ok) return actionError(upcharge.error);
+
+      const unitPrice = menu.price_cents + upcharge.deltaCents;
+      const lineSubtotal = unitPrice * inputItem.quantity;
       subtotalCents += lineSubtotal;
+
       const components = (menu.daily_menu_components ?? [])
         .slice()
         .sort((a, b) => a.sort_order - b.sort_order)
@@ -241,7 +299,22 @@ export async function persistOrder(
         .filter((c) => c.kind === "product" && c.product_id)
         .map((c) => c.product_id!);
 
-      return {
+      // Desglose de las opciones elegidas con su adicional (de la DB) para el
+      // snapshot. label/product_name son sólo display (vienen del payload).
+      const extraByKey = new Map(
+        upcharge.choices.map((c) => [
+          `${c.choice_group_id}::${c.product_id}`,
+          c.extra_price_cents,
+        ]),
+      );
+      const snapshotChoices = (inputItem.selected_choices ?? []).map((sc) => ({
+        choice_group_label: sc.choice_group_label,
+        product_name: sc.product_name,
+        extra_price_cents:
+          extraByKey.get(`${sc.choice_group_id}::${sc.product_id}`) ?? 0,
+      }));
+
+      lines.push({
         kind: "daily_menu",
         product_id: null,
         daily_menu_id: menu.id,
@@ -249,9 +322,12 @@ export async function persistOrder(
           name: menu.name,
           image_url: menu.image_url,
           components,
+          selected_choices: snapshotChoices,
         },
         product_name: menu.name,
-        unit_price_cents: menu.price_cents,
+        // El adicional va en el PADRE; los hijos siguen en $0 (invariante de
+        // is_combo_component → reportes/caja/confirmación sin cambios).
+        unit_price_cents: unitPrice,
         quantity: inputItem.quantity,
         notes: inputItem.notes ?? null,
         subtotal_cents: lineSubtotal,
@@ -261,7 +337,8 @@ export async function persistOrder(
           product_id: sc.product_id,
           modifier_ids: sc.modifier_ids ?? [],
         })),
-      };
+      });
+      continue;
     }
     const product = productById.get(inputItem.product_id)!;
     const modLines = inputItem.modifier_ids.map((id) => {
@@ -276,7 +353,7 @@ export async function persistOrder(
     const lineSubtotal =
       (product.price_cents + modsTotal) * inputItem.quantity;
     subtotalCents += lineSubtotal;
-    return {
+    lines.push({
       kind: "product",
       product_id: product.id,
       daily_menu_id: null,
@@ -287,8 +364,8 @@ export async function persistOrder(
       notes: inputItem.notes ?? null,
       subtotal_cents: lineSubtotal,
       modifiers: modLines,
-    };
-  });
+    });
+  }
 
   let deliveryFeeCents = 0;
   if (data.delivery_type === "delivery") {
@@ -371,6 +448,7 @@ export async function persistOrder(
     payment_status: "pending",
     promo_code_id: promoCodeId,
     promo_code_snapshot: promoCodeSnapshot,
+    scheduled_at: scheduledAtIso,
   };
   const { data: order, error: orderErr } = await supabase
     .from("orders")
@@ -626,7 +704,9 @@ export async function persistOrder(
 
   // Auto-march (spec-05): pedidos cash van directo a cocina al crearse.
   // Pedidos MP esperan el webhook de pago aprobado.
-  if (paymentMethod === "cash") {
+  // Diferido (spec 31): si es para más tarde, no marcha ahora aunque sea cash
+  // (defensa extra — el schema ya fuerza MP en los programados).
+  if (paymentMethod === "cash" && !isScheduledForLater(scheduledAtIso)) {
     try {
       await routeOrderToCocina(order.id, business.id);
     } catch (e) {

@@ -72,7 +72,7 @@ export default async function LocalEnVivoPage({
     service
       .from("orders")
       .select(
-        "id, order_number, table_id, total_cents, created_at, status, customer_name, order_items(product_name, quantity, cancelled_at), comandas(id, batch, status, station_id, emitted_at, delivered_at, stations(name), comanda_items(order_items(product_name, quantity, cancelled_at)))",
+        "id, order_number, table_id, total_cents, created_at, status, customer_name, order_items(product_name, quantity, cancelled_at), comandas(id, batch, status, station_id, emitted_at, delivered_at, stations(name), comanda_items(order_items(product_name, quantity, cancelled_at, products(prep_time_minutes))))",
       )
       .eq("business_id", business.id)
       .eq("delivery_type", "dine_in")
@@ -115,11 +115,15 @@ export default async function LocalEnVivoPage({
         stations={stations}
         floorPlans={floorPlans}
         dineInOrders={(dineInOrders ?? []).map((o) => {
+          type RawProduct = { prep_time_minutes: number | null };
+          type RawOrderItem = {
+            product_name: string;
+            quantity: number;
+            cancelled_at: string | null;
+            products: RawProduct | RawProduct[] | null;
+          };
           type RawComandaItem = {
-            order_items:
-              | { product_name: string; quantity: number; cancelled_at: string | null }
-              | { product_name: string; quantity: number; cancelled_at: string | null }[]
-              | null;
+            order_items: RawOrderItem | RawOrderItem[] | null;
           };
           type RawComanda = {
             id: string;
@@ -159,16 +163,19 @@ export default async function LocalEnVivoPage({
                     : ci.order_items,
                 )
                 .filter(
-                  (oi): oi is {
-                    product_name: string;
-                    quantity: number;
-                    cancelled_at: string | null;
-                  } => oi != null && oi.cancelled_at === null,
+                  (oi): oi is RawOrderItem =>
+                    oi != null && oi.cancelled_at === null,
                 )
-                .map((oi) => ({
-                  product_name: oi.product_name,
-                  quantity: oi.quantity,
-                }));
+                .map((oi) => {
+                  const product = Array.isArray(oi.products)
+                    ? oi.products[0]
+                    : oi.products;
+                  return {
+                    product_name: oi.product_name,
+                    quantity: oi.quantity,
+                    prep_time_minutes: product?.prep_time_minutes ?? null,
+                  };
+                });
               return {
                 id: c.id,
                 batch: c.batch,

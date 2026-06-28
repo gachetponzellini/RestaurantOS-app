@@ -57,6 +57,9 @@ async function syncComponents(
       product_id: component.product_id ?? null,
       choice_group_id: component.choice_group_id ?? null,
       choice_group_label: component.choice_group_label ?? null,
+      // Adicional sólo para `choice` (spec 29); los demás kinds van en 0.
+      extra_price_cents:
+        component.kind === "choice" ? (component.extra_price_cents ?? 0) : 0,
     };
     if (component.id) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any

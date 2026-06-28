@@ -12,6 +12,31 @@ export type Database = {
   __InternalSupabase: {
     PostgrestVersion: "14.5"
   }
+  graphql_public: {
+    Tables: {
+      [_ in never]: never
+    }
+    Views: {
+      [_ in never]: never
+    }
+    Functions: {
+      graphql: {
+        Args: {
+          extensions?: Json
+          operationName?: string
+          query?: string
+          variables?: Json
+        }
+        Returns: Json
+      }
+    }
+    Enums: {
+      [_ in never]: never
+    }
+    CompositeTypes: {
+      [_ in never]: never
+    }
+  }
   public: {
     Tables: {
       business_hours: {
@@ -896,6 +921,7 @@ export type Database = {
           emitted_at: string
           id: string
           order_id: string
+          print_failed_at: string | null
           station_id: string
           status: string
         }
@@ -905,6 +931,7 @@ export type Database = {
           emitted_at?: string
           id?: string
           order_id: string
+          print_failed_at?: string | null
           station_id: string
           status?: string
         }
@@ -914,6 +941,7 @@ export type Database = {
           emitted_at?: string
           id?: string
           order_id?: string
+          print_failed_at?: string | null
           station_id?: string
           status?: string
         }
@@ -1024,6 +1052,7 @@ export type Database = {
           choice_group_id: string | null
           choice_group_label: string | null
           description: string | null
+          extra_price_cents: number
           id: string
           kind: string
           label: string
@@ -1035,6 +1064,7 @@ export type Database = {
           choice_group_id?: string | null
           choice_group_label?: string | null
           description?: string | null
+          extra_price_cents?: number
           id?: string
           kind?: string
           label: string
@@ -1046,6 +1076,7 @@ export type Database = {
           choice_group_id?: string | null
           choice_group_label?: string | null
           description?: string | null
+          extra_price_cents?: number
           id?: string
           kind?: string
           label?: string
@@ -1455,6 +1486,7 @@ export type Database = {
           business_id: string
           cae: string | null
           cae_vencimiento: string | null
+          cancelled_by: string | null
           cancelled_reason: string | null
           cancels_invoice_id: string | null
           created_at: string
@@ -1481,6 +1513,7 @@ export type Database = {
           business_id: string
           cae?: string | null
           cae_vencimiento?: string | null
+          cancelled_by?: string | null
           cancelled_reason?: string | null
           cancels_invoice_id?: string | null
           created_at?: string
@@ -1507,6 +1540,7 @@ export type Database = {
           business_id?: string
           cae?: string | null
           cae_vencimiento?: string | null
+          cancelled_by?: string | null
           cancelled_reason?: string | null
           cancels_invoice_id?: string | null
           created_at?: string
@@ -1831,6 +1865,7 @@ export type Database = {
       order_items: {
         Row: {
           cancelled_at: string | null
+          cancelled_by: string | null
           cancelled_reason: string | null
           daily_menu_id: string | null
           daily_menu_snapshot: Json | null
@@ -1851,6 +1886,7 @@ export type Database = {
         }
         Insert: {
           cancelled_at?: string | null
+          cancelled_by?: string | null
           cancelled_reason?: string | null
           daily_menu_id?: string | null
           daily_menu_snapshot?: Json | null
@@ -1871,6 +1907,7 @@ export type Database = {
         }
         Update: {
           cancelled_at?: string | null
+          cancelled_by?: string | null
           cancelled_reason?: string | null
           daily_menu_id?: string | null
           daily_menu_snapshot?: Json | null
@@ -2065,6 +2102,7 @@ export type Database = {
           bill_requested_at: string | null
           business_id: string
           cancelled_at: string | null
+          cancelled_by: string | null
           cancelled_reason: string | null
           closed_at: string | null
           created_at: string
@@ -2089,6 +2127,7 @@ export type Database = {
           payment_status: string
           promo_code_id: string | null
           promo_code_snapshot: string | null
+          scheduled_at: string | null
           status: string
           subtotal_cents: number
           table_id: string | null
@@ -2101,6 +2140,7 @@ export type Database = {
           bill_requested_at?: string | null
           business_id: string
           cancelled_at?: string | null
+          cancelled_by?: string | null
           cancelled_reason?: string | null
           closed_at?: string | null
           created_at?: string
@@ -2125,6 +2165,7 @@ export type Database = {
           payment_status?: string
           promo_code_id?: string | null
           promo_code_snapshot?: string | null
+          scheduled_at?: string | null
           status?: string
           subtotal_cents: number
           table_id?: string | null
@@ -2137,6 +2178,7 @@ export type Database = {
           bill_requested_at?: string | null
           business_id?: string
           cancelled_at?: string | null
+          cancelled_by?: string | null
           cancelled_reason?: string | null
           closed_at?: string | null
           created_at?: string
@@ -2161,6 +2203,7 @@ export type Database = {
           payment_status?: string
           promo_code_id?: string | null
           promo_code_snapshot?: string | null
+          scheduled_at?: string | null
           status?: string
           subtotal_cents?: number
           table_id?: string | null
@@ -2714,6 +2757,9 @@ export type Database = {
           id: string
           is_active: boolean
           name: string
+          printer_enabled: boolean
+          printer_ip: string | null
+          printer_port: number
           sort_order: number
         }
         Insert: {
@@ -2722,6 +2768,9 @@ export type Database = {
           id?: string
           is_active?: boolean
           name: string
+          printer_enabled?: boolean
+          printer_ip?: string | null
+          printer_port?: number
           sort_order?: number
         }
         Update: {
@@ -2730,6 +2779,9 @@ export type Database = {
           id?: string
           is_active?: boolean
           name?: string
+          printer_enabled?: boolean
+          printer_ip?: string | null
+          printer_port?: number
           sort_order?: number
         }
         Relationships: [
@@ -3451,6 +3503,9 @@ export type CompositeTypes<
     : never
 
 export const Constants = {
+  graphql_public: {
+    Enums: {},
+  },
   public: {
     Enums: {},
   },

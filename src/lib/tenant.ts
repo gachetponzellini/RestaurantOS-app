@@ -49,6 +49,13 @@ export type BusinessSettings = {
   logo_mark_url?: string;
   logo_mono_url?: string;
   favicon_url?: string;
+  // Resumen de cierre por email (spec 34)
+  /** Si el cron manda el resumen del día automáticamente. */
+  closing_summary_enabled?: boolean;
+  /** Hora local (0–23) a la que el cron dispara el resumen del día. */
+  closing_summary_hour?: number;
+  /** Destinatarios explícitos. Vacío/ausente → admins del negocio. */
+  closing_summary_recipients?: string[];
 };
 
 export const getBusiness = cache(async (slug: string): Promise<Business | null> => {

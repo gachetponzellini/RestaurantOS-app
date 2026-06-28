@@ -16,6 +16,8 @@ export type AdminOrder = {
   payment_method: string;
   payment_status: string;
   cancelled_reason: string | null;
+  /** Pedido diferido (spec 31): instante de retiro futuro. Null = para ahora. */
+  scheduled_at: string | null;
   items: { product_name: string; quantity: number }[];
 };
 
@@ -52,14 +54,20 @@ export async function getTodayOrders(
   const since = startOfTodayUtc(timezone).toISOString();
   // Filtramos `dine_in` afuera: las orders de mesa viven en otra pantalla
   // (Salón). Aquí solo queremos delivery / pickup / take_away (canal online).
+  //
+  // Diferidos (spec 31): además de lo creado hoy, traemos lo agendado para hoy
+  // en adelante (`scheduled_at >= hoy`) — así un pedido cargado ayer para hoy
+  // entra a la operación, y la sección "Próximos" del board (client-side)
+  // separa los que todavía no marcharon. Un agendado para dentro de 3 días
+  // entra por `created_at` pero el board lo manda a Próximos, no al kanban.
   const { data } = await supabase
     .from("orders")
     .select(
-      "id, order_number, created_at, customer_name, customer_phone, delivery_type, total_cents, status, payment_method, payment_status, cancelled_reason, order_items(product_name, quantity, is_combo_component)",
+      "id, order_number, created_at, customer_name, customer_phone, delivery_type, total_cents, status, payment_method, payment_status, cancelled_reason, scheduled_at, order_items(product_name, quantity, is_combo_component)",
     )
     .eq("business_id", businessId)
     .neq("delivery_type", "dine_in")
-    .gte("created_at", since)
+    .or(`created_at.gte.${since},scheduled_at.gte.${since}`)
     .order("created_at", { ascending: false });
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -79,6 +87,7 @@ export async function getTodayOrders(
     payment_method: o.payment_method,
     payment_status: o.payment_status,
     cancelled_reason: o.cancelled_reason,
+    scheduled_at: o.scheduled_at,
     items: (o.order_items ?? [])
       .filter((i: any) => !i.is_combo_component)
       .map((i: any) => ({
@@ -163,7 +172,7 @@ export async function getOrdersList(
   let query = supabase
     .from("orders")
     .select(
-      "id, order_number, created_at, customer_name, customer_phone, delivery_type, total_cents, status, payment_method, payment_status, cancelled_reason, order_items(product_name, quantity, is_combo_component)",
+      "id, order_number, created_at, customer_name, customer_phone, delivery_type, total_cents, status, payment_method, payment_status, cancelled_reason, scheduled_at, order_items(product_name, quantity, is_combo_component)",
       { count: "exact" },
     )
     .eq("business_id", businessId);
@@ -217,6 +226,7 @@ export async function getOrdersList(
     payment_method: o.payment_method,
     payment_status: o.payment_status,
     cancelled_reason: o.cancelled_reason,
+    scheduled_at: o.scheduled_at,
     items: (o.order_items ?? [])
       .filter((i: any) => !i.is_combo_component)
       .map((i: any) => ({

@@ -9,6 +9,11 @@ export const DailyMenuComponentInput = z
     product_id: z.string().uuid().optional().nullable(),
     choice_group_id: z.string().uuid().optional().nullable(),
     choice_group_label: z.string().max(80).optional().nullable(),
+    // Adicional de la opción (spec 29). Sólo aplica a `choice`; pesos→centavos
+    // en el form. Nunca negativo (también `check` en DB). Opcional —no
+    // `.default()`— para no divergir input/output de Zod y romper la inferencia
+    // de react-hook-form; el default 0 lo aplica la columna DB y los consumidores.
+    extra_price_cents: z.number().int().min(0).optional(),
   })
   .superRefine((data, ctx) => {
     if (data.kind === "product" && !data.product_id) {

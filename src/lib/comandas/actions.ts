@@ -12,6 +12,8 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 import { getBusiness } from "@/lib/tenant";
 
+import { resolveComboUpcharge } from "@/lib/orders/combo-pricing";
+
 import { createComandasForItems } from "./route-items";
 import { resolveStation } from "./routing";
 import type { ComandaStatus, KitchenItemStatus } from "./types";
@@ -332,7 +334,7 @@ export async function enviarComanda(
     const { data: menuRow } = await service
       .from("daily_menus")
       .select(
-        "id, name, price_cents, image_url, business_id, is_active, is_available, daily_menu_components(id, label, description, sort_order, kind, product_id, choice_group_id, choice_group_label)",
+        "id, name, price_cents, image_url, business_id, is_active, is_available, daily_menu_components(id, label, description, sort_order, kind, product_id, choice_group_id, choice_group_label, extra_price_cents)",
       )
       .eq("id", menuItem.daily_menu_id)
       .maybeSingle();
@@ -345,20 +347,60 @@ export async function enviarComanda(
       return actionError(`"${menu.name}" no está disponible.`);
     }
 
-    const menuPrice = Number(menu.price_cents);
-    const menuSubtotal = menuPrice * menuItem.quantity;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const components = (menu.daily_menu_components ?? [])
       .slice()
       .sort((a: any, b: any) => a.sort_order - b.sort_order);
+
+    // Adicional por opción (spec 29): se deriva de la DB, nunca del payload.
+    const upcharge = resolveComboUpcharge(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      components.map((c: any) => ({
+        kind: c.kind ?? "text",
+        choice_group_id: c.choice_group_id,
+        product_id: c.product_id,
+        extra_price_cents: Number(c.extra_price_cents ?? 0),
+      })),
+      (menuItem.selected_choices ?? []).map((sc) => ({
+        choice_group_id: sc.choice_group_id,
+        product_id: sc.product_id,
+      })),
+    );
+    if (!upcharge.ok) return actionError(upcharge.error);
+
+    const menuPrice = Number(menu.price_cents) + upcharge.deltaCents;
+    const menuSubtotal = menuPrice * menuItem.quantity;
+
+    // Desglose de las opciones elegidas para el snapshot (todo de la DB: el
+    // payload del mozo no trae labels). `label` de un componente choice es el
+    // nombre del producto elegido (lo setea el form).
+    const choiceCompByKey = new Map<string, any>(
+      components
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        .filter((c: any) => c.kind === "choice" && c.choice_group_id && c.product_id)
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        .map((c: any) => [`${c.choice_group_id}::${c.product_id}`, c]),
+    );
+    const snapshotChoices = (menuItem.selected_choices ?? []).map((sc) => {
+      const comp = choiceCompByKey.get(`${sc.choice_group_id}::${sc.product_id}`);
+      return {
+        choice_group_label: comp?.choice_group_label ?? "Opción",
+        product_name: comp?.label ?? "",
+        extra_price_cents: Number(comp?.extra_price_cents ?? 0),
+      };
+    });
+
     const snapshot = {
       name: menu.name,
       image_url: menu.image_url,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       components: components.map((c: any) => ({
         label: c.label,
         description: c.description,
         kind: c.kind ?? "text",
         product_id: c.product_id,
       })),
+      selected_choices: snapshotChoices,
     };
 
     const { data: parentRow, error: parentErr } = await service
@@ -370,6 +412,7 @@ export async function enviarComanda(
         daily_menu_id: menu.id,
         daily_menu_snapshot: snapshot,
         product_name: menu.name,
+        // Adicional en el PADRE; los hijos van en $0 más abajo.
         unit_price_cents: menuPrice,
         quantity: menuItem.quantity,
         notes: menuItem.notes ?? null,
@@ -807,6 +850,7 @@ export async function cancelarItem(
     .update({
       cancelled_at: new Date().toISOString(),
       cancelled_reason: trimmed,
+      cancelled_by: ctxResult.data.userId, // spec 34 — responsable de la anulación
     })
     .eq("id", orderItemId);
   if (error) {

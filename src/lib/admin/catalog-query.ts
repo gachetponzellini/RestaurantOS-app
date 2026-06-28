@@ -61,6 +61,9 @@ export type AdminStation = {
   name: string;
   sort_order: number;
   is_active: boolean;
+  printer_ip: string | null;
+  printer_port: number;
+  printer_enabled: boolean;
 };
 
 export async function getAdminCatalog(businessId: string) {
@@ -78,7 +81,9 @@ export async function getAdminCatalog(businessId: string) {
       .order("sort_order"),
     supabase
       .from("stations")
-      .select("id, name, sort_order, is_active")
+      .select(
+        "id, name, sort_order, is_active, printer_ip, printer_port, printer_enabled",
+      )
       .eq("business_id", businessId)
       .order("sort_order"),
     supabase

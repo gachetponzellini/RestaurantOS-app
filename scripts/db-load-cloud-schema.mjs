@@ -60,5 +60,18 @@ execSync(
   },
 );
 
+// 4. Policies de storage.objects. El dump del cloud trae solo `public`, así que
+//    las policies del schema `storage` (migraciones 0004/0007/0022/0054) no
+//    llegan al local → uploads fallaban con "new row violates RLS policy".
+//    Las aplicamos desde un fixture tracked (réplica del cloud).
+const STORAGE_FIXTURE = "supabase/local-fixtures/storage_policies.sql";
+if (existsSync(STORAGE_FIXTURE)) {
+  console.log("→ Aplicando policies de storage.objects al local…");
+  execSync(
+    `docker exec -i ${CONTAINER} psql -U postgres -d postgres -q`,
+    { stdio: ["pipe", "inherit", "inherit"], input: readFileSync(STORAGE_FIXTURE) },
+  );
+}
+
 console.log("\n✓ Esquema del cloud aplicado al local.");
 console.log("  Seguí con:  pnpm seed:estructura && pnpm seed:operativo");

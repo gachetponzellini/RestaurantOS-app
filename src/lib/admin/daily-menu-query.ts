@@ -13,6 +13,8 @@ export type AdminDailyMenuComponent = {
   choice_group_label: string | null;
   product_name: string | null;
   product_image_url: string | null;
+  /** Adicional de la opción en centavos (spec 29). 0 = incluida. */
+  extra_price_cents: number;
 };
 
 export type AdminDailyMenu = {
@@ -32,7 +34,7 @@ export type AdminDailyMenu = {
 };
 
 const SELECT =
-  "id, name, slug, description, price_cents, image_url, available_days, is_active, is_available, sort_order, display_context, is_suggestion, daily_menu_components(id, label, description, sort_order, kind, product_id, choice_group_id, choice_group_label, products(id, name, image_url))";
+  "id, name, slug, description, price_cents, image_url, available_days, is_active, is_available, sort_order, display_context, is_suggestion, daily_menu_components(id, label, description, sort_order, kind, product_id, choice_group_id, choice_group_label, extra_price_cents, products(id, name, image_url))";
 
 function mapRow(
   row: {
@@ -58,6 +60,7 @@ function mapRow(
           product_id?: string | null;
           choice_group_id?: string | null;
           choice_group_label?: string | null;
+          extra_price_cents?: number | null;
           products?: { id: string; name: string; image_url: string | null } | null;
         }[]
       | null;
@@ -90,6 +93,7 @@ function mapRow(
         choice_group_label: c.choice_group_label ?? null,
         product_name: c.products?.name ?? null,
         product_image_url: c.products?.image_url ?? null,
+        extra_price_cents: Number(c.extra_price_cents ?? 0),
       })),
   };
 }

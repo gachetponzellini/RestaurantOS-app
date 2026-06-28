@@ -54,6 +54,8 @@ export type MenuDailyMenuComponent = {
   product_image_url: string | null;
   choice_group_id: string | null;
   choice_group_label: string | null;
+  /** Adicional de la opción (spec 29). 0 en `text`/`product` y opciones incluidas. */
+  extra_price_cents: number;
 };
 
 export type MenuDailyMenuChoiceGroup = {
@@ -125,7 +127,7 @@ export const getMenu = cache(
       supabase
         .from("daily_menus")
         .select(
-          "id, name, description, price_cents, image_url, available_days, is_suggestion, daily_menu_components(id, label, description, sort_order, kind, product_id, choice_group_id, choice_group_label, products(id, name, image_url))",
+          "id, name, description, price_cents, image_url, available_days, is_suggestion, daily_menu_components(id, label, description, sort_order, kind, product_id, choice_group_id, choice_group_label, extra_price_cents, products(id, name, image_url))",
         )
         .eq("business_id", businessId)
         .eq("is_active", true)
@@ -198,6 +200,7 @@ export const getMenu = cache(
         product_image_url: c.products?.image_url ?? null,
         choice_group_id: c.choice_group_id ?? null,
         choice_group_label: c.choice_group_label ?? null,
+        extra_price_cents: Number(c.extra_price_cents ?? 0),
       }));
 
     const groupMap = new Map<string, MenuDailyMenuChoiceGroup>();

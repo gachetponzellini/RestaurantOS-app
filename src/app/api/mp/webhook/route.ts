@@ -2,7 +2,9 @@ import { NextResponse } from "next/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { closeOrderIfFullyPaid } from "@/lib/billing/cobro-actions";
+import { notifyScheduledConfirmed } from "@/lib/notifications/delivery-notify";
 import { routeOrderToCocina } from "@/lib/orders/route-to-cocina";
+import { isScheduledForLater } from "@/lib/orders/scheduled";
 import { fetchPayment, verifySignature } from "@/lib/payments/mercadopago";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 
@@ -198,7 +200,7 @@ export async function POST(req: Request) {
   const orderId = externalRef;
   const { data: order } = await service
     .from("orders")
-    .select("id, business_id, status, payment_status")
+    .select("id, business_id, status, payment_status, scheduled_at")
     .eq("id", orderId)
     .maybeSingle();
   if (!order) {
@@ -249,11 +251,20 @@ export async function POST(req: Request) {
   }
 
   // Auto-march (spec-05): pago aprobado → rutear a cocina.
+  // Diferido (spec 31): si el pedido es para más tarde, el pago aprobado sólo
+  // **confirma el agendado** (avisa al cliente) — NO marcha. Lo marcha el cron
+  // ~40 min antes (o "marchar ahora"). Sin scheduled_at futuro, marcha como hoy.
   if (nextPaymentStatus === "paid") {
-    try {
-      await routeOrderToCocina(order.id, order.business_id);
-    } catch (e) {
-      console.error("MP webhook: auto-march failed", e);
+    const scheduledAt = (order as { scheduled_at?: string | null })
+      .scheduled_at;
+    if (isScheduledForLater(scheduledAt)) {
+      await notifyScheduledConfirmed({ orderId: order.id });
+    } else {
+      try {
+        await routeOrderToCocina(order.id, order.business_id);
+      } catch (e) {
+        console.error("MP webhook: auto-march failed", e);
+      }
     }
   }
 

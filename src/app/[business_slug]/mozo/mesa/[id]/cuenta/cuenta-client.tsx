@@ -537,9 +537,15 @@ export function CuentaClient({
         orderId={cuenta.order.id}
         slug={slug}
         parentStartTransition={startTransition}
+        isPending={isPending}
         onDone={() => {
           setDividirOpen(false);
-          reloadData();
+          // El refresh va DENTRO de la transición: `isPending` se mantiene
+          // hasta que llegan los splits recién creados, así "Pasar a cobro"
+          // queda bloqueado. Si no, se rehabilita con la vista vieja (sin
+          // splits) y el cobro arma un pago único. (bug 2026-06-19)
+          if (embedded) onReload?.();
+          else startTransition(() => router.refresh());
         }}
       />
 

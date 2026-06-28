@@ -498,7 +498,11 @@ export async function anularFactura(
   // Marcar la factura original como anulada + persistir el motivo.
   const { data: cancelledRow, error: cancelErr } = await service
     .from("invoices")
-    .update({ status: "cancelled", cancelled_reason: motivo })
+    .update({
+      status: "cancelled",
+      cancelled_reason: motivo,
+      cancelled_by: ctxResult.data.userId, // spec 34 — responsable de la anulación
+    })
     .eq("id", original.id)
     .select()
     .single();

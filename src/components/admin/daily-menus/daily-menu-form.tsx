@@ -86,6 +86,8 @@ export function DailyMenuForm({
             product_id: c.product_id,
             choice_group_id: c.choice_group_id,
             choice_group_label: c.choice_group_label,
+            // Centavos en datos → pesos en el form (igual que price_cents).
+            extra_price_cents: (c.extra_price_cents ?? 0) / 100,
           })),
         }
       : {
@@ -105,10 +107,15 @@ export function DailyMenuForm({
   const onSubmit = async (values: DailyMenuInput) => {
     setSubmitting(true);
     try {
-      // El input de precio está en unidades de $, persistimos en cents.
+      // El input de precio está en unidades de $, persistimos en cents. Ídem
+      // el adicional por opción (spec 29): pesos en el form, centavos en datos.
       const payload: DailyMenuInput = {
         ...values,
         price_cents: Math.round(values.price_cents * 100),
+        components: values.components.map((c) => ({
+          ...c,
+          extra_price_cents: Math.round((c.extra_price_cents ?? 0) * 100),
+        })),
       };
       const result = menu
         ? await updateDailyMenu(slug, menu.id, payload)
@@ -397,6 +404,7 @@ function ComponentsEditor({
       kind: "choice",
       choice_group_id: groupId,
       choice_group_label: groupLabel,
+      extra_price_cents: 0,
     });
   };
 
@@ -417,7 +425,7 @@ function ComponentsEditor({
             type="button"
             size="sm"
             variant="outline"
-            onClick={() => append({ label: "", kind: "text" })}
+            onClick={() => append({ label: "", kind: "text", extra_price_cents: 0 })}
           >
             <Plus className="size-3.5" /> Componente
           </Button>
@@ -432,6 +440,7 @@ function ComponentsEditor({
                 kind: "choice",
                 choice_group_id: groupId,
                 choice_group_label: "",
+                extra_price_cents: 0,
               });
             }}
           >
@@ -668,6 +677,27 @@ function ChoiceGroupCard({
                   }}
                 />
               </div>
+              <FormField
+                control={control}
+                name={`components.${idx}.extra_price_cents`}
+                render={({ field }) => (
+                  <div className="flex shrink-0 items-center gap-1">
+                    <span className="text-muted-foreground text-xs">+$</span>
+                    <Input
+                      type="number"
+                      min={0}
+                      inputMode="numeric"
+                      placeholder="0"
+                      aria-label="Adicional en pesos"
+                      className="w-16"
+                      value={field.value ?? 0}
+                      onChange={(e) =>
+                        field.onChange(parseInt(e.target.value) || 0)
+                      }
+                    />
+                  </div>
+                )}
+              />
               {indices.length > 1 && (
                 <Button
                   type="button"
@@ -693,6 +723,12 @@ function ChoiceGroupCard({
       >
         <Plus className="size-3.5" /> Opción
       </Button>
+
+      <p className="text-muted-foreground ml-3 text-xs">
+        <span className="font-medium">+$</span> = adicional sobre el combo. Dejá
+        0 si la opción va incluida; lo que cargues se suma al precio cuando el
+        cliente la elige.
+      </p>
     </div>
   );
 }

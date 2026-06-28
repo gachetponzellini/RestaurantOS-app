@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   ModifierGroupInput,
   ProductInput,
+  StationPrinterInput,
   warnGarnishModifierGroups,
 } from "./schemas";
 
@@ -102,5 +103,112 @@ describe("warnGarnishModifierGroups", () => {
     ];
     const warnings = warnGarnishModifierGroups(groups);
     expect(warnings).toHaveLength(0);
+  });
+});
+
+describe("StationPrinterInput — config de comandera por sector (spec 28)", () => {
+  it("acepta IPv4 válida + puerto", () => {
+    const r = StationPrinterInput.safeParse({
+      printer_ip: "192.168.10.50",
+      printer_port: 9100,
+      printer_enabled: true,
+    });
+    expect(r.success).toBe(true);
+    if (r.success) {
+      expect(r.data.printer_ip).toBe("192.168.10.50");
+      expect(r.data.printer_port).toBe(9100);
+    }
+  });
+
+  it("acepta hostname válido", () => {
+    const r = StationPrinterInput.safeParse({
+      printer_ip: "comandera-cocina.local",
+      printer_port: 9100,
+      printer_enabled: true,
+    });
+    expect(r.success).toBe(true);
+  });
+
+  it("recorta espacios alrededor de la IP", () => {
+    const r = StationPrinterInput.safeParse({
+      printer_ip: "  192.168.10.50  ",
+      printer_port: 9100,
+      printer_enabled: true,
+    });
+    expect(r.success).toBe(true);
+    if (r.success) expect(r.data.printer_ip).toBe("192.168.10.50");
+  });
+
+  it("normaliza IP vacía a null (sector sin impresora)", () => {
+    const r = StationPrinterInput.safeParse({
+      printer_ip: "",
+      printer_port: 9100,
+      printer_enabled: false,
+    });
+    expect(r.success).toBe(true);
+    if (r.success) expect(r.data.printer_ip).toBeNull();
+  });
+
+  it("acepta printer_ip null", () => {
+    const r = StationPrinterInput.safeParse({
+      printer_ip: null,
+      printer_port: 9100,
+      printer_enabled: true,
+    });
+    expect(r.success).toBe(true);
+    if (r.success) expect(r.data.printer_ip).toBeNull();
+  });
+
+  it("rechaza IPv4 con octeto fuera de rango", () => {
+    const r = StationPrinterInput.safeParse({
+      printer_ip: "192.168.10.300",
+      printer_port: 9100,
+      printer_enabled: true,
+    });
+    expect(r.success).toBe(false);
+  });
+
+  it("rechaza un host con caracteres inválidos", () => {
+    const r = StationPrinterInput.safeParse({
+      printer_ip: "no es una ip",
+      printer_port: 9100,
+      printer_enabled: true,
+    });
+    expect(r.success).toBe(false);
+  });
+
+  it("aplica el default de puerto 9100 cuando no viene", () => {
+    const r = StationPrinterInput.safeParse({
+      printer_ip: "192.168.10.50",
+      printer_enabled: true,
+    });
+    expect(r.success).toBe(true);
+    if (r.success) expect(r.data.printer_port).toBe(9100);
+  });
+
+  it("rechaza puerto fuera de 1–65535", () => {
+    expect(
+      StationPrinterInput.safeParse({
+        printer_ip: "192.168.10.50",
+        printer_port: 70000,
+        printer_enabled: true,
+      }).success,
+    ).toBe(false);
+    expect(
+      StationPrinterInput.safeParse({
+        printer_ip: "192.168.10.50",
+        printer_port: 0,
+        printer_enabled: true,
+      }).success,
+    ).toBe(false);
+  });
+
+  it("rechaza puerto no entero", () => {
+    const r = StationPrinterInput.safeParse({
+      printer_ip: "192.168.10.50",
+      printer_port: 9100.5,
+      printer_enabled: true,
+    });
+    expect(r.success).toBe(false);
   });
 });

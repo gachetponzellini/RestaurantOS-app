@@ -77,6 +77,8 @@ type CartDailyMenuItem = {
     choice_group_label: string;
     product_id: string;
     product_name: string;
+    /** Adicional de la opción en centavos (spec 29). 0 = incluida. */
+    extra_price_cents: number;
     modifier_ids: string[];
   }[];
 };
@@ -486,7 +488,15 @@ export function MozoPedirClient({
           if (nextQty < 1) return c;
           if (nextQty > 99) return c;
           if (isDailyMenuCart(c)) {
-            return { ...c, quantity: nextQty, line_subtotal_cents: c.unit_price_cents * nextQty };
+            const choicesTotal = c.selected_choices.reduce(
+              (a, sc) => a + (sc.extra_price_cents ?? 0),
+              0,
+            );
+            return {
+              ...c,
+              quantity: nextQty,
+              line_subtotal_cents: (c.unit_price_cents + choicesTotal) * nextQty,
+            };
           }
           const modsTotal = c.modifiers.reduce(
             (a, m) => a + m.price_delta_cents,
@@ -853,7 +863,13 @@ export function MozoPedirClient({
               unit_price_cents: menu.price_cents,
               quantity,
               notes: "",
-              line_subtotal_cents: menu.price_cents * quantity,
+              line_subtotal_cents:
+                (menu.price_cents +
+                  selectedChoices.reduce(
+                    (acc, sc) => acc + (sc.extra_price_cents ?? 0),
+                    0,
+                  )) *
+                quantity,
               seat_number: seatMode ? activeSeat : null,
               selected_choices: selectedChoices,
             },
@@ -1268,7 +1284,12 @@ function DailyMenuModal({
   const allChoicesResolved =
     menu.choice_groups.length === 0 ||
     menu.choice_groups.every((g) => selections.has(g.choice_group_id));
-  const lineTotal = menu.price_cents * quantity;
+  // Adicional de las opciones elegidas (spec 29).
+  const choicesDelta = [...selections.values()].reduce(
+    (acc, sc) => acc + (sc.extra_price_cents ?? 0),
+    0,
+  );
+  const lineTotal = (menu.price_cents + choicesDelta) * quantity;
 
   const handleAdd = () => {
     if (!allChoicesResolved) return;
@@ -1369,6 +1390,7 @@ function DailyMenuModal({
                               choice_group_label: group.label,
                               product_id: opt.product_id!,
                               product_name: opt.product_name ?? opt.label,
+                              extra_price_cents: opt.extra_price_cents ?? 0,
                               modifier_ids: [],
                             });
                             return next;
@@ -1392,7 +1414,7 @@ function DailyMenuModal({
                           )}
                         </span>
                         <span
-                          className={`text-sm ${
+                          className={`flex-1 text-sm ${
                             isSelected
                               ? "font-semibold text-zinc-900"
                               : "text-zinc-700"
@@ -1400,6 +1422,11 @@ function DailyMenuModal({
                         >
                           {opt.product_name ?? opt.label}
                         </span>
+                        {opt.extra_price_cents > 0 && (
+                          <span className="shrink-0 text-sm font-semibold text-zinc-500 tabular-nums">
+                            +{formatCurrency(opt.extra_price_cents)}
+                          </span>
+                        )}
                       </button>
                     );
                   })}
@@ -1606,21 +1633,21 @@ function ResumenStep({
                     <button
                       onClick={() => onChangeQty(c._key, -1)}
                       disabled={c.quantity <= 1}
-                      className="rounded-full bg-white p-2 shadow-sm ring-1 ring-zinc-200 active:scale-[0.95] disabled:opacity-40"
+                      className="flex h-11 w-11 items-center justify-center rounded-full bg-white shadow-sm ring-1 ring-zinc-200 active:scale-[0.95] disabled:opacity-40"
                       aria-label="Restar"
                     >
-                      <Minus className="h-4 w-4" />
+                      <Minus className="h-5 w-5" />
                     </button>
-                    <span className="w-7 text-center text-base font-bold tabular-nums">
+                    <span className="w-9 text-center text-lg font-bold tabular-nums">
                       {c.quantity}
                     </span>
                     <button
                       onClick={() => onChangeQty(c._key, +1)}
                       disabled={c.quantity >= 99}
-                      className="rounded-full bg-white p-2 shadow-sm ring-1 ring-zinc-200 active:scale-[0.95] disabled:opacity-40"
+                      className="flex h-11 w-11 items-center justify-center rounded-full bg-white shadow-sm ring-1 ring-zinc-200 active:scale-[0.95] disabled:opacity-40"
                       aria-label="Sumar"
                     >
-                      <Plus className="h-4 w-4" />
+                      <Plus className="h-5 w-5" />
                     </button>
                   </div>
                 </div>

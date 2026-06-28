@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { notifyPrintFailed } from "@/lib/notifications/events";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 
 function unauthorized() {
@@ -44,12 +45,12 @@ export async function GET(req: Request) {
       batch,
       status,
       emitted_at,
-      stations!inner(name),
+      stations!inner(name, printer_ip, printer_port, printer_enabled),
       orders!inner(
         id,
         business_id,
         table_id,
-        tables(label)
+        tables!orders_table_id_fkey(label)
       ),
       comanda_items(
         order_item_id,
@@ -86,12 +87,22 @@ export async function GET(req: Request) {
       table_id: string | null;
       tables: { label: string } | null;
     };
-    const station = c.stations as unknown as { name: string };
+    const station = c.stations as unknown as {
+      name: string;
+      printer_ip: string | null;
+      printer_port: number;
+      printer_enabled: boolean;
+    };
 
     return {
       comanda_id: c.id,
       station_id: c.station_id,
       station_name: station?.name ?? "—",
+      // Destino de impresión del sector (spec 28). El agente imprime en esta IP
+      // sin mapeo local; si es null, saltea la comanda y la deja `pendiente`.
+      printer_ip: station?.printer_ip ?? null,
+      printer_port: station?.printer_port ?? 9100,
+      printer_enabled: station?.printer_enabled ?? true,
       batch: c.batch,
       emitted_at: c.emitted_at,
       table_label: order?.tables?.label ?? "—",
@@ -124,14 +135,19 @@ export async function GET(req: Request) {
 
 /**
  * POST /api/print-agent
- * Body: { comanda_id: string }
+ * Body: { comanda_id: string, result?: "ok" | "failed", error?: string }
  *
- * Confirma que el agente imprimió la comanda. Transiciona pendiente → en_preparacion.
+ * - `result:"ok"` (default, retrocompatible): el agente imprimió → transiciona
+ *   `pendiente → en_preparacion` y limpia un eventual flag de fallo.
+ * - `result:"failed"` (spec 33): el agente no pudo imprimir → setea
+ *   `print_failed_at` y avisa (notificación `comanda.impresion_fallida`), una sola
+ *   vez por comanda (dedup vía `print_failed_at`). La comanda **no** cambia de
+ *   estado (sigue `pendiente`, se reintenta).
  */
 export async function POST(req: Request) {
   if (!verifyAgentKey(req)) return unauthorized();
 
-  let body: { comanda_id?: string };
+  let body: { comanda_id?: string; result?: "ok" | "failed"; error?: string };
   try {
     body = await req.json();
   } catch {
@@ -145,12 +161,13 @@ export async function POST(req: Request) {
       { status: 400 },
     );
   }
+  const result = body.result ?? "ok";
 
   const service = createSupabaseServiceClient();
 
   const { data: row } = await service
     .from("comandas")
-    .select("id, status")
+    .select("id, status, print_failed_at, orders!inner(business_id)")
     .eq("id", comandaId)
     .maybeSingle();
 
@@ -161,13 +178,40 @@ export async function POST(req: Request) {
     );
   }
 
+  // ── Reporte de fallo de impresión (spec 33) ──
+  if (result === "failed") {
+    // Dedup: si ya quedó marcada como fallida, no re-notificar en cada reintento.
+    if (row.print_failed_at) {
+      return NextResponse.json({
+        status: row.status,
+        notified: false,
+        alreadyFlagged: true,
+      });
+    }
+    const businessId = (row.orders as unknown as { business_id: string })
+      .business_id;
+    await service
+      .from("comandas")
+      .update({ print_failed_at: new Date().toISOString() })
+      .eq("id", comandaId);
+    await notifyPrintFailed({ businessId, comandaId });
+    return NextResponse.json({ status: row.status, notified: true });
+  }
+
+  // ── Confirmación OK: pendiente → en_preparacion + limpia el flag de fallo ──
   if (row.status !== "pendiente") {
+    if (row.print_failed_at) {
+      await service
+        .from("comandas")
+        .update({ print_failed_at: null })
+        .eq("id", comandaId);
+    }
     return NextResponse.json({ status: row.status, changed: false });
   }
 
   const { error } = await service
     .from("comandas")
-    .update({ status: "en_preparacion" })
+    .update({ status: "en_preparacion", print_failed_at: null })
     .eq("id", comandaId);
 
   if (error) {

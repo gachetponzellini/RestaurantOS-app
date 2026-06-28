@@ -206,6 +206,9 @@ describe.skipIf(!dbAvailable)("billing/cobro (integration)", () => {
     expect(init.ok).toBe(true);
     if (!init.ok) return;
     expect(init.data.splits).toHaveLength(2);
+    // Invariante anti-regresión (bug 2026-06-19): con una división activa, el
+    // cobro NUNCA debe armar un pago único (implicit split).
+    expect(init.data.hasImplicitSplit).toBe(false);
 
     const [s1, s2] = init.data.splits;
     const r1 = await registrarPago({

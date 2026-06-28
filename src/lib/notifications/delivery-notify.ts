@@ -1,9 +1,13 @@
 import "server-only";
 
+import { formatInTimeZone } from "date-fns-tz";
+
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 
 import { renderDeliveryMessage } from "./delivery-templates";
 import { enqueueWhatsapp } from "./whatsapp-outbox";
+
+const DEFAULT_TZ = "America/Argentina/Buenos_Aires";
 
 /**
  * Encola el WhatsApp al cliente tras un cambio de estado de delivery.
@@ -81,5 +85,62 @@ export async function notifyDeliveryStatusChange(params: {
     });
   } catch (err) {
     console.error("notifyDeliveryStatusChange", err);
+  }
+}
+
+/**
+ * Aviso al cliente de que su pedido diferido (spec 31) quedó **agendado** tras
+ * aprobarse el pago MP. Es el primer aviso del flujo; el "listo para retirar"
+ * sale después por el cambio de estado normal (`ready` → notifyDeliveryStatusChange).
+ *
+ * Best-effort (nunca lanza). Sólo aplica a pickup con `scheduled_at`. Como todo
+ * aviso proactivo, va por el outbox de WhatsApp; sin template aprobado por Meta
+ * queda registrado en `failed` con motivo (mismo límite que el resto hoy).
+ */
+export async function notifyScheduledConfirmed(params: {
+  orderId: string;
+}): Promise<void> {
+  try {
+    const service = createSupabaseServiceClient();
+
+    const { data: order } = await service
+      .from("orders")
+      .select(
+        "id, business_id, order_number, customer_name, customer_phone, delivery_type, scheduled_at",
+      )
+      .eq("id", params.orderId)
+      .maybeSingle();
+    if (!order || !order.scheduled_at) return;
+    if (order.delivery_type !== "pickup") return;
+    if (!order.customer_phone || order.customer_phone.trim().length === 0) {
+      return;
+    }
+
+    const { data: business } = await service
+      .from("businesses")
+      .select("name, timezone")
+      .eq("id", order.business_id)
+      .maybeSingle();
+    if (!business) return;
+
+    const tz = business.timezone ?? DEFAULT_TZ;
+    const cuando = formatInTimeZone(
+      new Date(order.scheduled_at),
+      tz,
+      "dd/MM 'a las' HH:mm 'hs'",
+    );
+    const body =
+      `¡Listo ${order.customer_name}! Tu pedido #${order.order_number} quedó ` +
+      `agendado para el ${cuando}. Te avisamos cuando esté para retirar. 🙌`;
+
+    await enqueueWhatsapp({
+      businessId: order.business_id,
+      toPhone: order.customer_phone,
+      body,
+      kind: "delivery_status",
+      refId: order.id,
+    });
+  } catch (err) {
+    console.error("notifyScheduledConfirmed", err);
   }
 }
