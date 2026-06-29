@@ -54,3 +54,6 @@ supabase/.clone
 
 # claude local settings
 .claude/settings.local.json
+
+# Backups locales de baseline (no versionar)
+backups/
