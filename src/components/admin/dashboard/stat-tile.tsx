@@ -32,7 +32,7 @@ export function StatTile({
   return (
     <div
       className={cn(
-        "group relative flex flex-col justify-between gap-5 rounded-2xl p-5 transition",
+        "group relative flex flex-col justify-between gap-4 rounded-2xl p-4 transition sm:gap-5 sm:p-5",
         !isAccent &&
           "bg-white ring-1 ring-zinc-200/70 hover:ring-zinc-300 hover:shadow-sm",
         isDark && "bg-zinc-900 text-zinc-50 ring-1 ring-zinc-900",
@@ -70,7 +70,7 @@ export function StatTile({
         ) : null}
       </div>
       <div>
-        <div className="text-[1.75rem] font-semibold leading-none tracking-tight tabular-nums sm:text-3xl">
+        <div className="text-2xl font-semibold leading-none tracking-tight tabular-nums sm:text-3xl">
           {value}
         </div>
         <div className="mt-2 flex flex-wrap items-center gap-2">

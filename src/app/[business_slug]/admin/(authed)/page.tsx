@@ -81,7 +81,7 @@ export default async function AdminDashboardPage({
   const todayDow = currentDayOfWeek(business.timezone);
 
   return (
-    <PageShell width="wide" className="space-y-10">
+    <PageShell width="wide" className="space-y-8 sm:space-y-10">
       <DashboardHeader
         businessName={business.name}
         userName={ctx.userName}
@@ -90,7 +90,7 @@ export default async function AdminDashboardPage({
         isActive={business.is_active ?? true}
       />
 
-      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-6">
+      <section className="grid grid-cols-2 gap-3 sm:gap-4 md:grid-cols-2 xl:grid-cols-6">
         <StatTile
           eyebrow="Pedidos hoy"
           value={overview.today.orderCount.toString()}
@@ -152,7 +152,7 @@ export default async function AdminDashboardPage({
         hasCostData={profit.hasCostData}
       />
 
-      <section className="grid gap-4 md:grid-cols-2">
+      <section className="grid grid-cols-2 gap-3 sm:gap-4 md:grid-cols-2">
         <StatTile
           eyebrow="CMV · 30 días"
           value={formatCurrency(profit.foodCostCents)}

@@ -34,10 +34,11 @@ import type { BusinessRole } from "@/lib/admin/context";
 import { canSee, type AdminSection } from "@/lib/permissions/sections";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { cn } from "@/lib/utils";
+import { AdminMobileNav } from "@/components/admin/admin-mobile-nav";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
-type NavItem = {
+export type NavItem = {
   section: AdminSection;
   href: string;
   label: string;
@@ -45,7 +46,7 @@ type NavItem = {
   match: (pathname: string) => boolean;
 };
 
-type NavGroup = {
+export type NavGroup = {
   label: string;
   items: NavItem[];
 };
@@ -348,12 +349,13 @@ export function AdminSidebar({
   // ── Render ────────────────────────────────────────────────────────────────
 
   return (
-    <aside
+    <>
+      <aside
       aria-label="Navegación admin"
       onMouseEnter={() => setExpanded(true)}
       onMouseLeave={() => setExpanded(false)}
       style={{ width: COLLAPSED_WIDTH }}
-      className="sticky top-0 z-40 h-screen shrink-0"
+      className="sticky top-0 z-40 hidden h-screen shrink-0 md:block"
     >
       <div
         style={{ width: expanded ? EXPANDED_WIDTH : COLLAPSED_WIDTH }}
@@ -483,7 +485,24 @@ export function AdminSidebar({
           />
         </div>
       </div>
-    </aside>
+      </aside>
+
+      {/* Navegación mobile (<md): top-bar + bottom-bar + drawer. Comparte el
+          modelo de nav (groups) y los badges realtime con el rail desktop. */}
+      <AdminMobileNav
+        groups={groups}
+        slug={slug}
+        pathname={pathname}
+        pendingCount={pendingCount}
+        lowStockCount={lowStockCount}
+        businessName={businessName}
+        businessLogoUrl={businessLogoUrl}
+        userEmail={userEmail}
+        userName={userName}
+        isPlatformAdmin={isPlatformAdmin}
+        siblings={siblings}
+      />
+    </>
   );
 }
 

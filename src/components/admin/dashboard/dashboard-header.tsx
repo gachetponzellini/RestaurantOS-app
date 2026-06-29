@@ -87,7 +87,7 @@ export function DashboardHeader({
         <p className="text-[0.65rem] font-semibold uppercase tracking-[0.18em] text-zinc-500">
           Panel · {businessName}
         </p>
-        <h1 className="mt-2 text-4xl font-semibold tracking-tight text-zinc-900 sm:text-5xl">
+        <h1 className="mt-2 text-3xl font-semibold tracking-tight text-zinc-900 sm:text-5xl">
           {greeting},{" "}
           <span className="text-zinc-500">{firstName}</span>
         </h1>

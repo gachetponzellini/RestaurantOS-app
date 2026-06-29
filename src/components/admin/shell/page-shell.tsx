@@ -52,7 +52,7 @@ export function PageHeader({
   const titleCls =
     size === "compact"
       ? "mt-1 text-2xl font-semibold tracking-tight text-zinc-900 sm:text-3xl"
-      : "mt-2 text-4xl font-semibold tracking-tight text-zinc-900 sm:text-5xl";
+      : "mt-2 text-3xl font-semibold tracking-tight text-zinc-900 sm:text-5xl";
 
   return (
     <header className="space-y-3">

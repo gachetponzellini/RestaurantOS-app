@@ -42,7 +42,7 @@ export function RangeSelector({
 
   const pill = (isActive: boolean) =>
     cn(
-      "rounded-full px-3.5 py-1.5 text-xs font-semibold transition cursor-pointer",
+      "shrink-0 whitespace-nowrap rounded-full px-3.5 py-1.5 text-xs font-semibold transition cursor-pointer",
       isActive ? "text-white shadow-sm" : "text-zinc-600 hover:text-zinc-900",
     );
 
@@ -52,10 +52,10 @@ export function RangeSelector({
       : undefined;
 
   return (
-    <div className="flex flex-col items-end gap-2">
+    <div className="flex w-full flex-col items-stretch gap-2 sm:w-auto sm:items-end">
       <nav
         aria-label="Rango del reporte"
-        className="inline-flex rounded-full bg-white p-1 ring-1 ring-zinc-200/70"
+        className="inline-flex max-w-full overflow-x-auto rounded-full bg-white p-1 ring-1 ring-zinc-200/70"
       >
         {ORDER.map((r) => {
           const isActive = active === r;
@@ -84,7 +84,7 @@ export function RangeSelector({
       </nav>
 
       {showCustom && (
-        <div className="flex items-center gap-2 rounded-xl bg-white p-2 ring-1 ring-zinc-200/70">
+        <div className="flex flex-wrap items-center gap-2 rounded-xl bg-white p-2 ring-1 ring-zinc-200/70">
           <label className="flex items-center gap-1.5 text-xs text-zinc-600">
             Desde
             <input

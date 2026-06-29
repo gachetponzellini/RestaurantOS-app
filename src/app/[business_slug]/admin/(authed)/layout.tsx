@@ -94,7 +94,11 @@ export default async function AdminAuthedLayout({
         lowStockCount={lowStockCount}
         isActive={business.is_active ?? true}
       />
-      <div className="min-w-0 flex-1">{children}</div>
+      {/* En mobile el contenido despeja la top-bar (h-14) y la bottom-bar
+          fija de AdminMobileNav. En md+ el rail lateral ocupa el flujo. */}
+      <div className="min-w-0 flex-1 pt-14 pb-20 md:pt-0 md:pb-0">
+        {children}
+      </div>
 
       {/* Bell fixed top-right — visible en todas las pantallas admin,
           z-50 queda por encima del overlay del LocalShell (z-30) y de los
