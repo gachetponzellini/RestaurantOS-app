@@ -2750,6 +2750,32 @@ export type Database = {
           },
         ]
       }
+      shift_summary_sends: {
+        Row: {
+          business_id: string
+          sent_at: string
+          sent_for_date: string
+        }
+        Insert: {
+          business_id: string
+          sent_at?: string
+          sent_for_date: string
+        }
+        Update: {
+          business_id?: string
+          sent_at?: string
+          sent_for_date?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "shift_summary_sends_business_id_fkey"
+            columns: ["business_id"]
+            isOneToOne: false
+            referencedRelation: "businesses"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       stations: {
         Row: {
           business_id: string
@@ -3374,7 +3400,9 @@ export type Database = {
       is_business_member: { Args: { bid: string }; Returns: boolean }
       is_business_staff: { Args: { bid: string }; Returns: boolean }
       is_platform_admin: { Args: never; Returns: boolean }
+      march_due_scheduled_orders: { Args: never; Returns: undefined }
       mark_overdue_reservations_no_show: { Args: never; Returns: number }
+      send_due_shift_summaries: { Args: never; Returns: undefined }
     }
     Enums: {
       [_ in never]: never
