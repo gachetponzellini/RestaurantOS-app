@@ -14,8 +14,24 @@ import {
 } from "@/components/ui/sheet";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { cn } from "@/lib/utils";
+import type { AdminSection } from "@/lib/permissions/sections";
 
 import type { NavGroup, NavItem } from "@/components/admin/admin-sidebar";
+
+// En mobile el panel es para MONITOREAR, no para editar/configurar. Solo estas
+// secciones aparecen en el drawer; el resto (catálogo, salones, promociones,
+// campañas, chatbot, proveedores, facturación, RRHH, configuración) se esconde
+// y se opera desde la PC. El acceso por URL directa sigue disponible.
+const MOBILE_SECTIONS = new Set<AdminSection>([
+  "dashboard",
+  "operacion",
+  "pedidos",
+  "cajas",
+  "reservas",
+  "clientes",
+  "conversaciones",
+  "reportes",
+]);
 
 function badgeFor(
   item: NavItem,
@@ -54,6 +70,14 @@ export function AdminMobileNav({
   siblings: { slug: string; name: string; logoUrl: string | null }[];
 }) {
   const [drawerOpen, setDrawerOpen] = useState(false);
+
+  // Solo secciones de monitoreo en mobile (ver MOBILE_SECTIONS).
+  const mobileGroups = groups
+    .map((g) => ({
+      ...g,
+      items: g.items.filter((it) => MOBILE_SECTIONS.has(it.section)),
+    }))
+    .filter((g) => g.items.length > 0);
 
   const initials =
     businessName
@@ -133,7 +157,7 @@ export function AdminMobileNav({
           </SheetHeader>
 
           <nav className="flex-1 overflow-y-auto px-3 py-3">
-            {groups.map((group, gi) => (
+            {mobileGroups.map((group, gi) => (
               <div key={group.label} className="flex flex-col gap-0.5">
                 {gi > 0 && <div className="my-2 h-px bg-zinc-200/70" />}
                 <p className="px-2.5 pb-1 text-[0.55rem] font-semibold uppercase tracking-[0.14em] text-zinc-400">
