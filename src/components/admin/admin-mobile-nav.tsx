@@ -3,7 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useState } from "react";
-import { Building2, LogOut, Menu as MenuIcon, MoreHorizontal } from "lucide-react";
+import { Building2, LogOut, Menu as MenuIcon } from "lucide-react";
 
 import {
   Sheet,
@@ -12,23 +12,10 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
-import type { AdminSection } from "@/lib/permissions/sections";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { cn } from "@/lib/utils";
 
 import type { NavGroup, NavItem } from "@/components/admin/admin-sidebar";
-
-// Secciones que aparecen en la bottom-bar (por orden de prioridad). Se filtran
-// contra las que el rol realmente ve, así un encargado obtiene las suyas sin
-// reportes/cajas. Tomamos las primeras 4 + el botón "Más" (abre el drawer).
-const PRIMARY_SECTIONS: AdminSection[] = [
-  "dashboard",
-  "operacion",
-  "reportes",
-  "reservas",
-  "cajas",
-  "clientes",
-];
 
 function badgeFor(
   item: NavItem,
@@ -67,14 +54,6 @@ export function AdminMobileNav({
   siblings: { slug: string; name: string; logoUrl: string | null }[];
 }) {
   const [drawerOpen, setDrawerOpen] = useState(false);
-
-  const flat = groups.flatMap((g) => g.items);
-  const bySection = new Map(flat.map((it) => [it.section, it]));
-  const primary = PRIMARY_SECTIONS.map((s) => bySection.get(s)).filter(
-    (it): it is NavItem => Boolean(it),
-  );
-  // Si el rol ve muy pocas secciones, igualmente reservamos el slot "Más".
-  const primarySlots = primary.slice(0, 4);
 
   const initials =
     businessName
@@ -129,49 +108,6 @@ export function AdminMobileNav({
           </span>
         </Link>
       </header>
-
-      {/* ── Bottom bar (mobile) ───────────────────────────────────────────── */}
-      <nav
-        aria-label="Navegación rápida"
-        className="fixed inset-x-0 bottom-0 z-40 flex items-stretch border-t border-zinc-200/70 bg-zinc-50/95 backdrop-blur-xl md:hidden"
-        style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
-      >
-        {primarySlots.map((item) => {
-          const active = item.match(pathname);
-          const badge = badgeFor(item, pendingCount, lowStockCount);
-          return (
-            <Link
-              key={item.href}
-              href={item.href}
-              className={cn(
-                "relative flex flex-1 flex-col items-center justify-center gap-0.5 py-2 text-[0.6rem] font-medium transition",
-                active ? "text-zinc-900" : "text-zinc-500 hover:text-zinc-800",
-              )}
-            >
-              <span
-                className="relative"
-                style={active ? { color: "var(--brand)" } : undefined}
-              >
-                {item.icon}
-                {badge !== undefined && badge > 0 && (
-                  <span className="absolute -right-2 -top-1.5 flex min-w-[0.95rem] items-center justify-center rounded-full bg-red-500 px-0.5 text-[0.5rem] font-bold leading-none text-white ring-1 ring-zinc-50">
-                    {badge > 99 ? "99+" : badge}
-                  </span>
-                )}
-              </span>
-              <span className="max-w-full truncate">{item.label}</span>
-            </Link>
-          );
-        })}
-        <button
-          type="button"
-          onClick={() => setDrawerOpen(true)}
-          className="flex flex-1 flex-col items-center justify-center gap-0.5 py-2 text-[0.6rem] font-medium text-zinc-500 transition hover:text-zinc-800"
-        >
-          <MoreHorizontal className="size-[18px]" strokeWidth={1.75} />
-          <span>Más</span>
-        </button>
-      </nav>
 
       {/* ── Drawer (menú completo) ────────────────────────────────────────── */}
       <Sheet open={drawerOpen} onOpenChange={setDrawerOpen}>
