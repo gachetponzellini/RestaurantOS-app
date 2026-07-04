@@ -180,10 +180,9 @@ function TabsInner({
   // es una sola superficie densa, sin título redundante.
   return (
     <div
-      className="fixed inset-0 z-30 flex flex-col bg-zinc-50 transition-[left] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)]"
-      style={{ left: "var(--admin-sidebar-width, 60px)" }}
+      className="fixed inset-x-0 bottom-0 top-14 z-30 flex flex-col bg-zinc-50 transition-[left] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] md:top-0 md:left-[var(--admin-sidebar-width,60px)]"
     >
-      <div className="border-border/60 flex items-center justify-between gap-3 border-b bg-white/95 px-4 py-3 backdrop-blur">
+      <div className="border-border/60 flex items-center justify-between gap-3 overflow-x-auto border-b bg-white/95 px-3 py-3 backdrop-blur sm:px-4">
         {tabsBar}
         {/* El botón "Distribuir mozos" se movió al header del sidebar de
             mesas dentro del salón (SalonDesktop → ActiveTablesList). El
@@ -276,7 +275,7 @@ function TabButton({
       onClick={onClick}
       aria-pressed={active}
       className={cn(
-        "relative inline-flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold transition",
+        "relative inline-flex shrink-0 items-center gap-2 whitespace-nowrap rounded-xl px-3 py-2 text-sm font-semibold transition sm:px-4",
         active ? "bg-zinc-100 text-zinc-900" : "text-zinc-500 hover:text-zinc-900",
       )}
     >
