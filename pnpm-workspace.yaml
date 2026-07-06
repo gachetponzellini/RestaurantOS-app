@@ -1,0 +1,9 @@
+# pnpm 11 gestiona acá qué dependencias pueden correr build scripts en install
+# (reemplaza al viejo campo `pnpm.onlyBuiltDependencies` de package.json).
+# Equivalente a haber corrido `pnpm approve-builds`.
+allowBuilds:
+  esbuild: true
+  msw: true
+  sharp: true
+  supabase: true
+  unrs-resolver: true

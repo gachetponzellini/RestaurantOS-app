@@ -2,6 +2,9 @@
   "name": "pedidos",
   "version": "0.1.0",
   "private": true,
+  "engines": {
+    "node": ">=22 <25"
+  },
   "scripts": {
     "dev": "next dev --turbopack",
     "dev:local": "supabase start && node scripts/env-switch.mjs local && next dev --turbopack",
@@ -91,13 +94,5 @@
     "tsx": "^4.21.0",
     "typescript": "^5",
     "vitest": "^4.1.4"
-  },
-  "pnpm": {
-    "onlyBuiltDependencies": [
-      "esbuild",
-      "sharp",
-      "supabase",
-      "unrs-resolver"
-    ]
   }
 }
