@@ -52,6 +52,15 @@ export function canMarkRotura(role: BusinessRole): boolean {
   return role === "admin" || role === "encargado";
 }
 
+/**
+ * Reimprimir / reintentar la impresión de una comanda desde operación (spec
+ * 35). Gestión del local: encargado/admin. El mozo ya recibe la notificación
+ * de fallo (spec 33) pero no dispara la reimpresión en Fase 1.
+ */
+export function canReimprimirComanda(role: BusinessRole): boolean {
+  return role === "admin" || role === "encargado";
+}
+
 // ── Cuenta / cobros ─────────────────────────────────────────────
 
 /**
@@ -117,7 +126,13 @@ export function canTransitionMesa(
   from: OperationalStatus,
   to: OperationalStatus,
 ): boolean {
-  const isAnulacion = to === "libre" && from === "ocupada";
+  // Anulación = liberar una mesa con order activa/cuenta pedida SIN cobro
+  // (ocupada/pidio_cuenta → libre). Antes solo cubría `ocupada`, así que un mozo
+  // podía liberar una mesa en `pidio_cuenta` (siempre con items cargados) y
+  // cancelar una cuenta con plata (spec 36 · R-E3). `limpiar → libre` (mesa ya
+  // cobrada, se limpió) no es anulación y sigue libre para cualquiera.
+  const isAnulacion =
+    to === "libre" && (from === "ocupada" || from === "pidio_cuenta");
   if (isAnulacion) return role === "admin" || role === "encargado";
   return true;
 }

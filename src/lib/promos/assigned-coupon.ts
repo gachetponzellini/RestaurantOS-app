@@ -46,6 +46,9 @@ export async function getAssignedCoupon(
       code: promo.code,
       subtotalCents,
       deliveryFeeCents,
+      // Estos promos ya están filtrados por customer_id = customer.id; pasamos
+      // el id para que el gate de código personal (R-D1) los deje pasar.
+      customerId: customer.id,
     });
     if (result.ok) return result.promo;
   }

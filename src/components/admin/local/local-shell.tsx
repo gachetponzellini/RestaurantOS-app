@@ -45,6 +45,7 @@ function TabsInner({
   businessMembers,
   initialPresent,
   todaySummary,
+  printAgentLastSeenAt,
 }: {
   slug: string;
   businessId: string;
@@ -65,6 +66,7 @@ function TabsInner({
   businessMembers: { user_id: string; full_name: string | null }[];
   initialPresent: PresentEmployee[];
   todaySummary?: TodaySummary;
+  printAgentLastSeenAt: string | null;
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -223,6 +225,7 @@ function TabsInner({
             initialComandas={initialComandas}
             stations={stations}
             mozos={mozos}
+            printAgentLastSeenAt={printAgentLastSeenAt}
           />
         )}
         {active === "caja" && (
@@ -314,6 +317,7 @@ export function LocalShell(props: {
   businessMembers: { user_id: string; full_name: string | null }[];
   initialPresent: PresentEmployee[];
   todaySummary?: TodaySummary;
+  printAgentLastSeenAt: string | null;
 }) {
   return (
     <Suspense fallback={null}>

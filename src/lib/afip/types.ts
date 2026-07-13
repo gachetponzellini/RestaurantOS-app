@@ -6,21 +6,22 @@ export type TipoComprobante =
 
 export type InvoiceStatus = "pending" | "authorized" | "failed" | "cancelled";
 
-export type AFIPProvider = "tusfacturas" | "afipsdk" | "direct" | "sandbox";
+export type AFIPProvider = "sandbox" | "gateway";
 
 /** Modo fiscal por negocio. En `sandbox` los CAEs son fake (sin valor fiscal). */
 export type FiscalMode = "sandbox" | "produccion";
 
 /**
- * Credenciales de TusFacturas, resueltas POR NEGOCIO (server-only).
- * Son tres tokens; el CUIT emisor lo determina la credencial, no se envía
- * en el payload. Nunca se exponen al cliente.
+ * Credenciales del ARCA GPSF Gateway, resueltas POR NEGOCIO (server-only).
+ * El gateway autentica con UNA API key (`sk_live_...`) por tenant; el CUIT
+ * emisor lo determina esa key, no se envía en el payload. El `tenantSlug`
+ * arma la URL personalizada del cliente (`/api/t/<slug>/v1`). Nunca se exponen
+ * al cliente: viven en la tabla `afip_gateway_credentials` (service-role-only).
  */
-export type TusfacturasCredentials = {
-  apiToken: string;
+export type GatewayCredentials = {
   apiKey: string;
-  userToken: string;
-  apiUrl?: string;
+  tenantSlug: string;
+  baseUrl: string;
 };
 
 export type AFIPConfig = {
@@ -30,8 +31,21 @@ export type AFIPConfig = {
   defaultTipo: TipoComprobante;
   mode: FiscalMode;
   enabled: boolean;
-  /** null cuando el negocio todavía no cargó las credenciales reales. */
-  credentials: TusfacturasCredentials | null;
+  /** null cuando el negocio todavía no cargó la credencial del gateway. */
+  credentials: GatewayCredentials | null;
+};
+
+/**
+ * Condición IVA del receptor (RG 5616, obligatoria en el gateway):
+ * 1=Responsable Inscripto · 4=Exento · 5=Consumidor Final · 6=Monotributo.
+ */
+export type CondicionIvaReceptor = 1 | 4 | 5 | 6;
+
+/** Comprobante que ajusta una NC/ND (obligatorio para notas de crédito). */
+export type ComprobanteAsociado = {
+  tipo: TipoComprobante;
+  puntoVenta: number;
+  numero: number;
 };
 
 export type InvoiceRequest = {
@@ -42,14 +56,38 @@ export type InvoiceRequest = {
   razonSocialReceptor?: string;
   totalCents: number;
   concepto: "productos" | "servicios" | "productos_y_servicios";
+  /** NC/ND: comprobante(s) que ajusta. Requerido por el gateway para notas de crédito. */
+  comprobantesAsociados?: ComprobanteAsociado[];
 };
 
-export type InvoiceResponse = {
+/** Estado normalizado de un job del provider (mapea los estados del gateway). */
+export type JobState = "pending" | "authorized" | "failed";
+
+/** Clasificación del error del provider (para reintentos y UI). */
+export type ProviderErrorType =
+  | "validation"
+  | "arca_down"
+  | "auth"
+  | "not_found"
+  | "unknown";
+
+/**
+ * Resultado de una operación del provider (`enqueue` o `getStatus`), normalizado.
+ *
+ * El gateway es asíncrono: `enqueue` devuelve `state: "pending"` con un `jobId`
+ * que se pollea con `getStatus`. El sandbox resuelve de una: `enqueue` ya
+ * devuelve `state: "authorized"` (terminal), sin necesidad de polling.
+ */
+export type ProviderResult = {
   success: boolean;
+  state: JobState;
+  jobId?: string;
   cae?: string;
   caeVencimiento?: string;
   numero?: number;
+  qrUrl?: string;
   error?: string;
+  errorType?: ProviderErrorType;
   rawResponse?: unknown;
 };
 
@@ -73,7 +111,11 @@ export type Invoice = {
   error_message: string | null;
   idempotency_key: string | null;
   pdf_url: string | null;
+  /** URL del QR de ARCA (RG 4892), presente cuando el gateway autoriza. */
+  qr_url: string | null;
   provider: string;
+  /** job_id del gateway; se pollea hasta estado terminal. */
+  provider_job_id: string | null;
   provider_response: unknown;
   created_at: string;
   /** Motivo de anulación (presente cuando `status = 'cancelled'`). */

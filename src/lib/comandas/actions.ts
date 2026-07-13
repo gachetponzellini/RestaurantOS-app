@@ -7,7 +7,7 @@ import { actionError, actionOk, type ActionResult } from "@/lib/actions";
 import { requireMozoActionContext } from "@/lib/mozo/auth";
 import { createNotification } from "@/lib/notifications/create";
 import { notifyItemCancelled } from "@/lib/notifications/events";
-import { canCancelItem } from "@/lib/permissions/can";
+import { canCancelItem, canReimprimirComanda } from "@/lib/permissions/can";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 import { getBusiness } from "@/lib/tenant";
@@ -452,7 +452,12 @@ export async function enviarComanda(
         }
       }
 
-      for (const pid of [...new Set(childProductIds)]) {
+      // Un hijo por componente (spec 36 · R-E4): NO deduplicar por product_id.
+      // El flujo público (persist-order) inserta un order_item hijo por cada
+      // componente; si acá deduplicábamos con Set, un combo con el mismo
+      // producto repetido descontaba stock/receta 1 vez en el mozo y N en el
+      // público. `missingIds` sí puede deduplicar (es solo para fetchear).
+      for (const pid of childProductIds) {
         const childProduct = productById.get(pid);
         if (!childProduct) continue;
         const childStation = resolveStation(
@@ -585,8 +590,8 @@ export async function marcarComandaEntregada(
     return actionError("No pudimos marcar la comanda.");
   }
 
-  // Espejamos en kitchen_status de los items vinculados (la pantalla
-  // /cocina los lee).
+  // Espejamos en kitchen_status de los items vinculados (el kanban de Comandas
+  // en /admin/operacion los lee; la pantalla /cocina fue eliminada, d3).
   const { data: links } = await service
     .from("comanda_items")
     .select("order_item_id")
@@ -671,6 +676,9 @@ export async function advanceComandaStatus(
   const business = await getBusiness(slug);
   if (!business) return actionError("Negocio no encontrado.");
 
+  const ctxResult = await requireMozoActionContext(business.id);
+  if (!ctxResult.ok) return ctxResult;
+
   const service = createSupabaseServiceClient() as unknown as GenericClient;
 
   const { data: row } = await service
@@ -700,7 +708,8 @@ export async function advanceComandaStatus(
   }
 
   // Espejamos el avance en kitchen_status de los items. `kitchen_status`
-  // mantiene el set de 4 valores legacy (la pantalla `/cocina` los usa) —
+  // mantiene el set de 4 valores legacy (el kanban de Comandas los usa; la
+  // pantalla /cocina fue eliminada, d3) —
   // mapeamos los 3 estados de comanda a los 3 que sí movemos.
   const itemKitchen: KitchenItemStatus =
     next === "pendiente"
@@ -739,6 +748,9 @@ export async function advanceItemKitchenStatus(
 ): Promise<ActionResult<{ kitchen_status: KitchenItemStatus }>> {
   const business = await getBusiness(slug);
   if (!business) return actionError("Negocio no encontrado.");
+
+  const ctxResult = await requireMozoActionContext(business.id);
+  if (!ctxResult.ok) return ctxResult;
 
   const service = createSupabaseServiceClient() as unknown as GenericClient;
 
@@ -900,6 +912,62 @@ export async function cancelarItem(
   // La tab Comandas del back-office (operación) muestra los items cancelados
   // en vivo — sin esto, el "86" no se refleja en el kanban hasta un refresh
   // manual. Igual que el fix ya aplicado a las acciones de mesa.
+  revalidatePath(`/${slug}/admin/operacion`);
+  return actionOk(undefined);
+}
+
+/**
+ * Pide reimprimir una comanda desde operación (spec 35). Setea
+ * `reprint_requested_at = now()` y limpia `print_failed_at`:
+ *
+ * - El `GET /api/print-agent` incluye las comandas con `reprint_requested_at`
+ *   seteado aunque ya hayan avanzado → el agente la (re)imprime sin cambios.
+ * - Limpiar `print_failed_at` resetea el dedup del aviso del spec 33: si el
+ *   reintento vuelve a fallar, puede volver a notificar.
+ *
+ * NO toca la máquina de estados de la comanda (reimpresión = flag lateral).
+ * Sirve tanto para "Reimprimir" (comanda avanzada) como para "Reintentar"
+ * (comanda fallada) — ambos terminan en el mismo lugar. Gate encargado/admin
+ * + scope por `business_id`.
+ */
+export async function solicitarReimpresion(
+  slug: string,
+  comandaId: string,
+): Promise<ActionResult<void>> {
+  const business = await getBusiness(slug);
+  if (!business) return actionError("Negocio no encontrado.");
+
+  const ctxResult = await requireMozoActionContext(business.id);
+  if (!ctxResult.ok) return ctxResult;
+  if (!canReimprimirComanda(ctxResult.data.role)) {
+    return actionError("Solo encargado o admin pueden reimprimir una comanda.");
+  }
+
+  const service = createSupabaseServiceClient() as unknown as GenericClient;
+
+  const { data: row } = await service
+    .from("comandas")
+    .select("id, orders!inner(business_id)")
+    .eq("id", comandaId)
+    .maybeSingle();
+  const ownerBusinessId = (row as { orders?: { business_id: string } } | null)
+    ?.orders?.business_id;
+  if (!row || ownerBusinessId !== business.id) {
+    return actionError("Comanda no encontrada.");
+  }
+
+  const { error } = await service
+    .from("comandas")
+    .update({
+      reprint_requested_at: new Date().toISOString(),
+      print_failed_at: null,
+    })
+    .eq("id", comandaId);
+  if (error) {
+    console.error("solicitarReimpresion", error);
+    return actionError("No pudimos pedir la reimpresión.");
+  }
+
   revalidatePath(`/${slug}/admin/operacion`);
   return actionOk(undefined);
 }

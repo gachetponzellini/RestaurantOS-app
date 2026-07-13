@@ -5,6 +5,7 @@ import { z } from "zod";
 
 import { actionError, actionOk, type ActionResult } from "@/lib/actions";
 import { cloneBusinessStructure } from "@/lib/platform/clone-business";
+import { RESERVED_SLUGS } from "@/lib/reserved-slugs";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 
@@ -18,16 +19,6 @@ const BusinessInput = z.object({
   timezone: z.string().min(1),
   admin_email: z.string().email("Email inválido."),
 });
-
-const RESERVED_SLUGS = new Set([
-  "admin",
-  "super",
-  "api",
-  "auth",
-  "www",
-  "app",
-  "login",
-]);
 
 async function assertPlatformAdmin() {
   const supabase = await createSupabaseServerClient();

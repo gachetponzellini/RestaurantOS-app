@@ -386,11 +386,22 @@ export async function persistOrder(
   let promoCodeId: string | null = null;
   let promoCodeSnapshot: string | null = null;
   if (data.promo_code) {
+    // Resolvemos el customer (por business+phone, la misma identidad que usa el
+    // upsert de abajo) para validar códigos personales (spec 36 · R-D1). Cliente
+    // nuevo = null → un código personal ajeno se rechaza, que es lo correcto.
+    const { data: existingCustomer } = await supabase
+      .from("customers")
+      .select("id")
+      .eq("business_id", business.id)
+      .eq("phone", data.customer_phone)
+      .maybeSingle();
+
     const validation = await validatePromoCode(supabase, {
       businessId: business.id,
       code: data.promo_code,
       subtotalCents,
       deliveryFeeCents,
+      customerId: (existingCustomer as { id: string } | null)?.id ?? null,
     });
     if (!validation.ok) {
       return actionError(validation.error);

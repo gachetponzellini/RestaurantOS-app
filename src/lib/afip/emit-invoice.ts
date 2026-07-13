@@ -10,23 +10,27 @@ import { createSupabaseServiceClient } from "@/lib/supabase/service";
 import { getBusiness } from "@/lib/tenant";
 
 import { calculateAmounts } from "./calculate-amounts";
+import { createGatewayClient } from "./gateway";
 import type { AFIPProviderClient } from "./provider";
 import {
   type ProviderSelection,
   selectProvider,
 } from "./provider-config";
 import { createSandboxClient } from "./sandbox";
-import { createTusfacturasClient } from "./tusfacturas";
 import type {
   AFIPConfig,
   Invoice,
-  InvoiceResponse,
+  ProviderResult,
   TipoComprobante,
 } from "./types";
 
 type GenericClient = SupabaseClient;
 
 const UNIQUE_VIOLATION = "23505";
+
+/** Ventana máxima de polling inline (anular): el worker suele resolver en segundos. */
+const INLINE_POLL_TIMEOUT_MS = 90_000;
+const INLINE_POLL_INTERVAL_MS = 3_000;
 
 type EmitInput = {
   orderId: string;
@@ -49,7 +53,7 @@ function buildProvider(
   businessId: string,
 ): AFIPProviderClient {
   if (selection.kind === "sandbox") return createSandboxClient(businessId);
-  return createTusfacturasClient(selection.credentials);
+  return createGatewayClient(selection.credentials);
 }
 
 async function loadAFIPConfig(
@@ -59,7 +63,7 @@ async function loadAFIPConfig(
   const { data } = await service
     .from("businesses")
     .select(
-      "afip_cuit, afip_punto_venta, afip_provider, afip_default_tipo, afip_mode, afip_enabled, afip_provider_api_token, afip_provider_api_key, afip_provider_user_token",
+      "afip_cuit, afip_punto_venta, afip_provider, afip_default_tipo, afip_mode, afip_enabled",
     )
     .eq("id", businessId)
     .single();
@@ -71,31 +75,51 @@ async function loadAFIPConfig(
     afip_default_tipo: string | null;
     afip_mode: string | null;
     afip_enabled: boolean | null;
-    afip_provider_api_token: string | null;
-    afip_provider_api_key: string | null;
-    afip_provider_user_token: string | null;
   };
   if (!row.afip_cuit || !row.afip_punto_venta) return null;
 
-  const hasCreds =
-    row.afip_provider_api_token &&
-    row.afip_provider_api_key &&
-    row.afip_provider_user_token;
+  // La credencial del gateway vive en tabla aparte (service-role-only).
+  const { data: credData } = await service
+    .from("afip_gateway_credentials")
+    .select("api_key, tenant_slug, base_url")
+    .eq("business_id", businessId)
+    .maybeSingle();
+  const cred = credData as {
+    api_key: string | null;
+    tenant_slug: string | null;
+    base_url: string | null;
+  } | null;
+
+  const hasCreds = Boolean(cred?.api_key && cred?.tenant_slug);
 
   return {
     cuit: row.afip_cuit,
     puntoVenta: row.afip_punto_venta,
-    provider: (row.afip_provider ?? "tusfacturas") as AFIPConfig["provider"],
+    provider: (row.afip_provider ?? "gateway") as AFIPConfig["provider"],
     defaultTipo: (row.afip_default_tipo ?? "factura_b") as TipoComprobante,
     mode: row.afip_mode === "produccion" ? "produccion" : "sandbox",
     enabled: Boolean(row.afip_enabled),
     credentials: hasCreds
       ? {
-          apiToken: row.afip_provider_api_token!,
-          apiKey: row.afip_provider_api_key!,
-          userToken: row.afip_provider_user_token!,
+          apiKey: cred!.api_key!,
+          tenantSlug: cred!.tenant_slug!,
+          baseUrl: cred!.base_url ?? "https://arca-gpsf-gateway.vercel.app",
         }
       : null,
+  };
+}
+
+/** Campos de la fila `invoices` derivados de un resultado terminal del provider. */
+function terminalPatch(result: ProviderResult): Record<string, unknown> {
+  return {
+    status: result.state === "authorized" ? "authorized" : "failed",
+    numero: result.numero ?? null,
+    cae: result.cae ?? null,
+    cae_vencimiento: result.caeVencimiento ?? null,
+    qr_url: result.qrUrl ?? null,
+    provider_job_id: result.jobId ?? null,
+    error_message: result.error ?? null,
+    provider_response: result.rawResponse ?? null,
   };
 }
 
@@ -110,7 +134,7 @@ export async function emitInvoice(
 
   const service = createSupabaseServiceClient() as unknown as GenericClient;
 
-  // Config AFIP del negocio (CUIT, PV, modo, credenciales).
+  // Config AFIP del negocio (CUIT, PV, modo, credencial del gateway).
   const afipConfig = await loadAFIPConfig(service, business.id);
   if (!afipConfig) {
     return actionError(
@@ -121,7 +145,7 @@ export async function emitInvoice(
   // Validar order.
   const { data: orderRow } = await service
     .from("orders")
-    .select("id, business_id, total_cents, total_paid_cents, lifecycle_status")
+    .select("id, business_id, total_cents, tip_cents, total_paid_cents, lifecycle_status")
     .eq("id", input.orderId)
     .maybeSingle();
   if (
@@ -130,7 +154,17 @@ export async function emitInvoice(
   ) {
     return actionError("Orden no encontrada.");
   }
-  const order = orderRow as { id: string; total_cents: number };
+  const order = orderRow as {
+    id: string;
+    total_cents: number;
+    tip_cents: number;
+  };
+  // Base facturable ARCA = subtotal − descuento (SIN propina). `total_cents` ya
+  // suma la propina (billing/totals.ts:18) y la propina no integra la base
+  // imponible en AR. `total_cents` queda intacto para el cobro/posnet; solo el
+  // comprobante fiscal la excluye. (spec 36 · R-C1; corrige lo que spec 06 dio
+  // por hecho.)
+  const facturableCents = order.total_cents - (order.tip_cents ?? 0);
 
   const tipo = input.tipoComprobante ?? afipConfig.defaultTipo;
 
@@ -153,13 +187,13 @@ export async function emitInvoice(
     return actionError("Esta orden ya tiene una factura autorizada.");
   }
 
-  // Selección de provider según modo fiscal. En producción sin credenciales,
-  // NO se llama al provider externo.
+  // Selección de provider según modo fiscal. En producción sin credencial,
+  // NO se llama al gateway.
   const selection = selectProvider(afipConfig);
   if (selection.kind === "error") return actionError(selection.message);
-  const providerName = selection.kind === "sandbox" ? "sandbox" : "tusfacturas";
+  const providerName = selection.kind === "sandbox" ? "sandbox" : "gateway";
 
-  const amounts = calculateAmounts(order.total_cents);
+  const amounts = calculateAmounts(facturableCents);
   const idempotencyKey = input.idempotencyKey ?? `${input.orderId}:${tipo}`;
 
   // ── RESERVA ──────────────────────────────────────────────────────
@@ -212,38 +246,45 @@ export async function emitInvoice(
   }
   const reservedInvoice = reserved as Invoice;
 
-  // ── EMITIR ───────────────────────────────────────────────────────
+  // ── ENCOLAR ──────────────────────────────────────────────────────
   const provider = buildProvider(selection, business.id);
-  let providerResult: InvoiceResponse;
+  let result: ProviderResult;
   try {
-    providerResult = await provider.emit({
-      tipo,
-      puntoVenta: afipConfig.puntoVenta,
-      cuitEmisor: afipConfig.cuit,
-      cuitReceptor: input.cuitReceptor,
-      razonSocialReceptor: input.razonSocialReceptor,
-      totalCents: order.total_cents,
-      concepto: "productos",
-    });
+    result = await provider.enqueue(
+      {
+        tipo,
+        puntoVenta: afipConfig.puntoVenta,
+        cuitEmisor: afipConfig.cuit,
+        cuitReceptor: input.cuitReceptor,
+        razonSocialReceptor: input.razonSocialReceptor,
+        totalCents: facturableCents,
+        concepto: "productos",
+      },
+      idempotencyKey,
+    );
   } catch (err) {
-    providerResult = {
+    result = {
       success: false,
-      error: `Error de red con el provider: ${err instanceof Error ? err.message : String(err)}`,
+      state: "failed",
+      error: `Error de red con el gateway: ${err instanceof Error ? err.message : String(err)}`,
     };
   }
 
-  // ── CONFIRMAR ────────────────────────────────────────────────────
-  const status = providerResult.success ? "authorized" : "failed";
+  // ── PERSISTIR ────────────────────────────────────────────────────
+  // - `pending` (gateway): guardamos el job_id; la UI pollea `pollInvoiceStatus`.
+  // - `authorized` (sandbox) / `failed`: estado terminal directo.
+  const patch =
+    result.state === "pending"
+      ? {
+          status: "pending",
+          provider_job_id: result.jobId ?? null,
+          provider_response: result.rawResponse ?? null,
+        }
+      : terminalPatch(result);
+
   const { data: updated, error: updErr } = await service
     .from("invoices")
-    .update({
-      status,
-      numero: providerResult.numero ?? null,
-      cae: providerResult.cae ?? null,
-      cae_vencimiento: providerResult.caeVencimiento ?? null,
-      error_message: providerResult.error ?? null,
-      provider_response: providerResult.rawResponse ?? null,
-    })
+    .update(patch)
     .eq("id", reservedInvoice.id)
     .select()
     .single();
@@ -253,13 +294,120 @@ export async function emitInvoice(
   }
   const invoice = updated as Invoice;
 
-  if (!providerResult.success) {
+  // Sólo es error "duro" si el provider rechazó (failed). `pending` es OK: la UI
+  // pollea hasta el CAE.
+  if (result.state === "failed") {
     return actionError(
-      `AFIP rechazó el comprobante: ${providerResult.error ?? "error desconocido"}`,
+      `AFIP rechazó el comprobante: ${result.error ?? "error desconocido"}`,
     );
   }
 
   return actionOk({ invoice });
+}
+
+/**
+ * Pollea el estado de una factura `pending` contra el gateway y persiste el
+ * desenlace (authorized/failed). Idempotente: si otra llamada ya la resolvió,
+ * devuelve la fila fresca. La UI la llama en loop hasta estado terminal.
+ */
+export async function pollInvoiceStatus(
+  invoiceId: string,
+  slug: string,
+): Promise<ActionResult<EmitResult>> {
+  const business = await getBusiness(slug);
+  if (!business) return actionError("Negocio no encontrado.");
+
+  const ctxResult = await requireMozoActionContext(business.id);
+  if (!ctxResult.ok) return ctxResult;
+
+  const service = createSupabaseServiceClient() as unknown as GenericClient;
+
+  const { data: invRow } = await service
+    .from("invoices")
+    .select("*")
+    .eq("id", invoiceId)
+    .maybeSingle();
+  if (
+    !invRow ||
+    (invRow as { business_id: string }).business_id !== business.id
+  ) {
+    return actionError("Factura no encontrada.");
+  }
+  const inv = invRow as Invoice;
+
+  // Ya terminal, o sin job que pollear (sandbox): devolver tal cual.
+  if (inv.status !== "pending" || !inv.provider_job_id) {
+    return actionOk({ invoice: inv });
+  }
+
+  const afipConfig = await loadAFIPConfig(service, business.id);
+  if (!afipConfig) return actionError("AFIP no configurado.");
+  const selection = selectProvider(afipConfig);
+  if (selection.kind === "error") return actionError(selection.message);
+  const provider = buildProvider(selection, business.id);
+
+  let result: ProviderResult;
+  try {
+    result = await provider.getStatus(inv.provider_job_id);
+  } catch {
+    // Error transitorio consultando: sigue pending.
+    return actionOk({ invoice: inv });
+  }
+
+  // Todavía en proceso: no tocamos la fila.
+  if (result.state === "pending") return actionOk({ invoice: inv });
+
+  // Persistir el desenlace, sólo si sigue pending (evita pisar una carrera).
+  const { data: updated } = await service
+    .from("invoices")
+    .update({
+      status: result.state === "authorized" ? "authorized" : "failed",
+      numero: result.numero ?? inv.numero,
+      cae: result.cae ?? inv.cae,
+      cae_vencimiento: result.caeVencimiento ?? inv.cae_vencimiento,
+      qr_url: result.qrUrl ?? inv.qr_url,
+      error_message: result.error ?? null,
+      provider_response: result.rawResponse ?? inv.provider_response,
+    })
+    .eq("id", invoiceId)
+    .eq("status", "pending")
+    .select()
+    .maybeSingle();
+
+  if (updated) return actionOk({ invoice: updated as Invoice });
+
+  // Otra llamada ganó la carrera: devolver la fila fresca.
+  const { data: fresh } = await service
+    .from("invoices")
+    .select("*")
+    .eq("id", invoiceId)
+    .single();
+  return actionOk({ invoice: fresh as Invoice });
+}
+
+/** Pollea inline (server-side) un job del provider hasta estado terminal. */
+async function waitForTerminal(
+  provider: AFIPProviderClient,
+  initial: ProviderResult,
+): Promise<ProviderResult> {
+  if (initial.state !== "pending" || !initial.jobId) return initial;
+  const deadline = Date.now() + INLINE_POLL_TIMEOUT_MS;
+  let last = initial;
+  while (Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, INLINE_POLL_INTERVAL_MS));
+    try {
+      last = await provider.getStatus(initial.jobId);
+    } catch {
+      continue;
+    }
+    if (last.state !== "pending") return last;
+  }
+  return {
+    ...last,
+    success: false,
+    state: "pending",
+    error: last.error ?? "Timeout esperando la respuesta de ARCA.",
+  };
 }
 
 export async function retryInvoice(
@@ -301,36 +449,48 @@ export async function retryInvoice(
   if (selection.kind === "error") return actionError(selection.message);
 
   const provider = buildProvider(selection, business.id);
-  let providerResult: InvoiceResponse;
+
+  // Reintento SIEMPRE con nueva idempotency-key: un rechazo previo del gateway
+  // (dato inválido) exige reemitir con clave distinta (guía §2). Es seguro: una
+  // factura `failed` nunca produjo CAE, así que no hay riesgo de duplicar.
+  const newKey = `${inv.order_id ?? inv.id}:${inv.tipo_comprobante}:retry:${Date.now().toString(36)}`;
+
+  let result: ProviderResult;
   try {
-    providerResult = await provider.emit({
-      tipo: inv.tipo_comprobante,
-      puntoVenta: inv.punto_venta,
-      cuitEmisor: afipConfig.cuit,
-      cuitReceptor: inv.cuit_receptor ?? undefined,
-      razonSocialReceptor: inv.razon_social_receptor ?? undefined,
-      totalCents: inv.total_cents,
-      concepto: "productos",
-    });
+    result = await provider.enqueue(
+      {
+        tipo: inv.tipo_comprobante,
+        puntoVenta: inv.punto_venta,
+        cuitEmisor: afipConfig.cuit,
+        cuitReceptor: inv.cuit_receptor ?? undefined,
+        razonSocialReceptor: inv.razon_social_receptor ?? undefined,
+        totalCents: inv.total_cents,
+        concepto: "productos",
+      },
+      newKey,
+    );
   } catch (err) {
-    providerResult = {
+    result = {
       success: false,
-      error: `Error de red con el provider: ${err instanceof Error ? err.message : String(err)}`,
+      state: "failed",
+      error: `Error de red con el gateway: ${err instanceof Error ? err.message : String(err)}`,
     };
   }
 
-  const newStatus = providerResult.success ? "authorized" : "failed";
+  const patch =
+    result.state === "pending"
+      ? {
+          status: "pending",
+          idempotency_key: newKey,
+          provider_job_id: result.jobId ?? null,
+          error_message: null,
+          provider_response: result.rawResponse ?? null,
+        }
+      : { ...terminalPatch(result), idempotency_key: newKey };
 
   const { error: updErr } = await service
     .from("invoices")
-    .update({
-      status: newStatus,
-      cae: providerResult.cae ?? inv.cae,
-      cae_vencimiento: providerResult.caeVencimiento ?? inv.cae_vencimiento,
-      numero: providerResult.numero ?? inv.numero,
-      error_message: providerResult.error ?? null,
-      provider_response: providerResult.rawResponse ?? null,
-    })
+    .update(patch)
     .eq("id", invoiceId);
 
   if (updErr) {
@@ -341,9 +501,9 @@ export async function retryInvoice(
     return actionError(`Error guardando reintento: ${updErr.message}`);
   }
 
-  if (!providerResult.success) {
+  if (result.state === "failed") {
     return actionError(
-      `Reintento fallido: ${providerResult.error ?? "error desconocido"}`,
+      `Reintento fallido: ${result.error ?? "error desconocido"}`,
     );
   }
 
@@ -381,6 +541,11 @@ type AnularResult = {
  * el motivo persistido. Permiso: encargado/admin (el mozo no anula). Habilita
  * re-facturar la orden, porque el guard de `emitInvoice` deja de ver una
  * factura `authorized` vigente.
+ *
+ * El gateway exige `comprobantes_asociados` para la NC. Como la NC es asíncrona
+ * y sólo debemos marcar la original `cancelled` cuando la NC quedó realmente
+ * autorizada, acá polleamos inline hasta estado terminal (el worker resuelve en
+ * segundos).
  */
 export async function anularFactura(
   input: AnularInput,
@@ -424,39 +589,61 @@ export async function anularFactura(
   if (!ncTipo) {
     return actionError("Este comprobante no se puede anular con nota de crédito.");
   }
+  if (original.numero == null) {
+    return actionError(
+      "La factura original no tiene número asignado; no se puede emitir la nota de crédito.",
+    );
+  }
 
   const afipConfig = await loadAFIPConfig(service, business.id);
   if (!afipConfig) return actionError("AFIP no configurado.");
 
   const selection = selectProvider(afipConfig);
   if (selection.kind === "error") return actionError(selection.message);
-  const providerName = selection.kind === "sandbox" ? "sandbox" : "tusfacturas";
+  const providerName = selection.kind === "sandbox" ? "sandbox" : "gateway";
 
-  // Emitir la nota de crédito por el mismo total que la factura original.
+  // Encolar la NC por el mismo total, referenciando la factura original.
   const provider = buildProvider(selection, business.id);
-  let providerResult: InvoiceResponse;
+  const ncKey = `anular:${original.id}`;
+  let result: ProviderResult;
   try {
-    providerResult = await provider.emit({
-      tipo: ncTipo,
-      puntoVenta: afipConfig.puntoVenta,
-      cuitEmisor: afipConfig.cuit,
-      cuitReceptor: original.cuit_receptor ?? undefined,
-      razonSocialReceptor: original.razon_social_receptor ?? undefined,
-      totalCents: original.total_cents,
-      concepto: "productos",
-    });
+    result = await provider.enqueue(
+      {
+        tipo: ncTipo,
+        puntoVenta: afipConfig.puntoVenta,
+        cuitEmisor: afipConfig.cuit,
+        cuitReceptor: original.cuit_receptor ?? undefined,
+        razonSocialReceptor: original.razon_social_receptor ?? undefined,
+        totalCents: original.total_cents,
+        concepto: "productos",
+        comprobantesAsociados: [
+          {
+            tipo: original.tipo_comprobante,
+            puntoVenta: original.punto_venta,
+            numero: original.numero,
+          },
+        ],
+      },
+      ncKey,
+    );
   } catch (err) {
-    providerResult = {
+    result = {
       success: false,
-      error: `Error de red con el provider: ${err instanceof Error ? err.message : String(err)}`,
+      state: "failed",
+      error: `Error de red con el gateway: ${err instanceof Error ? err.message : String(err)}`,
     };
   }
 
-  if (!providerResult.success) {
-    // La factura original NO cambia de estado si la NC no se pudo emitir.
-    return actionError(
-      `No se pudo emitir la nota de crédito: ${providerResult.error ?? "error desconocido"}`,
-    );
+  // Esperar el desenlace de la NC (polleo inline si quedó pending).
+  result = await waitForTerminal(provider, result);
+
+  if (result.state !== "authorized") {
+    // La factura original NO cambia de estado si la NC no se autorizó.
+    const detail =
+      result.state === "pending"
+        ? "La nota de crédito quedó en proceso en ARCA. Reintentá la anulación en unos segundos."
+        : (result.error ?? "error desconocido");
+    return actionError(`No se pudo emitir la nota de crédito: ${detail}`);
   }
 
   const amounts = calculateAmounts(original.total_cents);
@@ -472,9 +659,10 @@ export async function anularFactura(
       payment_id: original.payment_id,
       tipo_comprobante: ncTipo,
       punto_venta: afipConfig.puntoVenta,
-      numero: providerResult.numero ?? null,
-      cae: providerResult.cae ?? null,
-      cae_vencimiento: providerResult.caeVencimiento ?? null,
+      numero: result.numero ?? null,
+      cae: result.cae ?? null,
+      cae_vencimiento: result.caeVencimiento ?? null,
+      qr_url: result.qrUrl ?? null,
       cuit_receptor: original.cuit_receptor,
       razon_social_receptor: original.razon_social_receptor,
       total_cents: amounts.totalCents,
@@ -483,8 +671,9 @@ export async function anularFactura(
       iva_rate: amounts.ivaRate,
       status: "authorized",
       provider: providerName,
-      provider_response: providerResult.rawResponse ?? null,
-      idempotency_key: `anular:${original.id}`,
+      provider_job_id: result.jobId ?? null,
+      provider_response: result.rawResponse ?? null,
+      idempotency_key: ncKey,
       cancels_invoice_id: original.id,
     })
     .select()

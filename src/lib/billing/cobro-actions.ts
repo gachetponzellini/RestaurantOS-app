@@ -734,11 +734,15 @@ export async function anularCobro(
     .eq("order_id", orderId)
     .eq("payment_status", "pending");
 
-  // Reset splits.
+  // Reset splits — pero NO resucitar los cancelados (spec 36 · R-C4). Un split
+  // ya `cancelled` (via cancelarSplit, que redistribuyó su expected a los
+  // activos) volvía a `pending` con su expected intacto → total esperado
+  // inflado y la order no cerraba al re-cobrar.
   await service
     .from("order_splits")
     .update({ paid_amount_cents: 0, status: "pending" })
-    .eq("order_id", orderId);
+    .eq("order_id", orderId)
+    .neq("status", "cancelled");
 
   // Si la order ya estaba cerrada, reabrirla.
   if (order.lifecycle_status === "closed") {

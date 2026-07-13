@@ -117,6 +117,41 @@ describe.skipIf(!dbAvailable)("afip/emitInvoice idempotencia (integration)", () 
     expect(r.data.invoice.numero).not.toBeNull();
   });
 
+  it("propina fuera del facturable: el comprobante excluye tip_cents (spec 36 · R-C1)", { timeout: 30_000 }, async () => {
+    // subtotal 10.000 + propina 2.000 = total_cents 12.000. La base facturable
+    // ARCA debe ser 10.000 (la propina no integra la base imponible en AR).
+    const { data: order } = await supabase
+      .from("orders")
+      .insert({
+        business_id: businessId,
+        customer_name: "AFIP tip",
+        customer_phone: "0",
+        delivery_type: "dine_in",
+        subtotal_cents: 10_000,
+        tip_cents: 2_000,
+        total_cents: 12_000,
+        lifecycle_status: "open",
+      })
+      .select("id")
+      .single();
+    const orderId = order!.id as string;
+
+    const r = await emitInvoice({ orderId, slug: businessSlug });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+
+    const { data: inv } = await supabase
+      .from("invoices")
+      .select("total_cents, neto_cents, iva_cents")
+      .eq("order_id", orderId)
+      .eq("status", "authorized")
+      .single();
+    const row = inv as { total_cents: number; neto_cents: number; iva_cents: number };
+    // El comprobante se factura sobre 10.000, no 12.000 (sin propina).
+    expect(row.total_cents).toBe(10_000);
+    expect(row.neto_cents + row.iva_cents).toBe(10_000);
+  });
+
   it("doble emisión con misma idempotency_key → un solo comprobante", { timeout: 30_000 }, async () => {
     const orderId = await newOrder();
     const key = `${orderId}:factura_b`;

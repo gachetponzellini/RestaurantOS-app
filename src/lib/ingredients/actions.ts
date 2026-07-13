@@ -42,6 +42,47 @@ async function authDb() {
   return createSupabaseServerClient();
 }
 
+/**
+ * Gate estándar del catálogo/back-office: resuelve el negocio por slug, exige
+ * sesión con membership activa (via requireMozoActionContext, que ya corta
+ * disabled_at) y rol admin/encargado. Espejo del patrón de `stock/actions.ts`.
+ * Las mutaciones de recetas/insumos/stock-cocina usan el service client
+ * (bypassa RLS), así que este gate es la única barrera de permisos/tenant.
+ */
+async function requireCatalogAdmin(
+  businessSlug: string,
+): Promise<ActionResult<{ businessId: string }>> {
+  const businessId = await getBusinessIdBySlug(businessSlug);
+  if (!businessId) return actionError("Negocio no encontrado.");
+  const ctxResult = await requireMozoActionContext(businessId);
+  if (!ctxResult.ok) return ctxResult;
+  if (ctxResult.data.role !== "admin" && ctxResult.data.role !== "encargado") {
+    return actionError("Solo admin o encargado pueden gestionar el catálogo.");
+  }
+  return actionOk({ businessId });
+}
+
+/**
+ * Verifica que el `ingredientId` pertenezca a un negocio del que el usuario
+ * autenticado es miembro admin/encargado. Barrera de tenant para los reads
+ * "callable from client" que sólo reciben el id (evita IDOR cross-tenant de
+ * recetas/costos).
+ */
+async function callerOwnsIngredient(
+  service: ReturnType<typeof db>,
+  ingredientId: string,
+): Promise<boolean> {
+  const { data: ing } = await service
+    .from("ingredients")
+    .select("business_id")
+    .eq("id", ingredientId)
+    .maybeSingle();
+  if (!ing) return false;
+  const ctxResult = await requireMozoActionContext(ing.business_id as string);
+  if (!ctxResult.ok) return false;
+  return ctxResult.data.role === "admin" || ctxResult.data.role === "encargado";
+}
+
 // ═══════════════════════════════════════════════════════════════════
 // INGREDIENTS (INSUMOS)
 // ═══════════════════════════════════════════════════════════════════
@@ -53,8 +94,9 @@ export async function createIngredient(
   const parsed = IngredientInput.safeParse(input);
   if (!parsed.success) return actionError("Datos inválidos.");
 
-  const businessId = await getBusinessIdBySlug(businessSlug);
-  if (!businessId) return actionError("Negocio no encontrado.");
+  const auth = await requireCatalogAdmin(businessSlug);
+  if (!auth.ok) return auth;
+  const businessId = auth.data.businessId;
 
   const supabase = await authDb();
   const { data, error } = await supabase
@@ -83,6 +125,9 @@ export async function updateIngredient(
   const parsed = IngredientInput.safeParse(input);
   if (!parsed.success) return actionError("Datos inválidos.");
 
+  const auth = await requireCatalogAdmin(businessSlug);
+  if (!auth.ok) return auth;
+
   const supabase = await authDb();
   const { error } = await supabase
     .from("ingredients")
@@ -105,6 +150,9 @@ export async function deleteIngredient(
   businessSlug: string,
   id: string,
 ): Promise<ActionResult<null>> {
+  const auth = await requireCatalogAdmin(businessSlug);
+  if (!auth.ok) return auth;
+
   const supabase = await authDb();
   const { error } = await supabase.from("ingredients").delete().eq("id", id);
   if (error) {
@@ -138,8 +186,9 @@ export async function upsertPresentations(
     return actionError("Debe haber exactamente una presentación por defecto.");
   }
 
-  const businessId = await getBusinessIdBySlug(businessSlug);
-  if (!businessId) return actionError("Negocio no encontrado.");
+  const auth = await requireCatalogAdmin(businessSlug);
+  if (!auth.ok) return auth;
+  const businessId = auth.data.businessId;
 
   const service = db();
 
@@ -208,11 +257,13 @@ export async function saveRecipe(
     return actionError("No se puede repetir un ingrediente en la misma receta.");
   }
 
+  const auth = await requireCatalogAdmin(businessSlug);
+  if (!auth.ok) return auth;
+  const businessId = auth.data.businessId;
+
   const service = db();
 
   // Verify product belongs to business
-  const businessId = await getBusinessIdBySlug(businessSlug);
-  if (!businessId) return actionError("Negocio no encontrado.");
 
   const { data: product } = await service
     .from("products")
@@ -249,6 +300,9 @@ export async function removeRecipeLine(
   businessSlug: string,
   recipeLineId: string,
 ): Promise<ActionResult<null>> {
+  const auth = await requireCatalogAdmin(businessSlug);
+  if (!auth.ok) return auth;
+
   const supabase = await authDb();
   const { error } = await supabase.from("recipes").delete().eq("id", recipeLineId);
   if (error) {
@@ -284,8 +338,9 @@ export async function saveIngredientRecipe(
     return actionError("Un ingrediente no puede incluirse a sí mismo.");
   }
 
-  const businessId = await getBusinessIdBySlug(businessSlug);
-  if (!businessId) return actionError("Negocio no encontrado.");
+  const auth = await requireCatalogAdmin(businessSlug);
+  if (!auth.ok) return auth;
+  const businessId = auth.data.businessId;
 
   const service = db();
 
@@ -342,6 +397,9 @@ export async function removeIngredientRecipeLine(
   businessSlug: string,
   lineId: string,
 ): Promise<ActionResult<null>> {
+  const auth = await requireCatalogAdmin(businessSlug);
+  if (!auth.ok) return auth;
+
   const supabase = await authDb();
   const { error } = await supabase
     .from("ingredient_recipes")
@@ -395,8 +453,9 @@ export async function ingresarStockCocina(
   const parsed = StockIngresoInput.safeParse(input);
   if (!parsed.success) return actionError("Datos inválidos.");
 
-  const businessId = await getBusinessIdBySlug(businessSlug);
-  if (!businessId) return actionError("Negocio no encontrado.");
+  const auth = await requireCatalogAdmin(businessSlug);
+  if (!auth.ok) return auth;
+  const businessId = auth.data.businessId;
 
   const service = db();
 
@@ -456,8 +515,9 @@ export async function ajustarStockCocina(
   const parsed = StockAjusteInput.safeParse(input);
   if (!parsed.success) return actionError("Datos inválidos.");
 
-  const businessId = await getBusinessIdBySlug(businessSlug);
-  if (!businessId) return actionError("Negocio no encontrado.");
+  const auth = await requireCatalogAdmin(businessSlug);
+  if (!auth.ok) return auth;
+  const businessId = auth.data.businessId;
 
   const service = db();
 
@@ -634,6 +694,9 @@ export async function fetchSubRecipeLines(
 ): Promise<IngredientRecipeLine[]> {
   const service = db();
 
+  // Scope tenant: el ingrediente debe pertenecer a un negocio del caller.
+  if (!(await callerOwnsIngredient(service, ingredientId))) return [];
+
   const { data: subLines } = await service
     .from("ingredient_recipes")
     .select(
@@ -669,6 +732,10 @@ export async function fetchSubRecipeLines(
 /** Load presentations for an ingredient. Callable from client components. */
 export async function fetchPresentations(ingredientId: string) {
   const service = db();
+
+  // Scope tenant: el ingrediente debe pertenecer a un negocio del caller.
+  if (!(await callerOwnsIngredient(service, ingredientId))) return [];
+
   const { data } = await service
     .from("ingredient_presentations")
     .select("id, ingredient_id, name, net_quantity, cost_cents, is_default, created_at")

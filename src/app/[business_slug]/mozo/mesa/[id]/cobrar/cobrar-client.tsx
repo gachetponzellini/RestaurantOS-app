@@ -21,6 +21,7 @@ import { toast } from "sonner";
 
 import type { BusinessRole } from "@/lib/admin/context";
 import { emitInvoice, retryInvoice } from "@/lib/afip/emit-invoice";
+import { waitForInvoiceTerminal } from "@/lib/afip/poll";
 import type { Invoice, TipoComprobante } from "@/lib/afip/types";
 import {
   anularCobro,
@@ -907,14 +908,13 @@ function FacturacionSection({
         razonSocialReceptor: tipoA && razonSocial ? razonSocial : undefined,
         slug,
       });
-      setEmitting(false);
       if (!r.ok) {
+        setEmitting(false);
         setError(r.error);
         toast.error(r.error);
-      } else {
-        setInvoice(r.data.invoice);
-        toast.success("Factura emitida");
+        return;
       }
+      await resolveInvoice(r.data.invoice);
     });
   };
 
@@ -923,16 +923,59 @@ function FacturacionSection({
     setError(null);
     startTransition(async () => {
       const r = await retryInvoice(invoiceId, slug);
-      setEmitting(false);
       if (!r.ok) {
+        setEmitting(false);
         setError(r.error);
         toast.error(r.error);
-      } else {
-        setInvoice(r.data.invoice);
-        toast.success("Factura emitida");
+        return;
       }
+      await resolveInvoice(r.data.invoice);
     });
   };
+
+  // El gateway es asíncrono: `emit`/`retry` devuelven la factura `pending` y acá
+  // la polleamos hasta el CAE (o el rechazo). El sandbox ya viene `authorized`.
+  const resolveInvoice = async (initial: Invoice) => {
+    setInvoice(initial);
+    if (initial.status !== "pending") {
+      setEmitting(false);
+      if (initial.status === "authorized") toast.success("Factura emitida");
+      return;
+    }
+    const terminal = await waitForInvoiceTerminal(initial.id, slug, {
+      onUpdate: setInvoice,
+    });
+    setEmitting(false);
+    if (!terminal || terminal.status === "pending") {
+      toast.message("La factura sigue en proceso en ARCA. Reintentá en unos segundos.");
+    } else if (terminal.status === "authorized") {
+      toast.success("Factura emitida");
+    } else {
+      setError(terminal.error_message ?? "No se pudo emitir el comprobante");
+      toast.error(terminal.error_message ?? "No se pudo emitir el comprobante");
+    }
+  };
+
+  // Emisión en curso — el gateway está resolviendo el CAE (polling).
+  if (invoice && invoice.status === "pending") {
+    return (
+      <section className="rounded-2xl bg-white p-4 ring-1 ring-amber-200">
+        <div className="flex items-center gap-3">
+          <div className="flex size-10 items-center justify-center rounded-full bg-amber-100 text-amber-700">
+            <Loader2 className="size-5 animate-spin" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-semibold text-zinc-900">
+              Emitiendo comprobante…
+            </p>
+            <p className="text-xs text-zinc-500">
+              ARCA está autorizando la factura. No cierres esta pantalla.
+            </p>
+          </div>
+        </div>
+      </section>
+    );
+  }
 
   // Ya facturada OK
   if (invoice && invoice.status === "authorized") {

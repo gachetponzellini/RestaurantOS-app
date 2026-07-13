@@ -177,6 +177,33 @@ export async function POST(req: Request) {
       }
     }
 
+    // Reembolso/contracargo de un pago de mesa: revertir el split (spec 36 ·
+    // R-C3). Antes solo se actualizaba payments.payment_status y el split
+    // quedaba `paid` con paid_amount_cents inflado → descuadre de caja. El skip
+    // idempotente de arriba evita doble decremento si el webhook repite.
+    if (nextStatus === "refunded" && prow.split_id) {
+      const { data: splitRow } = await service
+        .from("order_splits")
+        .select("id, expected_amount_cents, paid_amount_cents")
+        .eq("id", prow.split_id)
+        .maybeSingle();
+      if (splitRow) {
+        const s = splitRow as {
+          id: string;
+          expected_amount_cents: number;
+          paid_amount_cents: number;
+        };
+        const newPaid = Math.max(0, s.paid_amount_cents - prow.amount_cents);
+        await service
+          .from("order_splits")
+          .update({
+            paid_amount_cents: newPaid,
+            status: newPaid >= s.expected_amount_cents ? "paid" : "pending",
+          })
+          .eq("id", s.id);
+      }
+    }
+
     if (nextStatus === "paid") {
       // Resolver slug del business para closeOrderIfFullyPaid.
       const { data: bizRow } = await service

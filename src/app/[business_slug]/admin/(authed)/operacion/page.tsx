@@ -8,7 +8,11 @@ import type {
 } from "@/components/admin/local/salon-desktop";
 import { ensureAdminAccess } from "@/lib/admin/context";
 import { getFloorPlansForBusiness } from "@/lib/admin/floor-plan/queries";
-import { getActiveComandas, getStationsForLocal } from "@/lib/admin/local-query";
+import {
+  getActiveComandas,
+  getPrintAgentHealth,
+  getStationsForLocal,
+} from "@/lib/admin/local-query";
 import { getTodayOrders, startOfTodayUtc } from "@/lib/admin/orders-query";
 import {
   getCajasConEstado,
@@ -64,6 +68,7 @@ export default async function LocalEnVivoPage({
     { data: businessMembersRaw },
     initialPresent,
     todaySummary,
+    printAgentHealth,
   ] = await Promise.all([
     getTodayOrders(business.id, business.timezone),
     getActiveComandas(business.id, business.timezone),
@@ -99,6 +104,7 @@ export default async function LocalEnVivoPage({
       .is("disabled_at", null),
     getCurrentPresent(business_slug),
     getTodaySummary(business.id),
+    getPrintAgentHealth(business.id),
   ]);
 
   // /admin/operacion toma full viewport (overlay sobre el sidebar) — sin
@@ -199,6 +205,7 @@ export default async function LocalEnVivoPage({
         businessMembers={(businessMembersRaw ?? []) as { user_id: string; full_name: string | null }[]}
         initialPresent={initialPresent}
         todaySummary={todaySummary}
+        printAgentLastSeenAt={printAgentHealth.lastSeenAt}
       />
     </>
   );

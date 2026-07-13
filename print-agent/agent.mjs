@@ -137,6 +137,23 @@ async function fetchComandas() {
 }
 
 /**
+ * Latido de salud (spec 35). Best-effort: si falla, no corta el loop — solo
+ * significa que operación verá el agente como "sin conexión" hasta el próximo
+ * latido OK. Un agente viejo (sin esta llamada) sigue imprimiendo igual.
+ */
+async function sendHeartbeat() {
+  try {
+    await fetch(`${base}/api/print-agent/heartbeat`, {
+      method: "POST",
+      headers: { ...authHeaders, "content-type": "application/json" },
+      body: JSON.stringify({ business_id: cfg.businessId }),
+    });
+  } catch {
+    /* best-effort: el próximo tick reintenta */
+  }
+}
+
+/**
  * Reporta al server: `result:"ok"` confirma (→ en_preparacion) o
  * `result:"failed"` avisa el fallo de impresión (spec 33).
  */
@@ -144,7 +161,12 @@ async function report(comandaId, result, error) {
   const res = await fetch(`${base}/api/print-agent`, {
     method: "POST",
     headers: { ...authHeaders, "content-type": "application/json" },
-    body: JSON.stringify({ comanda_id: comandaId, result, error }),
+    body: JSON.stringify({
+      comanda_id: comandaId,
+      business_id: cfg.businessId,
+      result,
+      error,
+    }),
   });
   return res.ok;
 }
@@ -201,6 +223,8 @@ async function printOne(c) {
 }
 
 async function tick() {
+  // Latido de salud antes del pull (spec 35). No bloquea la impresión.
+  if (!DRY) await sendHeartbeat();
   const comandas = await fetchComandas();
   const pend = comandas.length;
   if (pend === 0) {
@@ -229,8 +253,15 @@ console.log(
 if (DRY) console.log("modo DRY-RUN: no imprime ni confirma\n");
 
 if (ONCE) {
-  await tick();
-  process.exit(0);
+  try {
+    await tick();
+  } catch (e) {
+    console.error(`✗ ${e.message}`);
+    process.exitCode = 1;
+  }
+  // Salida natural: NO usar process.exit(). Forzar el exit con los sockets del
+  // fetch todavía cerrándose crashea libuv en Windows (Assertion async.c:94).
+  // Al terminar el top-level, el loop de eventos drena solo y el proceso cierra.
 } else {
   console.log(`loop cada ${cfg.pollMs}ms — Ctrl+C para cortar\n`);
   // eslint-disable-next-line no-constant-condition

@@ -32,6 +32,12 @@ export type LocalComanda = {
   status: ComandaStatus;
   emitted_at: string;
   delivered_at: string | null;
+  /** Spec 33: el print agent no pudo imprimir esta comanda. Se muestra como
+   *  badge "⚠ No imprimió" en el kanban. Null = sin fallo pendiente. */
+  print_failed_at: string | null;
+  /** Spec 35: reimpresión pedida (aún no confirmada por el agente). Sostiene
+   *  el estado optimista del botón Reimprimir/Reintentar. */
+  reprint_requested_at: string | null;
   /** Tipo de la order — "dine_in" / "delivery" / "take_away".
    *  El dine-in se rotula como Mesa N en la card. */
   delivery_type: string;
@@ -75,6 +81,7 @@ export async function getActiveComandas(
   // PostgREST con timestamp ISO embebido era frágil.
   const select = `
     id, order_id, station_id, batch, status, emitted_at, delivered_at,
+    print_failed_at, reprint_requested_at,
     stations!inner ( name ),
     orders!inner (
       id, business_id, order_number, delivery_type, customer_name, mozo_id,
@@ -124,6 +131,8 @@ export async function getActiveComandas(
     status: ComandaStatus;
     emitted_at: string;
     delivered_at: string | null;
+    print_failed_at: string | null;
+    reprint_requested_at: string | null;
     stations: { name: string };
     orders: {
       id: string;
@@ -158,6 +167,8 @@ export async function getActiveComandas(
     status: c.status,
     emitted_at: c.emitted_at,
     delivered_at: c.delivered_at,
+    print_failed_at: c.print_failed_at,
+    reprint_requested_at: c.reprint_requested_at,
     delivery_type: c.orders.delivery_type,
     table_label: c.orders.tables?.label ?? null,
     customer_name: c.orders.customer_name,
@@ -176,6 +187,35 @@ export async function getActiveComandas(
         kitchen_status: it.kitchen_status,
       })),
   }));
+}
+
+export type PrintAgentHealth = {
+  /** Último heartbeat del print agent del negocio, o `null` si nunca reportó. */
+  lastSeenAt: string | null;
+};
+
+/**
+ * Salud del print agent on-site (spec 35). Devuelve el último `last_seen_at`
+ * del heartbeat; el cliente deriva "conectada" / "sin conexión hace X" con un
+ * reloj vivo (para no depender del tiempo del server render) usando su propio
+ * umbral (`PRINT_AGENT_OFFLINE_THRESHOLD_MS`, definido en `comandas-kanban.tsx`
+ * para no arrastrar `server-only` al bundle). `null` = nunca reportó (agente
+ * viejo sin heartbeat o nunca levantado).
+ */
+export async function getPrintAgentHealth(
+  businessId: string,
+): Promise<PrintAgentHealth> {
+  const supabase = (await createSupabaseServerClient()) as unknown as GenericClient;
+  const { data, error } = await supabase
+    .from("print_agent_status")
+    .select("last_seen_at")
+    .eq("business_id", businessId)
+    .maybeSingle();
+  if (error) {
+    console.error("getPrintAgentHealth", error);
+    return { lastSeenAt: null };
+  }
+  return { lastSeenAt: (data as { last_seen_at: string } | null)?.last_seen_at ?? null };
 }
 
 export async function getStationsForLocal(

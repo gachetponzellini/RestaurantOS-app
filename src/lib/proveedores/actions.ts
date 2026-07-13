@@ -192,6 +192,29 @@ export async function linkSupplierIngredients(
 
   const service = db();
 
+  // Validar tenant de supplier + insumos: el service client bypassa RLS y los
+  // FK sólo chequean existencia, no negocio. Sin esto, un admin del negocio A
+  // podría pasar ids del negocio B y crear vínculos cruzados.
+  const { data: supplier } = await service
+    .from("suppliers")
+    .select("id")
+    .eq("id", supplierId)
+    .eq("business_id", businessId)
+    .maybeSingle();
+  if (!supplier) return actionError("Proveedor no encontrado.");
+
+  if (ingredientIds.length > 0) {
+    const { data: owned } = await service
+      .from("ingredients")
+      .select("id")
+      .eq("business_id", businessId)
+      .in("id", ingredientIds);
+    const ownedIds = new Set((owned ?? []).map((r: { id: string }) => r.id));
+    if (ingredientIds.some((id) => !ownedIds.has(id))) {
+      return actionError("Algún insumo no pertenece a este negocio.");
+    }
+  }
+
   // Atomic replace: delete existing, insert new
   await service
     .from("supplier_ingredients")

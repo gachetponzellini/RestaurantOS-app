@@ -35,7 +35,9 @@ export function pickTable(params: AssignTableParams): FloorTable | null {
     const conflict = reservations.some((r) => {
       if (r.table_id !== table.id) return false;
       if (!LIVE_RESERVATION_STATUSES.includes(r.status)) return false;
-      const rs = new Date(r.starts_at);
+      // Buffer de rotación simétrico (spec 36 · R-E2): a ambos lados de la
+      // reserva existente, para que el gap valga sin importar el orden de carga.
+      const rs = new Date(new Date(r.starts_at).getTime() - bufferMs);
       const re = new Date(new Date(r.ends_at).getTime() + bufferMs);
       return rs < windowEnd && windowStart < re;
     });

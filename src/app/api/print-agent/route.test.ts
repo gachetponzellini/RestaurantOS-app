@@ -8,7 +8,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 type Row = Record<string, unknown>;
 let rows: Row[]; // filas del GET
 let postRow: Row | null; // fila del select del POST (maybeSingle)
-let captured: { updates: Record<string, unknown>[] };
+let captured: { updates: Record<string, unknown>[]; orFilters: string[] };
 let notifyCalls: { businessId: string; comandaId: string }[];
 
 vi.mock("@/lib/notifications/events", () => ({
@@ -23,6 +23,10 @@ vi.mock("@/lib/supabase/service", () => ({
       select: () => {
         const b = {
           eq: () => b,
+          or: (filter: string) => {
+            captured.orFilters.push(filter);
+            return b;
+          },
           order: () => b,
           maybeSingle: async () => ({ data: postRow }),
           then: (resolve: (v: { data: Row[]; error: null }) => unknown) =>
@@ -85,7 +89,7 @@ beforeEach(() => {
   process.env.PRINT_AGENT_KEY = "test-key";
   rows = [makeRow("Cocina", "192.168.10.50"), makeRow("Bar", null)];
   postRow = null;
-  captured = { updates: [] };
+  captured = { updates: [], orFilters: [] };
   notifyCalls = [];
 });
 
@@ -108,6 +112,15 @@ describe("GET /api/print-agent — printer_ip por comanda (spec 28)", () => {
     };
     const bar = body.comandas.find((c) => c.station_name === "Bar");
     expect(bar?.printer_ip).toBeNull();
+  });
+
+  it("incluye las comandas con reimpresión pedida, no solo las pendiente (spec 35)", async () => {
+    // El filtro del GET debe ser `status=pendiente OR reprint_requested_at not null`
+    // para que una comanda ya avanzada con reimpresión pedida llegue al agente.
+    await GET(getReq());
+    expect(captured.orFilters).toHaveLength(1);
+    expect(captured.orFilters[0]).toContain("status.eq.pendiente");
+    expect(captured.orFilters[0]).toContain("reprint_requested_at.not.is.null");
   });
 
   it("sin Bearer válido → 401", async () => {
@@ -150,11 +163,12 @@ describe("POST /api/print-agent — confirmación y reporte de fallo (spec 33)",
     expect(captured.updates).toHaveLength(0);
   });
 
-  it("result:ok (default) → pendiente → en_preparacion + limpia el flag", async () => {
+  it("result:ok (default) → pendiente → en_preparacion + limpia los flags", async () => {
     postRow = {
       id: "c1",
       status: "pendiente",
       print_failed_at: null,
+      reprint_requested_at: null,
       orders: { business_id: "biz1" },
     };
     const res = await POST(postReq({ comanda_id: "c1" }));
@@ -164,8 +178,28 @@ describe("POST /api/print-agent — confirmación y reporte de fallo (spec 33)",
     expect(captured.updates[0]).toMatchObject({
       status: "en_preparacion",
       print_failed_at: null,
+      reprint_requested_at: null,
     });
     expect(notifyCalls).toHaveLength(0);
+  });
+
+  it("result:ok sobre una comanda `entregado` reimpresa → limpia reprint sin regresar estado (spec 35, R1.3)", async () => {
+    postRow = {
+      id: "c1",
+      status: "entregado",
+      print_failed_at: null,
+      reprint_requested_at: "2026-07-06T00:00:00Z",
+      orders: { business_id: "biz1" },
+    };
+    const res = await POST(postReq({ comanda_id: "c1" }));
+    const body = (await res.json()) as { status: string; changed: boolean };
+    // Sigue `entregado`, no vuelve a `en_preparacion`.
+    expect(body.status).toBe("entregado");
+    expect(body.changed).toBe(false);
+    // Limpia el flag de reimpresión (y no toca el status).
+    expect(captured.updates).toHaveLength(1);
+    expect(captured.updates[0]).toMatchObject({ reprint_requested_at: null });
+    expect(captured.updates[0]).not.toHaveProperty("status");
   });
 
   it("comanda inexistente → 404", async () => {

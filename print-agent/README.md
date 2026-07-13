@@ -1,8 +1,14 @@
-# Print agent (referencia — spec 28)
+# Print agent (referencia — spec 28 / 33 / 35)
 
 Programita que corre en una PC del local: lee las comandas `pendiente` de la app
 y las imprime. Loop **pull → imprimir → confirmar**. No es parte del build de
 Next; corre suelto con Node (`node print-agent/agent.mjs`).
+
+Además del pull, cada tick manda un **heartbeat** (`POST /api/print-agent/heartbeat`,
+spec 35) para que operación vea el agente como "conectado". Es best-effort: si
+falla no corta la impresión, solo aparece "sin conexión". La **reimpresión**
+(spec 35) no requiere nada del agente: el server incluye las comandas con
+reimpresión pedida en el mismo GET, así que el agente imprime lo que recibe.
 
 ## Config (`config.json`)
 

@@ -33,9 +33,12 @@ type Props = {
     defaultTipo: TipoComprobante;
     mode: FiscalMode;
     enabled: boolean;
-    hasApiToken: boolean;
-    hasApiKey: boolean;
-    hasUserToken: boolean;
+    /** La API key (secreta) ya está cargada. */
+    hasGatewayKey: boolean;
+    /** Slug del cliente en el gateway (no secreto, se pre-rellena). */
+    gatewayTenantSlug: string;
+    /** Base URL del gateway (no secreto, se pre-rellena). */
+    gatewayBaseUrl: string;
   };
 };
 
@@ -47,19 +50,20 @@ export function AfipConfigForm({ slug, initial }: Props) {
   const [defaultTipo, setDefaultTipo] = useState<TipoComprobante>(
     initial.defaultTipo,
   );
-  // Tokens: nunca se pre-rellenan. Vacío = "no tocar lo ya guardado".
-  const [apiToken, setApiToken] = useState("");
-  const [apiKey, setApiKey] = useState("");
-  const [userToken, setUserToken] = useState("");
+  // La API key nunca se pre-rellena. Vacío = "no tocar la ya guardada".
+  const [gatewayApiKey, setGatewayApiKey] = useState("");
+  const [gatewayTenantSlug, setGatewayTenantSlug] = useState(
+    initial.gatewayTenantSlug,
+  );
+  const [gatewayBaseUrl, setGatewayBaseUrl] = useState(initial.gatewayBaseUrl);
   const [pending, startTransition] = useTransition();
   const [promoting, startPromote] = useTransition();
 
   const isProduction = initial.mode === "produccion" && initial.enabled;
-  // Credenciales cargadas: las tres ya guardadas, o las tres recién tipeadas.
+  // Credencial cargada: API key (ya guardada o recién tipeada) + slug.
   const credsLoaded =
-    (initial.hasApiToken || apiToken.trim().length > 0) &&
-    (initial.hasApiKey || apiKey.trim().length > 0) &&
-    (initial.hasUserToken || userToken.trim().length > 0);
+    (initial.hasGatewayKey || gatewayApiKey.trim().length > 0) &&
+    gatewayTenantSlug.trim().length > 0;
 
   const handleSave = () => {
     startTransition(async () => {
@@ -69,15 +73,13 @@ export function AfipConfigForm({ slug, initial }: Props) {
         puntoVenta: Number(puntoVenta) || 0,
         provider,
         defaultTipo,
-        apiToken: apiToken || undefined,
-        apiKey: apiKey || undefined,
-        userToken: userToken || undefined,
+        gatewayApiKey: gatewayApiKey || undefined,
+        gatewayTenantSlug: gatewayTenantSlug || undefined,
+        gatewayBaseUrl: gatewayBaseUrl || undefined,
       });
       if (result.ok) {
         toast.success("Configuración AFIP guardada.");
-        setApiToken("");
-        setApiKey("");
-        setUserToken("");
+        setGatewayApiKey("");
         router.refresh();
       } else {
         toast.error(result.error);
@@ -136,12 +138,12 @@ export function AfipConfigForm({ slug, initial }: Props) {
               {credsLoaded ? (
                 <>
                   <CheckCircle2 className="size-3.5 text-emerald-600" />
-                  Credenciales cargadas
+                  Gateway conectado
                 </>
               ) : (
                 <>
                   <XCircle className="size-3.5 text-zinc-400" />
-                  Sin credenciales reales
+                  Sin credencial del gateway
                 </>
               )}
             </p>
@@ -165,7 +167,7 @@ export function AfipConfigForm({ slug, initial }: Props) {
             title={
               credsLoaded
                 ? undefined
-                : "Cargá las credenciales reales antes de promover"
+                : "Cargá la credencial del gateway antes de promover"
             }
           >
             Pasar a producción
@@ -202,9 +204,7 @@ export function AfipConfigForm({ slug, initial }: Props) {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="sandbox">Sandbox (pruebas)</SelectItem>
-              <SelectItem value="tusfacturas">TusFacturas.app</SelectItem>
-              <SelectItem value="afipsdk">AFIP SDK</SelectItem>
-              <SelectItem value="direct">Directo AFIP</SelectItem>
+              <SelectItem value="gateway">ARCA GPSF Gateway</SelectItem>
             </SelectContent>
           </Select>
         </SectionField>
@@ -223,44 +223,43 @@ export function AfipConfigForm({ slug, initial }: Props) {
         </SectionField>
       </div>
 
-      {/* ── Credenciales de TusFacturas (server-only) ────────────── */}
+      {/* ── Credencial del ARCA GPSF Gateway (server-only) ───────── */}
       <div className="rounded-xl bg-zinc-50 p-4 ring-1 ring-zinc-200/60">
         <p className="text-sm font-semibold text-zinc-900">
-          Credenciales de TusFacturas
+          Credencial del gateway ARCA
         </p>
         <p className="mt-1 text-xs text-zinc-500">
-          Los tres tokens de tu cuenta de TusFacturas. Se guardan de forma segura
-          y no se vuelven a mostrar. Dejá un campo vacío para no modificar el valor
-          ya cargado. El certificado de ARCA se carga en el panel de TusFacturas.
+          La API key (<code>sk_live_…</code>) y el slug del cliente que emite el
+          admin del gateway. La API key se guarda de forma segura y no se vuelve a
+          mostrar; dejá el campo vacío para no modificar la ya cargada. El
+          certificado de ARCA lo gestiona el gateway.
         </p>
-        <div className="mt-4 grid grid-cols-1 gap-5 sm:grid-cols-3">
-          <SectionField label="API Token">
-            <Input
-              type="password"
-              autoComplete="off"
-              value={apiToken}
-              onChange={(e) => setApiToken(e.target.value)}
-              placeholder={initial.hasApiToken ? "•••••••• (cargado)" : "apitoken"}
-            />
-          </SectionField>
+        <div className="mt-4 grid grid-cols-1 gap-5 sm:grid-cols-2">
           <SectionField label="API Key">
             <Input
               type="password"
               autoComplete="off"
-              value={apiKey}
-              onChange={(e) => setApiKey(e.target.value)}
-              placeholder={initial.hasApiKey ? "•••••••• (cargado)" : "apikey"}
+              value={gatewayApiKey}
+              onChange={(e) => setGatewayApiKey(e.target.value)}
+              placeholder={initial.hasGatewayKey ? "•••••••• (cargada)" : "sk_live_…"}
             />
           </SectionField>
-          <SectionField label="User Token">
+          <SectionField label="Slug del cliente" hint="El identificador del negocio en el gateway.">
             <Input
-              type="password"
               autoComplete="off"
-              value={userToken}
-              onChange={(e) => setUserToken(e.target.value)}
-              placeholder={
-                initial.hasUserToken ? "•••••••• (cargado)" : "usertoken"
-              }
+              value={gatewayTenantSlug}
+              onChange={(e) => setGatewayTenantSlug(e.target.value)}
+              placeholder="house"
+            />
+          </SectionField>
+        </div>
+        <div className="mt-5">
+          <SectionField label="Base URL" hint="Por defecto el gateway de producción.">
+            <Input
+              autoComplete="off"
+              value={gatewayBaseUrl}
+              onChange={(e) => setGatewayBaseUrl(e.target.value)}
+              placeholder="https://arca-gpsf-gateway.vercel.app"
             />
           </SectionField>
         </div>

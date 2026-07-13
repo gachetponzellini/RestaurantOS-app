@@ -13,6 +13,8 @@ export type PromoCode = {
   id: string;
   business_id: string;
   code: string;
+  /** Si está set, el código es personal: solo ese cliente puede canjearlo. */
+  customer_id: string | null;
   description: string | null;
   discount_type: PromoDiscountType;
   /**

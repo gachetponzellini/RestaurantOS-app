@@ -42,8 +42,5 @@ describe("cloneBusiness / whitelist de estructura", () => {
   it("secretos de businesses que nunca se clonan", () => {
     expect(SECRET_BUSINESS_COLUMNS).toContain("mp_access_token");
     expect(SECRET_BUSINESS_COLUMNS).toContain("mp_webhook_secret");
-    expect(SECRET_BUSINESS_COLUMNS).toContain("afip_provider_api_key");
-    expect(SECRET_BUSINESS_COLUMNS).toContain("afip_provider_api_token");
-    expect(SECRET_BUSINESS_COLUMNS).toContain("afip_provider_user_token");
   });
 });

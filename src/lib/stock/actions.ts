@@ -7,6 +7,45 @@ import { requireMozoActionContext } from "@/lib/mozo/auth";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 import { getBusiness } from "@/lib/tenant";
 
+/**
+ * Incremento atómico de stock vía RPC (spec 36 · R-C5). Evita el lost-update del
+ * read-modify-write en JS (dos ingresos/ventas concurrentes se pisaban).
+ * Devuelve el nuevo current_qty.
+ *
+ * Si la migración 0004 (`adjust_stock_item`) todavía no está aplicada, cae al
+ * read-modify-write previo (no atómico, comportamiento histórico) para no
+ * romper. Una vez aplicada 0004, gana el path atómico. Deploy: 0004 + código.
+ */
+async function adjustStockItemQty(
+  service: ReturnType<typeof createSupabaseServiceClient>,
+  stockItemId: string,
+  delta: number,
+): Promise<number> {
+  const { data, error } = await (
+    service as unknown as {
+      rpc: (
+        fn: string,
+        args: Record<string, unknown>,
+      ) => Promise<{ data: unknown; error: unknown }>;
+    }
+  ).rpc("adjust_stock_item", { p_stock_item_id: stockItemId, p_delta: delta });
+  if (!error && data != null) return Number(data);
+
+  // Fallback (RPC ausente): read-modify-write, como antes de 0004.
+  const { data: cur } = await service
+    .from("stock_items")
+    .select("current_qty")
+    .eq("id", stockItemId)
+    .single();
+  const newQty =
+    Number((cur as { current_qty: number } | null)?.current_qty ?? 0) + delta;
+  await service
+    .from("stock_items")
+    .update({ current_qty: newQty, updated_at: new Date().toISOString() })
+    .eq("id", stockItemId);
+  return newQty;
+}
+
 // ── toggleTrackStock ─────────────────────────────────────────────
 
 export async function toggleTrackStock(
@@ -224,13 +263,7 @@ export async function ingresarStock(
     .maybeSingle();
   if (!stockItem) return actionError("El producto no tiene stock trackeado.");
 
-  await service
-    .from("stock_items")
-    .update({
-      current_qty: (await service.from("stock_items").select("current_qty").eq("id", stockItem.id).single()).data!.current_qty + qty,
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", stockItem.id);
+  const newQty = await adjustStockItemQty(service, stockItem.id, qty);
 
   await service.from("stock_movimientos").insert({
     stock_item_id: stockItem.id,
@@ -242,12 +275,7 @@ export async function ingresarStock(
   });
 
   // Re-enable product if it was disabled due to 0 stock
-  const { data: updated } = await service
-    .from("stock_items")
-    .select("current_qty")
-    .eq("id", stockItem.id)
-    .single();
-  if (updated && updated.current_qty > 0) {
+  if (newQty > 0) {
     await service
       .from("products")
       .update({ is_available: true })
@@ -292,12 +320,7 @@ export async function ajustarStock(
     .maybeSingle();
   if (!stockItem) return actionError("El producto no tiene stock trackeado.");
 
-  const newQty = stockItem.current_qty + qty;
-
-  await service
-    .from("stock_items")
-    .update({ current_qty: newQty, updated_at: new Date().toISOString() })
-    .eq("id", stockItem.id);
+  const newQty = await adjustStockItemQty(service, stockItem.id, qty);
 
   await service.from("stock_movimientos").insert({
     stock_item_id: stockItem.id,

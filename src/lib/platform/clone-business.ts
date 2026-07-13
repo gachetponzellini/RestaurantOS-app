@@ -25,13 +25,13 @@ export const STRUCTURE_TABLES = [
   "chatbot_configs",
 ] as const;
 
+// Secretos que viven en columnas de `businesses` y nunca se clonan. La credencial
+// del gateway ARCA vive en su propia tabla (`afip_gateway_credentials`), que no
+// está en STRUCTURE/OPERATIONAL_TABLES, así que tampoco se clona.
 export const SECRET_BUSINESS_COLUMNS = [
   "mp_access_token",
   "mp_webhook_secret",
   "mp_public_key",
-  "afip_provider_api_key",
-  "afip_provider_api_token",
-  "afip_provider_user_token",
 ] as const;
 
 export const OPERATIONAL_TABLES = [

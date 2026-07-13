@@ -2,14 +2,35 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ChefHat, Check, Package, Play, Truck, UtensilsCrossed } from "lucide-react";
+import {
+  ChefHat,
+  Check,
+  Package,
+  Play,
+  Printer,
+  RotateCcw,
+  Truck,
+  UtensilsCrossed,
+  Wifi,
+  WifiOff,
+} from "lucide-react";
 
 import {
   advanceComandaStatus,
   marcarComandaEntregada,
+  solicitarReimpresion,
 } from "@/lib/comandas/actions";
 import type { LocalComanda, LocalStation } from "@/lib/admin/local-query";
 import type { ComandaStatus } from "@/lib/comandas/types";
+
+/**
+ * Umbral (ms) para considerar "caído" al print agent: sin heartbeat hace más
+ * de esto → "sin conexión" (spec 35). Definido acá (client) y no importado de
+ * `local-query` para no arrastrar su `import "server-only"` al bundle del
+ * cliente. El loader server (`getPrintAgentHealth`) solo devuelve `last_seen_at`;
+ * la derivación conectado/caído vive en el cliente con reloj vivo.
+ */
+const PRINT_AGENT_OFFLINE_THRESHOLD_MS = 60_000;
 import { useOptimisticAction } from "@/lib/ui/use-optimistic-action";
 import { mozoPalette } from "@/lib/mozo/colors";
 import type { MozoMember } from "@/lib/mozo/queries";
@@ -146,7 +167,8 @@ function deliveryIcon(type: string) {
 /** Cambio optimista de estado de una comanda (id + transición a aplicar). */
 type ComandaOptimistic =
   | { kind: "empezar"; id: string }
-  | { kind: "entregar"; id: string; deliveredAt: string };
+  | { kind: "entregar"; id: string; deliveredAt: string }
+  | { kind: "reimprimir"; id: string; requestedAt: string };
 
 export function ComandasKanban({
   slug,
@@ -154,14 +176,20 @@ export function ComandasKanban({
   initialComandas,
   stations,
   mozos,
+  printAgentLastSeenAt,
 }: {
   slug: string;
   businessId: string;
   initialComandas: LocalComanda[];
   stations: LocalStation[];
   mozos: MozoMember[];
+  printAgentLastSeenAt: string | null;
 }) {
   const router = useRouter();
+
+  // Filtro "solo fallidas": lo activa la alerta de fallos de impresión (spec
+  // 35) para ir directo a las comandas con `print_failed_at`.
+  const [showOnlyFailed, setShowOnlyFailed] = useState(false);
 
   // Optimistic con rollback en error vía helper compartido (spec 21). El `base`
   // es `initialComandas` (props del server): realtime dispara router.refresh()
@@ -174,6 +202,14 @@ export function ComandasKanban({
         if (c.id !== action.id) return c;
         if (action.kind === "empezar")
           return { ...c, status: "en_preparacion" };
+        if (action.kind === "reimprimir")
+          // Reimpresión = flag lateral: NO toca el estado de cocina. Marca la
+          // comanda en cola de (re)impresión y limpia el fallo (reintento).
+          return {
+            ...c,
+            reprint_requested_at: action.requestedAt,
+            print_failed_at: null,
+          };
         return { ...c, status: "entregado", delivered_at: action.deliveredAt };
       }),
   );
@@ -186,6 +222,13 @@ export function ComandasKanban({
     run(
       { kind: "entregar", id, deliveredAt: new Date().toISOString() },
       () => marcarComandaEntregada(id, slug),
+    );
+  };
+
+  const onReimprimir = (id: string) => {
+    run(
+      { kind: "reimprimir", id, requestedAt: new Date().toISOString() },
+      () => solicitarReimpresion(slug, id),
     );
   };
 
@@ -276,6 +319,25 @@ export function ComandasKanban({
     return m;
   }, [comandas, stations]);
 
+  // Comandas con fallo de impresión pendiente (spec 33/35), visibles (no
+  // fantasma). Alimenta la alerta accionable y el filtro "solo fallidas".
+  const failedCount = useMemo(
+    () =>
+      comandas.filter(
+        (c) =>
+          c.print_failed_at &&
+          (c.status === "entregado" ||
+            c.items.some((it) => !it.cancelled_at)),
+      ).length,
+    [comandas],
+  );
+
+  // Si se resolvieron todas las fallidas mientras el filtro estaba activo, lo
+  // apagamos para no dejar el kanban vacío sin explicación.
+  useEffect(() => {
+    if (showOnlyFailed && failedCount === 0) setShowOnlyFailed(false);
+  }, [showOnlyFailed, failedCount]);
+
   const byColumn = useMemo(() => {
     const groups: Record<ComandaStatus, LocalComanda[]> = {
       pendiente: [],
@@ -291,6 +353,8 @@ export function ComandasKanban({
         const hasLiveItem = c.items.some((it) => !it.cancelled_at);
         if (!hasLiveItem) continue;
       }
+      // Filtro de la alerta: solo las que no imprimieron (spec 35).
+      if (showOnlyFailed && !c.print_failed_at) continue;
       groups[c.status].push(c);
     }
     // Entregadas ya vienen acotadas al día operativo + tope 100 desde la
@@ -298,10 +362,36 @@ export function ComandasKanban({
     // mismo 100 del server para no recortar lo que sí trajo la query.
     groups.entregado = groups.entregado.slice(0, 100);
     return groups;
-  }, [comandas]);
+  }, [comandas, showOnlyFailed]);
 
   return (
     <div className="flex flex-col gap-5">
+      {/* ── Salud del print agent (spec 35) ── */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <AgentHealthPill lastSeenAt={printAgentLastSeenAt} />
+      </div>
+
+      {/* ── Alerta de fallos de impresión (spec 35) ── */}
+      {failedCount > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3">
+          <div className="flex items-center gap-2 text-sm font-semibold text-rose-800">
+            <Printer className="size-4 shrink-0" strokeWidth={2.5} />
+            <span>
+              {failedCount === 1
+                ? "1 comanda no se imprimió"
+                : `${failedCount} comandas no se imprimieron`}
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setShowOnlyFailed((v) => !v)}
+            className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-rose-600 px-3 text-xs font-semibold text-white transition hover:bg-rose-700 active:translate-y-px"
+          >
+            {showOnlyFailed ? "Mostrar todas" : "Ver solo las fallidas"}
+          </button>
+        </div>
+      )}
+
       {/* ── Stats de saturación por sector ── */}
       <SectorStatsBar
         stations={stations}
@@ -343,6 +433,7 @@ export function ComandasKanban({
                     mozoName={c.mozo_id ? (mozoNameById.get(c.mozo_id) ?? null) : null}
                     onEmpezar={onEmpezar}
                     onEntregar={onEntregar}
+                    onReimprimir={onReimprimir}
                     isPending={isPending}
                   />
                 ))}
@@ -424,6 +515,7 @@ function ComandaCard({
   mozoName,
   onEmpezar,
   onEntregar,
+  onReimprimir,
   isPending,
 }: {
   comanda: LocalComanda;
@@ -433,10 +525,13 @@ function ComandaCard({
   mozoName: string | null;
   onEmpezar: (id: string) => void;
   onEntregar: (id: string) => void;
+  onReimprimir: (id: string) => void;
   isPending: boolean;
 }) {
   const elapsed = useElapsedMinutes(comanda.emitted_at);
   const isTerminal = comanda.status === "entregado";
+  const printFailed = Boolean(comanda.print_failed_at);
+  const reprintQueued = Boolean(comanda.reprint_requested_at);
   // Para entregadas mostramos la recencia ("hace X") en vez del tiempo desde
   // emisión, que crecería sin sentido. El KPI de prep va abajo en su chip.
   const deliveredAgo = useElapsedMinutes(comanda.delivered_at ?? comanda.emitted_at);
@@ -458,9 +553,19 @@ function ComandaCard({
       className={[
         "bg-card group relative flex flex-col gap-2 rounded-xl p-3 text-left transition-all",
         "shadow-[0_1px_2px_rgba(19,27,46,0.04)]",
-        `ring-1 ${columnRing}`,
+        // Fallo de impresión (spec 33/35): resalta la card con ring rojo para
+        // que no se confunda con una recién marchada.
+        printFailed ? "ring-2 ring-rose-400/70" : `ring-1 ${columnRing}`,
       ].join(" ")}
     >
+      {/* Badge de fallo de impresión (spec 35) — distinto de una recién creada. */}
+      {printFailed && (
+        <span className="inline-flex items-center gap-1 self-start rounded-full bg-rose-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-rose-700">
+          <Printer className="size-3" strokeWidth={2.5} />
+          No imprimió
+        </span>
+      )}
+
       {/* Top row: origen + minutos + canal */}
       <header className="flex items-center justify-between gap-2">
         <div className="flex min-w-0 items-center gap-2">
@@ -590,7 +695,7 @@ function ComandaCard({
         </div>
       )}
 
-      {/* Entregadas: sin botón, pero mostramos el tiempo de preparación
+      {/* Entregadas: sin botón primario, pero mostramos el tiempo de preparación
           (delivered − emitted) como KPI — verde rápido / rojo lento. */}
       {isTerminal && prep != null && (
         <div className="border-border/40 mt-0.5 flex items-center gap-1.5 border-t pt-2">
@@ -600,6 +705,78 @@ function ComandaCard({
           </span>
         </div>
       )}
+
+      {/* Reimprimir / Reintentar (spec 35). Disponible en cualquier estado —
+          incluso entregadas — sin tocar la máquina de estados. El label cambia
+          según haya fallo pendiente ("Reintentar") o no ("Reimprimir"). */}
+      <button
+        type="button"
+        onClick={() => onReimprimir(comanda.id)}
+        disabled={isPending || reprintQueued}
+        className={[
+          "inline-flex h-8 w-full items-center justify-center gap-1.5 rounded-lg px-3 text-xs font-semibold transition active:translate-y-px disabled:opacity-50",
+          printFailed
+            ? "bg-rose-600 text-white hover:bg-rose-700"
+            : "text-muted-foreground ring-border/70 hover:bg-muted/60 ring-1",
+        ].join(" ")}
+      >
+        {reprintQueued ? (
+          <>
+            <Printer className="size-3.5" strokeWidth={2.5} />
+            En cola de impresión…
+          </>
+        ) : printFailed ? (
+          <>
+            <RotateCcw className="size-3.5" strokeWidth={2.5} />
+            Reintentar impresión
+          </>
+        ) : (
+          <>
+            <Printer className="size-3.5" strokeWidth={2.5} />
+            Reimprimir
+          </>
+        )}
+      </button>
     </article>
+  );
+}
+
+// ─── Pill de salud del print agent (spec 35) ────────────────────────────────
+
+/**
+ * Deriva la salud del print agent del último heartbeat, con un reloj vivo (no
+ * depende del tiempo del server render). "Conectada" si el último latido fue
+ * hace menos del umbral; si no, "sin conexión hace X". `null` = nunca reportó.
+ */
+function AgentHealthPill({ lastSeenAt }: { lastSeenAt: string | null }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const i = setInterval(() => setNow(Date.now()), 15_000);
+    return () => clearInterval(i);
+  }, []);
+
+  const msSince = lastSeenAt ? now - new Date(lastSeenAt).getTime() : null;
+  const connected =
+    msSince != null && msSince < PRINT_AGENT_OFFLINE_THRESHOLD_MS;
+
+  if (connected) {
+    return (
+      <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700 ring-1 ring-emerald-200">
+        <Wifi className="size-3.5" strokeWidth={2.5} />
+        Impresión: conectada
+      </span>
+    );
+  }
+
+  const agoLabel =
+    msSince == null
+      ? "sin señal"
+      : `hace ${formatRelativeTime(Math.floor(msSince / 60_000))}`;
+
+  return (
+    <span className="inline-flex items-center gap-1.5 rounded-full bg-rose-50 px-2.5 py-1 text-xs font-semibold text-rose-700 ring-1 ring-rose-200">
+      <WifiOff className="size-3.5" strokeWidth={2.5} />
+      Agente de impresión sin conexión ({agoLabel})
+    </span>
   );
 }

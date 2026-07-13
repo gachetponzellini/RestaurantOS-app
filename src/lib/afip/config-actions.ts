@@ -11,6 +11,8 @@ import { getBusiness } from "@/lib/tenant";
 
 import type { AFIPProvider, TipoComprobante } from "./types";
 
+const DEFAULT_GATEWAY_BASE_URL = "https://arca-gpsf-gateway.vercel.app";
+
 type UpdateAfipConfigInput = {
   slug: string;
   cuit: string;
@@ -18,13 +20,14 @@ type UpdateAfipConfigInput = {
   provider: AFIPProvider;
   defaultTipo: TipoComprobante;
   /**
-   * Credenciales del provider (TusFacturas). Sólo se persisten si vienen con
-   * valor: la UI no las pre-rellena, así que un guardado sin tocar estos campos
-   * NO pisa las credenciales ya cargadas.
+   * Credencial del ARCA GPSF Gateway. La API key sólo se persiste si viene con
+   * valor: la UI no la pre-rellena, así que un guardado sin tocarla NO pisa la
+   * que ya estaba cargada. `tenantSlug`/`baseUrl` sí se guardan siempre que
+   * vengan (no son secretos).
    */
-  apiToken?: string;
-  apiKey?: string;
-  userToken?: string;
+  gatewayApiKey?: string;
+  gatewayTenantSlug?: string;
+  gatewayBaseUrl?: string;
 };
 
 function revalidateAfip(slug: string) {
@@ -51,38 +54,76 @@ export async function updateAfipConfig(
     return actionError("Punto de venta inválido.");
   }
 
-  const update: Record<string, unknown> = {
-    afip_cuit: cuit,
-    afip_punto_venta: input.puntoVenta,
-    afip_provider: input.provider,
-    afip_default_tipo: input.defaultTipo,
-  };
-
-  // Persistir credenciales sólo si vienen con valor (server-only).
-  const apiToken = input.apiToken?.trim();
-  const apiKey = input.apiKey?.trim();
-  const userToken = input.userToken?.trim();
-  if (apiToken) update.afip_provider_api_token = apiToken;
-  if (apiKey) update.afip_provider_api_key = apiKey;
-  if (userToken) update.afip_provider_user_token = userToken;
-
   const service = createSupabaseServiceClient() as unknown as SupabaseClient;
+
+  // ── Credencial del gateway (tabla aparte, service-role-only) ────────────
+  const apiKey = input.gatewayApiKey?.trim();
+  const tenantSlug = input.gatewayTenantSlug?.trim();
+  const baseUrl = input.gatewayBaseUrl?.trim();
+
+  // ¿Ya hay una credencial cargada?
+  const { data: existingCred } = await service
+    .from("afip_gateway_credentials")
+    .select("business_id, api_key, tenant_slug")
+    .eq("business_id", business.id)
+    .maybeSingle();
+  const existing = existingCred as {
+    api_key: string | null;
+    tenant_slug: string | null;
+  } | null;
+
+  // Sólo tocamos la credencial si el admin mandó algún campo del gateway.
+  if (apiKey || tenantSlug || baseUrl) {
+    const credPatch: Record<string, unknown> = { business_id: business.id };
+    if (apiKey) credPatch.api_key = apiKey;
+    if (tenantSlug) credPatch.tenant_slug = tenantSlug;
+    if (baseUrl) credPatch.base_url = baseUrl;
+
+    // Para un INSERT nuevo, api_key y tenant_slug son obligatorios (NOT NULL).
+    if (!existing) {
+      if (!apiKey || !tenantSlug) {
+        return actionError(
+          "Para conectar el gateway cargá la API key y el slug del cliente.",
+        );
+      }
+      credPatch.base_url = baseUrl || DEFAULT_GATEWAY_BASE_URL;
+    }
+
+    const { error: credErr } = await service
+      .from("afip_gateway_credentials")
+      .upsert(credPatch, { onConflict: "business_id" });
+    if (credErr) {
+      return actionError(`Error guardando la credencial: ${credErr.message}`);
+    }
+  }
+
+  // Flag no-sensible para la UI: hay credencial válida (api_key + slug).
+  const hasCred =
+    Boolean(apiKey || existing?.api_key) &&
+    Boolean(tenantSlug || existing?.tenant_slug);
+
   const { error } = await service
     .from("businesses")
-    .update(update)
+    .update({
+      afip_cuit: cuit,
+      afip_punto_venta: input.puntoVenta,
+      afip_provider: input.provider,
+      afip_default_tipo: input.defaultTipo,
+      afip_gateway_connected: hasCred,
+    })
     .eq("id", business.id);
 
   if (error) return actionError(`Error guardando config: ${error.message}`);
 
   revalidateAfip(input.slug);
 
-  // Nunca devolvemos las credenciales en la respuesta.
+  // Nunca devolvemos la credencial en la respuesta.
   return actionOk({ ok: true as const });
 }
 
 /**
- * Promueve el negocio de `sandbox` a `producción`. Requiere las tres
- * credenciales reales cargadas; si faltan, bloquea y deja el modo en sandbox.
+ * Promueve el negocio de `sandbox` a `producción`. Requiere la credencial del
+ * gateway cargada (api_key + tenant_slug); si falta, bloquea y deja sandbox.
  */
 export async function promoteAfipToProduction(
   slug: string,
@@ -97,26 +138,19 @@ export async function promoteAfipToProduction(
 
   const service = createSupabaseServiceClient() as unknown as SupabaseClient;
   const { data } = await service
-    .from("businesses")
-    .select(
-      "afip_provider_api_token, afip_provider_api_key, afip_provider_user_token",
-    )
-    .eq("id", business.id)
-    .single();
+    .from("afip_gateway_credentials")
+    .select("api_key, tenant_slug")
+    .eq("business_id", business.id)
+    .maybeSingle();
 
-  const row = data as {
-    afip_provider_api_token: string | null;
-    afip_provider_api_key: string | null;
-    afip_provider_user_token: string | null;
+  const cred = data as {
+    api_key: string | null;
+    tenant_slug: string | null;
   } | null;
 
-  const hasCreds =
-    row?.afip_provider_api_token &&
-    row?.afip_provider_api_key &&
-    row?.afip_provider_user_token;
-  if (!hasCreds) {
+  if (!cred?.api_key || !cred?.tenant_slug) {
     return actionError(
-      "Cargá las credenciales reales antes de pasar a producción.",
+      "Cargá la credencial del gateway (API key + slug) antes de pasar a producción.",
     );
   }
 

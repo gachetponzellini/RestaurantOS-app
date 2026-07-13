@@ -3,22 +3,15 @@ import { NextResponse } from "next/server";
 import { notifyPrintFailed } from "@/lib/notifications/events";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 
-function unauthorized() {
-  return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-}
-
-function verifyAgentKey(req: Request): boolean {
-  const expected = process.env.PRINT_AGENT_KEY;
-  if (!expected) return false;
-  const auth = req.headers.get("authorization");
-  if (!auth?.startsWith("Bearer ")) return false;
-  return auth.slice(7) === expected;
-}
+import { unauthorized, verifyAgentKey } from "./agent-auth";
 
 /**
  * GET /api/print-agent?business_id=X[&station_id=Y]
  *
- * Devuelve las comandas en estado `pendiente` con su contenido imprimible.
+ * Devuelve las comandas imprimibles: las `pendiente` (recién marchadas) y las
+ * que tienen una reimpresión pedida (`reprint_requested_at`, spec 35) aunque ya
+ * hayan avanzado de estado. Así el agente vuelve a imprimir un ticket a demanda
+ * sin ningún cambio de su lado (imprime lo que el GET trae).
  * Si se pasa `station_id`, filtra por sector; si no, devuelve todas las del
  * negocio. El print agent llama esto en loop (pull).
  */
@@ -65,7 +58,10 @@ export async function GET(req: Request) {
       )
     `,
     )
-    .eq("status", "pendiente")
+    // `pendiente` (recién marchada) OR reimpresión pedida (spec 35). Una
+    // comanda `en_preparacion`/`entregado` con `reprint_requested_at` seteado
+    // vuelve a aparecerle al agente sin cambiar su estado de cocina.
+    .or("status.eq.pendiente,reprint_requested_at.not.is.null")
     .eq("orders.business_id", businessId)
     .order("emitted_at", { ascending: true });
 
@@ -138,7 +134,9 @@ export async function GET(req: Request) {
  * Body: { comanda_id: string, result?: "ok" | "failed", error?: string }
  *
  * - `result:"ok"` (default, retrocompatible): el agente imprimió → transiciona
- *   `pendiente → en_preparacion` y limpia un eventual flag de fallo.
+ *   `pendiente → en_preparacion` y limpia los flags laterales (fallo +
+ *   reimpresión pedida). Si la comanda ya estaba avanzada (reimpresión, spec
+ *   35), NO regresa el estado: solo limpia `reprint_requested_at`/`print_failed_at`.
  * - `result:"failed"` (spec 33): el agente no pudo imprimir → setea
  *   `print_failed_at` y avisa (notificación `comanda.impresion_fallida`), una sola
  *   vez por comanda (dedup vía `print_failed_at`). La comanda **no** cambia de
@@ -147,7 +145,12 @@ export async function GET(req: Request) {
 export async function POST(req: Request) {
   if (!verifyAgentKey(req)) return unauthorized();
 
-  let body: { comanda_id?: string; result?: "ok" | "failed"; error?: string };
+  let body: {
+    comanda_id?: string;
+    business_id?: string;
+    result?: "ok" | "failed";
+    error?: string;
+  };
   try {
     body = await req.json();
   } catch {
@@ -167,7 +170,9 @@ export async function POST(req: Request) {
 
   const { data: row } = await service
     .from("comandas")
-    .select("id, status, print_failed_at, orders!inner(business_id)")
+    .select(
+      "id, status, print_failed_at, reprint_requested_at, orders!inner(business_id)",
+    )
     .eq("id", comandaId)
     .maybeSingle();
 
@@ -176,6 +181,17 @@ export async function POST(req: Request) {
       { error: "comanda not found" },
       { status: 404 },
     );
+  }
+
+  // Ownership por tenant (spec 36): la key del agente es global, así que
+  // validamos que la comanda pertenezca al `business_id` que reporta el agente
+  // (el mismo que usa en el GET). Sin esto un agente podría transicionar
+  // comandas de OTRO negocio. Se exige cuando el agente lo manda; el agente de
+  // referencia lo envía siempre.
+  const ownerBusinessId = (row.orders as unknown as { business_id: string })
+    .business_id;
+  if (body.business_id && body.business_id !== ownerBusinessId) {
+    return NextResponse.json({ error: "comanda not found" }, { status: 404 });
   }
 
   // ── Reporte de fallo de impresión (spec 33) ──
@@ -188,22 +204,22 @@ export async function POST(req: Request) {
         alreadyFlagged: true,
       });
     }
-    const businessId = (row.orders as unknown as { business_id: string })
-      .business_id;
     await service
       .from("comandas")
       .update({ print_failed_at: new Date().toISOString() })
       .eq("id", comandaId);
-    await notifyPrintFailed({ businessId, comandaId });
+    await notifyPrintFailed({ businessId: ownerBusinessId, comandaId });
     return NextResponse.json({ status: row.status, notified: true });
   }
 
-  // ── Confirmación OK: pendiente → en_preparacion + limpia el flag de fallo ──
+  // ── Confirmación OK: pendiente → en_preparacion + limpia flags laterales ──
+  // Una comanda ya avanzada (reimpresión, spec 35) se confirma sin regresar el
+  // estado: solo se limpian `reprint_requested_at` + `print_failed_at`.
   if (row.status !== "pendiente") {
-    if (row.print_failed_at) {
+    if (row.print_failed_at || row.reprint_requested_at) {
       await service
         .from("comandas")
-        .update({ print_failed_at: null })
+        .update({ print_failed_at: null, reprint_requested_at: null })
         .eq("id", comandaId);
     }
     return NextResponse.json({ status: row.status, changed: false });
@@ -211,7 +227,11 @@ export async function POST(req: Request) {
 
   const { error } = await service
     .from("comandas")
-    .update({ status: "en_preparacion", print_failed_at: null })
+    .update({
+      status: "en_preparacion",
+      print_failed_at: null,
+      reprint_requested_at: null,
+    })
     .eq("id", comandaId);
 
   if (error) {

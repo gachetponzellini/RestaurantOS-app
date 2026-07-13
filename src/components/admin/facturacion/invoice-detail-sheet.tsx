@@ -16,6 +16,7 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { anularFactura, emitInvoice, retryInvoice } from "@/lib/afip/emit-invoice";
 import { classifyProviderError } from "@/lib/afip/error-classification";
+import { waitForInvoiceTerminal } from "@/lib/afip/poll";
 import {
   formatInvoiceNumber,
   INVOICE_STATUS_META,
@@ -60,12 +61,23 @@ export function InvoiceDetailSheet({
   const handleRetry = () => {
     startRetry(async () => {
       const result = await retryInvoice(invoice.id, slug);
-      if (result.ok) {
-        toast.success("Comprobante reintentado con éxito.");
-        onRetried?.();
-      } else {
+      if (!result.ok) {
         toast.error(result.error);
+        return;
       }
+      // El gateway es asíncrono: esperamos el desenlace por polling.
+      const terminal =
+        result.data.invoice.status === "pending"
+          ? await waitForInvoiceTerminal(result.data.invoice.id, slug)
+          : result.data.invoice;
+      if (terminal?.status === "authorized") {
+        toast.success("Comprobante reintentado con éxito.");
+      } else if (!terminal || terminal.status === "pending") {
+        toast.message("El comprobante sigue en proceso en ARCA.");
+      } else {
+        toast.error(terminal.error_message ?? "El reintento falló.");
+      }
+      onRetried?.();
     });
   };
 
@@ -104,12 +116,22 @@ export function InvoiceDetailSheet({
         orderId: invoice.order_id!,
         slug,
       });
-      if (result.ok) {
-        toast.success("Orden re-facturada.");
-        onRetried?.();
-      } else {
+      if (!result.ok) {
         toast.error(result.error);
+        return;
       }
+      const terminal =
+        result.data.invoice.status === "pending"
+          ? await waitForInvoiceTerminal(result.data.invoice.id, slug)
+          : result.data.invoice;
+      if (terminal?.status === "authorized") {
+        toast.success("Orden re-facturada.");
+      } else if (!terminal || terminal.status === "pending") {
+        toast.message("La factura sigue en proceso en ARCA.");
+      } else {
+        toast.error(terminal.error_message ?? "La re-facturación falló.");
+      }
+      onRetried?.();
     });
   };
 

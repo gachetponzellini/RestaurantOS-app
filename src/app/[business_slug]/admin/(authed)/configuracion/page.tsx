@@ -60,6 +60,19 @@ export default async function ConfiguracionPage({
         .eq("business_id", business.id)
         .order("sort_order"),
     ]);
+  // Credencial del gateway ARCA (tabla aparte, service-role-only). Sólo se leen
+  // los campos NO secretos (slug, base_url) + la presencia de la API key.
+  const { data: gatewayCred } = await service
+    .from("afip_gateway_credentials")
+    .select("api_key, tenant_slug, base_url")
+    .eq("business_id", business.id)
+    .maybeSingle();
+  const gateway = gatewayCred as {
+    api_key: string | null;
+    tenant_slug: string | null;
+    base_url: string | null;
+  } | null;
+
   const sampleProducts = menu.categories
     .flatMap((c) => c.products)
     .slice(0, 3)
@@ -214,14 +227,15 @@ export default async function ConfiguracionPage({
             initial={{
               cuit: (business as Record<string, unknown>).afip_cuit as string ?? "",
               puntoVenta: (business as Record<string, unknown>).afip_punto_venta as number ?? 0,
-              provider: ((business as Record<string, unknown>).afip_provider as "tusfacturas" | "afipsdk" | "direct") ?? "tusfacturas",
+              provider: ((business as Record<string, unknown>).afip_provider as "sandbox" | "gateway") ?? "gateway",
               defaultTipo: ((business as Record<string, unknown>).afip_default_tipo as "factura_a" | "factura_b" | "nota_credito_a" | "nota_credito_b") ?? "factura_b",
               mode: ((business as Record<string, unknown>).afip_mode as "sandbox" | "produccion") ?? "sandbox",
               enabled: Boolean((business as Record<string, unknown>).afip_enabled),
-              // Sólo flags: el valor del secreto NUNCA se manda al cliente.
-              hasApiToken: Boolean((business as Record<string, unknown>).afip_provider_api_token),
-              hasApiKey: Boolean((business as Record<string, unknown>).afip_provider_api_key),
-              hasUserToken: Boolean((business as Record<string, unknown>).afip_provider_user_token),
+              // API key: sólo el flag de presencia (el secreto NUNCA va al cliente).
+              hasGatewayKey: Boolean(gateway?.api_key),
+              // Slug y base URL no son secretos: se pre-rellenan.
+              gatewayTenantSlug: gateway?.tenant_slug ?? "",
+              gatewayBaseUrl: gateway?.base_url ?? "https://arca-gpsf-gateway.vercel.app",
             }}
           />
         </SettingsSection>

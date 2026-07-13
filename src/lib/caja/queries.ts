@@ -1,6 +1,7 @@
 import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { formatInTimeZone, fromZonedTime } from "date-fns-tz";
 
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 
@@ -353,8 +354,12 @@ export async function getCortesHoy(
   businessId: string,
 ): Promise<(CajaCorte & { caja_name: string; encargado_name: string | null })[]> {
   const service = db();
-  const todayStart = new Date();
-  todayStart.setHours(0, 0, 0, 0);
+  // Inicio del día operativo en timezone AR (spec 36 · R-G2): antes usaba la TZ
+  // del server (UTC en Vercel) → la ventana "hoy" arrancaba 21:00 AR del día
+  // anterior y los cortes nocturnos caían en el día equivocado.
+  const AR_TZ = "America/Argentina/Buenos_Aires";
+  const todayAr = formatInTimeZone(new Date(), AR_TZ, "yyyy-MM-dd");
+  const todayStart = fromZonedTime(`${todayAr}T00:00:00`, AR_TZ);
 
   const { data } = await service
     .from("caja_cortes")
@@ -419,6 +424,9 @@ export async function getRendicionPendienteMozo(
     .from("payments")
     .select("method, amount_cents, tip_cents")
     .eq("attributed_mozo_id", mozoId)
+    // Scope por negocio (spec 36 · R-C2): sin esto, un mozo activo en dos
+    // locales (House/Golf) veía en su rendición los pagos del OTRO negocio.
+    .eq("business_id", businessId)
     .eq("payment_status", "paid");
 
   if (ultima) {

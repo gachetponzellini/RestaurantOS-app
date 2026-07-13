@@ -3,21 +3,22 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 
 import type { AFIPProviderClient } from "./provider";
-import type { InvoiceRequest, InvoiceResponse } from "./types";
+import type { InvoiceRequest, ProviderResult } from "./types";
 
-// The invoices table was added in migration 0048 but Supabase types haven't
-// been regenerated yet, so we use a generic client to bypass the typed schema.
 type GenericClient = SupabaseClient;
 
 /**
- * Provider sandbox para testing local.
- * Simula respuestas de AFIP sin llamar a ninguna API externa.
- * Devuelve CAEs fake y números secuenciales leídos de la DB.
+ * Provider sandbox para testing local. Simula respuestas de AFIP sin llamar a
+ * ninguna API externa. A diferencia del gateway (asíncrono), el sandbox resuelve
+ * de una: `enqueue` ya devuelve `state: "authorized"` (terminal), así que no se
+ * pollea. Devuelve CAEs fake y números secuenciales leídos de la DB.
  */
 export function createSandboxClient(businessId: string): AFIPProviderClient {
   return {
-    emit: (req) => emit(req, businessId),
-    getLastNumber: (tipo, pv) => getLastNumber(tipo, pv, businessId),
+    enqueue: (req) => enqueue(req, businessId),
+    // El sandbox nunca queda pending, así que getStatus no debería llamarse.
+    // Se deja por contrato: devuelve un terminal benigno.
+    getStatus: async (jobId) => ({ success: true, state: "authorized", jobId }),
   };
 }
 
@@ -28,18 +29,14 @@ const TIPO_LABEL: Record<string, string> = {
   nota_credito_b: "NCB",
 };
 
-async function emit(
+async function enqueue(
   req: InvoiceRequest,
   businessId: string,
-): Promise<InvoiceResponse> {
+): Promise<ProviderResult> {
   // Simular latencia de red (~300-600ms)
   await new Promise((r) => setTimeout(r, 300 + Math.random() * 300));
 
-  const lastNum = await getLastNumber(
-    req.tipo,
-    req.puntoVenta,
-    businessId,
-  );
+  const lastNum = await getLastNumber(req.tipo, req.puntoVenta, businessId);
   const numero = lastNum + 1;
 
   const now = Date.now();
@@ -50,6 +47,8 @@ async function emit(
 
   return {
     success: true,
+    state: "authorized",
+    jobId: `sandbox:${numero}`,
     cae: `SANDBOX-${tipoTag}-${now}`,
     caeVencimiento: vencStr,
     numero,

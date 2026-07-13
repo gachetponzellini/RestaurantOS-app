@@ -64,8 +64,10 @@ function rangesOverlap(aStart: Date, aEnd: Date, bStart: Date, bEnd: Date): bool
 
 /**
  * True if the given window overlaps any LIVE reservation already booked on
- * that table. The buffer is added to the EXISTING reservation's end so two
- * back-to-back bookings on the same table get a small gap (turnover time).
+ * that table. The turnover buffer is added to BOTH ends of the existing
+ * reservation so two back-to-back bookings get the gap regardless of the order
+ * in which they were made (spec 36 · R-E2). Antes el buffer se sumaba sólo al
+ * `ends_at`, así que una reserva nueva ANTERIOR entraba pegada sin gap.
  */
 function tableHasConflict(
   tableId: string,
@@ -77,7 +79,7 @@ function tableHasConflict(
   for (const r of reservations) {
     if (r.table_id !== tableId) continue;
     if (!LIVE_RESERVATION_STATUSES.includes(r.status)) continue;
-    const rs = new Date(r.starts_at);
+    const rs = new Date(new Date(r.starts_at).getTime() - bufferMs);
     const re = new Date(new Date(r.ends_at).getTime() + bufferMs);
     if (rangesOverlap(windowStart, windowEnd, rs, re)) return true;
   }

@@ -35,6 +35,11 @@ export async function validatePromoCode(
     code: string;
     subtotalCents: number;
     deliveryFeeCents: number;
+    /**
+     * Cliente que intenta canjear (spec 36 · R-D1). Si el promo es personal
+     * (customer_id set), solo ese cliente puede usarlo. Anónimo = undefined.
+     */
+    customerId?: string | null;
   },
 ): Promise<{ ok: true; promo: ValidatedPromo } | { ok: false; error: string }> {
   const code = params.code.trim();
@@ -44,7 +49,7 @@ export async function validatePromoCode(
   const { data, error } = await supabase
     .from("promo_codes")
     .select(
-      "id, business_id, code, discount_type, discount_value, min_order_cents, max_uses, uses_count, valid_from, valid_until, is_active",
+      "id, business_id, code, customer_id, discount_type, discount_value, min_order_cents, max_uses, uses_count, valid_from, valid_until, is_active",
     )
     .eq("business_id", params.businessId)
     .ilike("code", code)
@@ -58,6 +63,7 @@ export async function validatePromoCode(
     PromoCode,
     | "id"
     | "code"
+    | "customer_id"
     | "discount_type"
     | "discount_value"
     | "min_order_cents"
@@ -67,6 +73,15 @@ export async function validatePromoCode(
     | "valid_until"
     | "is_active"
   >;
+
+  // Códigos personales de campaña (spec 36 · R-D1): si el promo está asignado a
+  // un cliente, solo ese cliente lo puede canjear. Antes NO se chequeaba, así
+  // que cualquiera (incluso anónimo) que tipeara el código de otro obtenía el
+  // descuento. El trigger de redención sí matchea customer_id, pero el descuento
+  // igual se aplicaba = impacto en dinero.
+  if (promo.customer_id && promo.customer_id !== params.customerId) {
+    return { ok: false, error: "Este código es personal de otro cliente." };
+  }
 
   if (!promo.is_active) {
     return { ok: false, error: "El código está desactivado." };

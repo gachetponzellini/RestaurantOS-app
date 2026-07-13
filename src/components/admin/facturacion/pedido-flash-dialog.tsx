@@ -19,6 +19,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { emitInvoice } from "@/lib/afip/emit-invoice";
+import { waitForInvoiceTerminal } from "@/lib/afip/poll";
 import { crearPedidoFlash } from "@/lib/billing/pedido-flash";
 
 type Props = {
@@ -78,7 +79,23 @@ export function PedidoFlashDialog({ slug }: Props) {
         return;
       }
 
-      toast.success("Pedido flash facturado.");
+      // El gateway es asíncrono: esperamos el CAE (o el rechazo) por polling.
+      const terminal =
+        invoiced.data.invoice.status === "pending"
+          ? await waitForInvoiceTerminal(invoiced.data.invoice.id, slug)
+          : invoiced.data.invoice;
+
+      if (!terminal || terminal.status === "pending") {
+        toast.message(
+          "Pedido flash creado. La factura sigue en proceso en ARCA — revisá el listado en unos segundos.",
+        );
+      } else if (terminal.status === "authorized") {
+        toast.success("Pedido flash facturado.");
+      } else {
+        toast.error(
+          `Pedido flash creado, pero la factura falló: ${terminal.error_message ?? "error"}`,
+        );
+      }
       reset();
       setOpen(false);
       router.refresh();

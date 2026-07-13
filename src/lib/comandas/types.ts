@@ -31,8 +31,9 @@ export type Comanda = {
 };
 
 /**
- * Snapshot de un order_item tal como se renderiza en la pantalla de cocina.
- * No es la fila completa de DB — es la proyección que necesita la cocina.
+ * Snapshot de un order_item tal como se renderiza en el tab Comandas del panel
+ * (kanban de /admin/operacion). La pantalla /cocina fue eliminada (decisión d3);
+ * no es la fila completa de DB — es la proyección que necesita ese kanban.
  */
 export type ComandaItemSnapshot = {
   order_item_id: string;

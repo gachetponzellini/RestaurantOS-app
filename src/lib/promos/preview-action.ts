@@ -1,6 +1,7 @@
 "use server";
 
 import { actionError, actionOk, type ActionResult } from "@/lib/actions";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 
 import { validatePromoCode } from "./validate";
@@ -36,11 +37,30 @@ export async function previewPromoCode(input: {
     .maybeSingle();
   if (!business) return actionError("Negocio no encontrado.");
 
+  // Cliente autenticado (si hay) para validar códigos personales en el preview
+  // (spec 36 · R-D1). Anónimo = null → un código personal ajeno se muestra como
+  // inválido, coherente con lo que hará el checkout.
+  const authed = await createSupabaseServerClient();
+  const {
+    data: { user },
+  } = await authed.auth.getUser();
+  let customerId: string | null = null;
+  if (user) {
+    const { data: cust } = await service
+      .from("customers")
+      .select("id")
+      .eq("user_id", user.id)
+      .eq("business_id", business.id)
+      .maybeSingle();
+    customerId = (cust as { id: string } | null)?.id ?? null;
+  }
+
   const result = await validatePromoCode(service, {
     businessId: business.id,
     code: input.code,
     subtotalCents: input.subtotal_cents,
     deliveryFeeCents: input.delivery_fee_cents,
+    customerId,
   });
 
   if (!result.ok) return actionError(result.error);

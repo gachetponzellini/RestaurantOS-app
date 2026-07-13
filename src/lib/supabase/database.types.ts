@@ -12,33 +12,46 @@ export type Database = {
   __InternalSupabase: {
     PostgrestVersion: "14.5"
   }
-  graphql_public: {
-    Tables: {
-      [_ in never]: never
-    }
-    Views: {
-      [_ in never]: never
-    }
-    Functions: {
-      graphql: {
-        Args: {
-          extensions?: Json
-          operationName?: string
-          query?: string
-          variables?: Json
-        }
-        Returns: Json
-      }
-    }
-    Enums: {
-      [_ in never]: never
-    }
-    CompositeTypes: {
-      [_ in never]: never
-    }
-  }
   public: {
     Tables: {
+      afip_gateway_credentials: {
+        Row: {
+          api_key: string
+          base_url: string
+          business_id: string
+          created_at: string
+          tenant_slug: string
+          updated_at: string
+          webhook_secret: string | null
+        }
+        Insert: {
+          api_key: string
+          base_url?: string
+          business_id: string
+          created_at?: string
+          tenant_slug: string
+          updated_at?: string
+          webhook_secret?: string | null
+        }
+        Update: {
+          api_key?: string
+          base_url?: string
+          business_id?: string
+          created_at?: string
+          tenant_slug?: string
+          updated_at?: string
+          webhook_secret?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "afip_gateway_credentials_business_id_fkey"
+            columns: ["business_id"]
+            isOneToOne: true
+            referencedRelation: "businesses"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       business_hours: {
         Row: {
           business_id: string
@@ -125,11 +138,9 @@ export type Database = {
           afip_cuit: string | null
           afip_default_tipo: string | null
           afip_enabled: boolean
+          afip_gateway_connected: boolean
           afip_mode: string
           afip_provider: string | null
-          afip_provider_api_key: string | null
-          afip_provider_api_token: string | null
-          afip_provider_user_token: string | null
           afip_punto_venta: number | null
           cover_image_url: string | null
           created_at: string
@@ -160,11 +171,9 @@ export type Database = {
           afip_cuit?: string | null
           afip_default_tipo?: string | null
           afip_enabled?: boolean
+          afip_gateway_connected?: boolean
           afip_mode?: string
           afip_provider?: string | null
-          afip_provider_api_key?: string | null
-          afip_provider_api_token?: string | null
-          afip_provider_user_token?: string | null
           afip_punto_venta?: number | null
           cover_image_url?: string | null
           created_at?: string
@@ -195,11 +204,9 @@ export type Database = {
           afip_cuit?: string | null
           afip_default_tipo?: string | null
           afip_enabled?: boolean
+          afip_gateway_connected?: boolean
           afip_mode?: string
           afip_provider?: string | null
-          afip_provider_api_key?: string | null
-          afip_provider_api_token?: string | null
-          afip_provider_user_token?: string | null
           afip_punto_venta?: number | null
           cover_image_url?: string | null
           created_at?: string
@@ -922,6 +929,7 @@ export type Database = {
           id: string
           order_id: string
           print_failed_at: string | null
+          reprint_requested_at: string | null
           station_id: string
           status: string
         }
@@ -932,6 +940,7 @@ export type Database = {
           id?: string
           order_id: string
           print_failed_at?: string | null
+          reprint_requested_at?: string | null
           station_id: string
           status?: string
         }
@@ -942,6 +951,7 @@ export type Database = {
           id?: string
           order_id?: string
           print_failed_at?: string | null
+          reprint_requested_at?: string | null
           station_id?: string
           status?: string
         }
@@ -1502,8 +1512,10 @@ export type Database = {
           payment_id: string | null
           pdf_url: string | null
           provider: string
+          provider_job_id: string | null
           provider_response: Json | null
           punto_venta: number
+          qr_url: string | null
           razon_social_receptor: string | null
           status: string
           tipo_comprobante: string
@@ -1529,8 +1541,10 @@ export type Database = {
           payment_id?: string | null
           pdf_url?: string | null
           provider?: string
+          provider_job_id?: string | null
           provider_response?: Json | null
           punto_venta: number
+          qr_url?: string | null
           razon_social_receptor?: string | null
           status?: string
           tipo_comprobante: string
@@ -1556,8 +1570,10 @@ export type Database = {
           payment_id?: string | null
           pdf_url?: string | null
           provider?: string
+          provider_job_id?: string | null
           provider_response?: Json | null
           punto_venta?: number
+          qr_url?: string | null
           razon_social_receptor?: string | null
           status?: string
           tipo_comprobante?: string
@@ -2445,6 +2461,29 @@ export type Database = {
             foreignKeyName: "phone_verification_codes_business_id_fkey"
             columns: ["business_id"]
             isOneToOne: false
+            referencedRelation: "businesses"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      print_agent_status: {
+        Row: {
+          business_id: string
+          last_seen_at: string
+        }
+        Insert: {
+          business_id: string
+          last_seen_at?: string
+        }
+        Update: {
+          business_id?: string
+          last_seen_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "print_agent_status_business_id_fkey"
+            columns: ["business_id"]
+            isOneToOne: true
             referencedRelation: "businesses"
             referencedColumns: ["id"]
           },
@@ -3531,9 +3570,6 @@ export type CompositeTypes<
     : never
 
 export const Constants = {
-  graphql_public: {
-    Enums: {},
-  },
   public: {
     Enums: {},
   },
