@@ -113,7 +113,11 @@ returns numeric language sql security definer set search_path = public as $$
    where id = p_stock_item_id
   returning current_qty;
 $$;
-grant execute on function public.adjust_stock_item(uuid, numeric) to authenticated, service_role;
+-- SOLO service_role: es SECURITY DEFINER y muta stock sin chequeo de tenant.
+-- El código lo llama vía el service client (tras su propio gate). Supabase
+-- concede EXECUTE a PUBLIC por default → hay que revocarlo explícitamente.
+revoke all on function public.adjust_stock_item(uuid, numeric) from public, anon, authenticated;
+grant execute on function public.adjust_stock_item(uuid, numeric) to service_role;
 
 -- ── R-E1 · agendar auto-no_show ──────────────────────────────────────────
 -- La función mark_overdue_reservations_no_show() existe (baseline) pero ningún
