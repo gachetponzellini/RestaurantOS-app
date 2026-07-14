@@ -20,7 +20,7 @@
 ## Fase D — Verify
 
 - [x] **T007** `pnpm typecheck` + `pnpm test` verde (incl. split-merge) + `pnpm build`. **SC-005**.
-- [ ] **T008** Verify en vivo con rol real (mozo): cobro efectivo refleja al instante, MP sigue por refresh, cierre por server, fallo de envío muestra mensaje. **SC-001..006**.
+- [x] **T008** Verify en vivo con rol real (mozo): cobro efectivo refleja al instante, MP sigue por refresh, cierre por server, fallo de envío muestra mensaje. **SC-001..006**. ✅ Validado por Juan (2026-07-14): funciona bien.
 - [x] **T009** Cierre de loop: features (cobros/mozo) + `wiki/log.md`, comentar issue, bump submódulo.
 
-> **T008** requiere sesión con rol real (mozo) + un pago real → verificación manual de Juan.
+> Todas las tasks completas. Spec 41 cerrada.

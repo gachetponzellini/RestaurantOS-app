@@ -4,7 +4,7 @@
 
 **Created**: 2026-07-14
 
-**Status**: Implemented (2026-07-14) — plan + tasks en esta carpeta. Cierra la capa cliente del bug crítico [cobro-doble-submit](../../../../wiki/analyses/cobro-doble-submit.md). Falta el verify en vivo con rol real (T008). Issue [#57](https://github.com/gachetponzellini/RestaurantOS-app/issues/57).
+**Status**: ✅ Done (2026-07-14) — implementada + **validada en vivo con rol real** (mozo). Cierra la capa cliente del bug crítico [cobro-doble-submit](../../../../wiki/analyses/cobro-doble-submit.md). Issue [#57](https://github.com/gachetponzellini/RestaurantOS-app/issues/57) cerrada.
 
 **Input**: Análisis [wiki/analyses/perf-percibida-operacion-mozo.md](../../../../wiki/analyses/perf-percibida-operacion-mozo.md) — **fase 2** (flujo caliente del mozo). Continúa la [spec 039](../039-fundaciones-perf-percibida/spec.md).
 
