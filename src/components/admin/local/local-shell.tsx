@@ -1,78 +1,290 @@
 "use client";
 
-import { Suspense, useEffect, useMemo, useState } from "react";
+import { Suspense, use, useEffect, useState, type ReactNode } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
 import { CajaAdminBoard } from "@/components/admin/local/caja-admin-board";
 import { ComandasKanban } from "@/components/admin/local/comandas-kanban";
 import { FichajeTab } from "@/components/admin/local/fichaje-tab";
 import { RendicionMozosTab } from "@/components/admin/local/rendicion-mozos-tab";
-import { SalonDesktop, type SalonOrderRef, type SalonReservationRef } from "@/components/admin/local/salon-desktop";
+import { SalonDesktop } from "@/components/admin/local/salon-desktop";
 import { OrdersRealtimeBoard } from "@/components/admin/orders-realtime-board";
-import type { LocalComanda, LocalStation } from "@/lib/admin/local-query";
-import type { AdminOrder } from "@/lib/admin/orders-query";
+import { ErrorBoundary } from "@/components/shared/error-boundary";
+import {
+  SalonBoardSkeleton,
+  TabContentSkeleton,
+} from "@/components/skeletons/operacion-skeleton";
+import {
+  countCajas,
+  countComandasActivas,
+  countPedidosNuevos,
+  countPresentes,
+  countRendicionesPendientes,
+  countSalonOcupadas,
+} from "@/app/[business_slug]/admin/(authed)/operacion/counts";
+import type {
+  CajaData,
+  ComandasData,
+  FichajeData,
+  PedidosData,
+  RendicionData,
+  SalonData,
+} from "@/app/[business_slug]/admin/(authed)/operacion/data";
 import type { BusinessRole } from "@/lib/admin/context";
-import type { FloorPlanWithTables } from "@/lib/admin/floor-plan/queries";
-import type { Caja, CajaConEstado, CajaUserAssignment, MozoRendicion, RendicionMozoPendiente } from "@/lib/caja/types";
-import type { MozoMember } from "@/lib/mozo/queries";
-import type { PresentEmployee } from "@/lib/rrhh/clock-actions";
-import type { TodaySummary } from "@/lib/rrhh/clock-queries";
 import { cn } from "@/lib/utils";
 
 type Tab = "pedidos" | "comandas" | "salon" | "caja" | "rendicion" | "fichaje";
 
 function isTab(v: string | null | undefined): v is Tab {
-  return v === "pedidos" || v === "comandas" || v === "salon" || v === "caja" || v === "rendicion" || v === "fichaje";
+  return (
+    v === "pedidos" ||
+    v === "comandas" ||
+    v === "salon" ||
+    v === "caja" ||
+    v === "rendicion" ||
+    v === "fichaje"
+  );
+}
+
+type ShellProps = {
+  slug: string;
+  businessId: string;
+  timezone: string;
+  currentUserId: string;
+  role: BusinessRole;
+  salon: Promise<SalonData>;
+  comandas: Promise<ComandasData>;
+  pedidos: Promise<PedidosData>;
+  caja: Promise<CajaData>;
+  rendicion: Promise<RendicionData>;
+  fichaje: Promise<FichajeData>;
+};
+
+// ─── Pills: nunca un "0" provisional (FR-006) ────────────────────────────────
+// Mientras la promesa del grupo está pendiente, el <Suspense> muestra "—"; el
+// número se calcula recién con el dato resuelto, con el mismo predicado que usa
+// la tab (FR-012). Un rechazo cae al ErrorBoundary → "—" (no tumba el shell).
+
+function CountFallback() {
+  return <span className="opacity-40">—</span>;
+}
+
+function CountValue<T>({
+  promise,
+  compute,
+}: {
+  promise: Promise<T>;
+  compute: (d: T) => number;
+}) {
+  return <>{compute(use(promise))}</>;
+}
+
+function Pill<T>({
+  promise,
+  compute,
+}: {
+  promise: Promise<T>;
+  compute: (d: T) => number;
+}) {
+  return (
+    <ErrorBoundary fallback={<CountFallback />}>
+      <Suspense fallback={<CountFallback />}>
+        <CountValue promise={promise} compute={compute} />
+      </Suspense>
+    </ErrorBoundary>
+  );
+}
+
+// ─── Error de carga de una tab (FR-007) ──────────────────────────────────────
+// Para tabs de plata (Caja / Rendición): mensaje explícito y accionable, jamás
+// un estado vacío que se lea como "no hay nada".
+
+function TabLoadError({ money }: { money?: boolean }) {
+  return (
+    <div className="mx-auto flex max-w-md flex-col items-center justify-center gap-3 rounded-2xl border border-red-200 bg-red-50 p-8 text-center">
+      <p className="text-sm font-semibold text-red-800">
+        {money
+          ? "No se pudieron cargar los datos de esta sección."
+          : "No se pudo cargar esta sección."}
+      </p>
+      <p className="max-w-sm text-xs text-red-700">
+        {money
+          ? "Esto NO significa que no haya nada: hay datos, pero fallaron al cargar. Reintentá antes de tomar decisiones de cierre."
+          : "Reintentá para volver a cargarla."}
+      </p>
+      <button
+        type="button"
+        onClick={() => window.location.reload()}
+        className="rounded-full bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700"
+      >
+        Reintentar
+      </button>
+    </div>
+  );
+}
+
+// ─── Paneles: cada uno lee su promesa con use() ──────────────────────────────
+
+function SalonPanel({
+  promise,
+  slug,
+  businessId,
+  currentUserId,
+  role,
+  distribuirOpen,
+  onDistribuirOpen,
+  onDistribuirClose,
+}: {
+  promise: Promise<SalonData>;
+  slug: string;
+  businessId: string;
+  currentUserId: string;
+  role: BusinessRole;
+  distribuirOpen: boolean;
+  onDistribuirOpen: () => void;
+  onDistribuirClose: () => void;
+}) {
+  const { floorPlans, dineInOrders, reservations, mozos } = use(promise);
+  return (
+    <SalonDesktop
+      slug={slug}
+      businessId={businessId}
+      floorPlans={floorPlans}
+      dineInOrders={dineInOrders}
+      reservations={reservations}
+      mozos={mozos}
+      currentUserId={currentUserId}
+      role={role}
+      distribuirOpen={distribuirOpen}
+      onDistribuirOpen={onDistribuirOpen}
+      onDistribuirClose={onDistribuirClose}
+    />
+  );
+}
+
+function PedidosPanel({
+  promise,
+  slug,
+  businessId,
+  timezone,
+}: {
+  promise: Promise<PedidosData>;
+  slug: string;
+  businessId: string;
+  timezone: string;
+}) {
+  const { initialOrders } = use(promise);
+  return (
+    <OrdersRealtimeBoard
+      businessId={businessId}
+      slug={slug}
+      timezone={timezone}
+      initialOrders={initialOrders}
+    />
+  );
+}
+
+function ComandasPanel({
+  promise,
+  slug,
+  businessId,
+}: {
+  promise: Promise<ComandasData>;
+  slug: string;
+  businessId: string;
+}) {
+  const { initialComandas, stations, mozos, printAgentLastSeenAt } =
+    use(promise);
+  return (
+    <ComandasKanban
+      slug={slug}
+      businessId={businessId}
+      initialComandas={initialComandas}
+      stations={stations}
+      mozos={mozos}
+      printAgentLastSeenAt={printAgentLastSeenAt}
+    />
+  );
+}
+
+function CajaPanel({
+  promise,
+  slug,
+}: {
+  promise: Promise<CajaData>;
+  slug: string;
+}) {
+  const { cajas } = use(promise);
+  return <CajaAdminBoard slug={slug} cajas={cajas} />;
+}
+
+function RendicionPanel({
+  rendicionPromise,
+  cajaPromise,
+  slug,
+  role,
+}: {
+  rendicionPromise: Promise<RendicionData>;
+  cajaPromise: Promise<CajaData>;
+  slug: string;
+  role: BusinessRole;
+}) {
+  const {
+    rendicionPendientes,
+    rendicionHistorial,
+    cajaAssignments,
+    businessMembers,
+  } = use(rendicionPromise);
+  // La tab de rendición también necesita las cajas: se lee de la MISMA promesa
+  // que alimenta la tab Caja y su pill (fuente única, sin duplicar la query).
+  const { cajas } = use(cajaPromise);
+  return (
+    <RendicionMozosTab
+      slug={slug}
+      initialPendientes={rendicionPendientes}
+      initialHistorial={rendicionHistorial}
+      cajas={cajas}
+      cajaAssignments={cajaAssignments}
+      members={businessMembers}
+      showAssignments={role === "admin"}
+    />
+  );
+}
+
+function FichajePanel({
+  promise,
+  slug,
+}: {
+  promise: Promise<FichajeData>;
+  slug: string;
+}) {
+  const { initialPresent, todaySummary } = use(promise);
+  return (
+    <FichajeTab
+      slug={slug}
+      initialPresent={initialPresent}
+      todaySummary={todaySummary}
+    />
+  );
 }
 
 function TabsInner({
   slug,
   businessId,
   timezone,
-  initialOrders,
-  initialComandas,
-  stations,
-  floorPlans,
-  dineInOrders,
-  reservations,
-  mozos,
   currentUserId,
   role,
-  cajas,
-  rendicionPendientes,
-  rendicionHistorial,
-  cajaAssignments,
-  businessMembers,
-  initialPresent,
-  todaySummary,
-  printAgentLastSeenAt,
-}: {
-  slug: string;
-  businessId: string;
-  timezone: string;
-  initialOrders: AdminOrder[];
-  initialComandas: LocalComanda[];
-  stations: LocalStation[];
-  floorPlans: FloorPlanWithTables[];
-  dineInOrders: SalonOrderRef[];
-  reservations: SalonReservationRef[];
-  mozos: MozoMember[];
-  currentUserId: string;
-  role: BusinessRole;
-  cajas: CajaConEstado[];
-  rendicionPendientes: RendicionMozoPendiente[];
-  rendicionHistorial: (MozoRendicion & { mozo_name: string; registered_by_name: string | null })[];
-  cajaAssignments: (CajaUserAssignment & { user_name: string | null; caja_name: string })[];
-  businessMembers: { user_id: string; full_name: string | null }[];
-  initialPresent: PresentEmployee[];
-  todaySummary?: TodaySummary;
-  printAgentLastSeenAt: string | null;
-}) {
+  salon,
+  comandas,
+  pedidos,
+  caja,
+  rendicion,
+  fichaje,
+}: ShellProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const raw = searchParams.get("tab");
   // Default = "salon" porque es la pantalla principal del operativo en local.
-  // El parámetro de URL se omite solo cuando estás en la default (salón).
   const active: Tab = isTab(raw) ? raw : "salon";
 
   const setTab = (next: Tab) => {
@@ -83,48 +295,14 @@ function TabsInner({
     router.replace(qs ? `?${qs}` : `?`, { scroll: false });
   };
 
-  // Como todo /admin/operacion ahora es fullscreen, colapsamos el sidebar al
-  // entrar a la pantalla (no solo al activar la tab Salón). Antes este
-  // dispatch vivía dentro de SalonDesktop.
+  // Como todo /admin/operacion es fullscreen, colapsamos el sidebar al entrar.
   useEffect(() => {
     window.dispatchEvent(new CustomEvent("admin-sidebar-collapse"));
   }, []);
 
-  // Modo "Distribuir mozos": vivido en el shell para que el botón quede
-  // alineado con las tabs en el header (en vez de dentro del SalonDesktop).
+  // Modo "Distribuir mozos": vive en el shell para que el botón quede alineado
+  // con las tabs en el header (en vez de dentro del SalonDesktop).
   const [distribuirOpen, setDistribuirOpen] = useState(false);
-  // Necesitamos las mesas activas para el overlay. SalonDesktop también
-  // las calcula, pero acá las planchamos desde floorPlans para el overlay.
-  const allActiveTables = useMemo(
-    () =>
-      floorPlans.flatMap((fp) =>
-        fp.tables.filter((t) => t.status === "active"),
-      ),
-    [floorPlans],
-  );
-
-  // Counters cheap — solo para la pill numérica del tab.
-  const counts = useMemo(() => {
-    const pedidosNuevos = initialOrders.filter((o) =>
-      ["pending", "confirmed"].includes(o.status),
-    ).length;
-    const comandasActivas = initialComandas.filter(
-      (c) => c.status !== "entregado",
-    ).length;
-    // Salón: mesas que NO están libres (ocupada + pidio_cuenta). Refleja
-    // cuántas mesas requieren atención del encargado.
-    const salonOcupadas = allActiveTables.filter(
-      (t) => (t.operational_status ?? "libre") !== "libre",
-    ).length;
-    return {
-      pedidos: pedidosNuevos,
-      comandas: comandasActivas,
-      salon: salonOcupadas,
-      caja: cajas.length,
-      rendicion: rendicionPendientes.filter((p) => p.pagos_count > 0).length,
-      fichaje: initialPresent.length,
-    };
-  }, [initialOrders, initialComandas, allActiveTables, cajas.length, rendicionPendientes, initialPresent.length]);
 
   const tabsBar = (
     <nav
@@ -134,129 +312,122 @@ function TabsInner({
       <TabButton
         active={active === "salon"}
         onClick={() => setTab("salon")}
-        count={counts.salon}
+        count={<Pill promise={salon} compute={(d) => countSalonOcupadas(d.floorPlans)} />}
       >
         Mesas
       </TabButton>
       <TabButton
         active={active === "comandas"}
         onClick={() => setTab("comandas")}
-        count={counts.comandas}
+        count={<Pill promise={comandas} compute={(d) => countComandasActivas(d.initialComandas)} />}
       >
         Comandas
       </TabButton>
       <TabButton
         active={active === "pedidos"}
         onClick={() => setTab("pedidos")}
-        count={counts.pedidos}
+        count={<Pill promise={pedidos} compute={(d) => countPedidosNuevos(d.initialOrders)} />}
       >
         Pedidos online
       </TabButton>
       <TabButton
         active={active === "caja"}
         onClick={() => setTab("caja")}
-        count={counts.caja}
+        count={<Pill promise={caja} compute={(d) => countCajas(d.cajas)} />}
       >
         Caja
       </TabButton>
       <TabButton
         active={active === "rendicion"}
         onClick={() => setTab("rendicion")}
-        count={counts.rendicion}
+        count={<Pill promise={rendicion} compute={(d) => countRendicionesPendientes(d.rendicionPendientes)} />}
       >
         Rendición
       </TabButton>
       <TabButton
         active={active === "fichaje"}
         onClick={() => setTab("fichaje")}
-        count={counts.fichaje}
+        count={<Pill promise={fichaje} compute={(d) => countPresentes(d.initialPresent)} />}
       >
         Fichaje
       </TabButton>
     </nav>
   );
 
-  // Todas las tabs comparten layout fullscreen con header fijo (tabs +
-  // acciones). Antes solo Salón era fullscreen; las otras quedaban dentro
-  // del PageShell y se sentían apretadas. Ahora la pantalla "Local en vivo"
-  // es una sola superficie densa, sin título redundante.
   return (
-    <div
-      className="fixed inset-x-0 bottom-0 top-14 z-30 flex flex-col bg-zinc-50 transition-[left] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] md:top-0 md:left-[var(--admin-sidebar-width,60px)]"
-    >
+    <div className="fixed inset-x-0 bottom-0 top-14 z-30 flex flex-col bg-zinc-50 transition-[left] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] md:left-[var(--admin-sidebar-width,60px)] md:top-0">
       <div className="border-border/60 flex items-center justify-between gap-3 overflow-x-auto border-b bg-white/95 px-3 py-3 backdrop-blur sm:px-4">
         {tabsBar}
-        {/* El botón "Distribuir mozos" se movió al header del sidebar de
-            mesas dentro del salón (SalonDesktop → ActiveTablesList). El
-            bell global vive en el admin layout. */}
       </div>
       <div className="flex-1 overflow-auto p-4">
         {active === "salon" && (
-          <SalonDesktop
-            slug={slug}
-            businessId={businessId}
-            floorPlans={floorPlans}
-            dineInOrders={dineInOrders}
-            reservations={reservations}
-            mozos={mozos}
-            currentUserId={currentUserId}
-            role={role}
-            distribuirOpen={distribuirOpen}
-            onDistribuirOpen={() => setDistribuirOpen(true)}
-            onDistribuirClose={() => setDistribuirOpen(false)}
-          />
+          <ErrorBoundary fallback={<TabLoadError />}>
+            <Suspense fallback={<SalonBoardSkeleton />}>
+              <SalonPanel
+                promise={salon}
+                slug={slug}
+                businessId={businessId}
+                currentUserId={currentUserId}
+                role={role}
+                distribuirOpen={distribuirOpen}
+                onDistribuirOpen={() => setDistribuirOpen(true)}
+                onDistribuirClose={() => setDistribuirOpen(false)}
+              />
+            </Suspense>
+          </ErrorBoundary>
         )}
-        {/* El board de Pedidos online se mantiene SIEMPRE montado (oculto con
-            CSS cuando no es la tab activa) para que su suscripción realtime no
-            se caiga al cambiar de tab. Antes, volver a la tab perdía los pedidos
-            entrados mientras tanto y re-hidrataba de un snapshot viejo del server. */}
+        {/* Pedidos online: SIEMPRE montado (oculto con CSS) para que su
+            suscripción realtime no se caiga al cambiar de tab. */}
         <div className={active === "pedidos" ? "" : "hidden"}>
-          <OrdersRealtimeBoard
-            businessId={businessId}
-            slug={slug}
-            timezone={timezone}
-            initialOrders={initialOrders}
-          />
+          <ErrorBoundary fallback={<TabLoadError />}>
+            <Suspense fallback={<TabContentSkeleton />}>
+              <PedidosPanel
+                promise={pedidos}
+                slug={slug}
+                businessId={businessId}
+                timezone={timezone}
+              />
+            </Suspense>
+          </ErrorBoundary>
         </div>
         {active === "comandas" && (
-          <ComandasKanban
-            slug={slug}
-            businessId={businessId}
-            initialComandas={initialComandas}
-            stations={stations}
-            mozos={mozos}
-            printAgentLastSeenAt={printAgentLastSeenAt}
-          />
+          <ErrorBoundary fallback={<TabLoadError />}>
+            <Suspense fallback={<TabContentSkeleton />}>
+              <ComandasPanel
+                promise={comandas}
+                slug={slug}
+                businessId={businessId}
+              />
+            </Suspense>
+          </ErrorBoundary>
         )}
         {active === "caja" && (
-          <CajaAdminBoard
-            slug={slug}
-            cajas={cajas}
-          />
+          <ErrorBoundary fallback={<TabLoadError money />}>
+            <Suspense fallback={<TabContentSkeleton />}>
+              <CajaPanel promise={caja} slug={slug} />
+            </Suspense>
+          </ErrorBoundary>
         )}
         {active === "rendicion" && (
-          <RendicionMozosTab
-            slug={slug}
-            initialPendientes={rendicionPendientes}
-            initialHistorial={rendicionHistorial}
-            cajas={cajas}
-            cajaAssignments={cajaAssignments}
-            members={businessMembers}
-            showAssignments={role === "admin"}
-          />
+          <ErrorBoundary fallback={<TabLoadError money />}>
+            <Suspense fallback={<TabContentSkeleton />}>
+              <RendicionPanel
+                rendicionPromise={rendicion}
+                cajaPromise={caja}
+                slug={slug}
+                role={role}
+              />
+            </Suspense>
+          </ErrorBoundary>
         )}
         {active === "fichaje" && (
-          <FichajeTab
-            slug={slug}
-            initialPresent={initialPresent}
-            todaySummary={todaySummary}
-          />
+          <ErrorBoundary fallback={<TabLoadError />}>
+            <Suspense fallback={<TabContentSkeleton />}>
+              <FichajePanel promise={fichaje} slug={slug} />
+            </Suspense>
+          </ErrorBoundary>
         )}
       </div>
-
-      {/* Modo "pintura" — vive directamente adentro de SalonDesktop como
-          un slot del sidebar derecho (paint mode). El overlay legacy
-          dejó de usarse. */}
     </div>
   );
 }
@@ -269,7 +440,7 @@ function TabButton({
 }: {
   active: boolean;
   onClick: () => void;
-  count: number;
+  count: ReactNode;
   children: React.ReactNode;
 }) {
   return (
@@ -297,28 +468,7 @@ function TabButton({
   );
 }
 
-export function LocalShell(props: {
-  slug: string;
-  businessId: string;
-  timezone: string;
-  initialOrders: AdminOrder[];
-  initialComandas: LocalComanda[];
-  stations: LocalStation[];
-  floorPlans: FloorPlanWithTables[];
-  dineInOrders: SalonOrderRef[];
-  reservations: SalonReservationRef[];
-  mozos: MozoMember[];
-  currentUserId: string;
-  role: BusinessRole;
-  cajas: CajaConEstado[];
-  rendicionPendientes: RendicionMozoPendiente[];
-  rendicionHistorial: (MozoRendicion & { mozo_name: string; registered_by_name: string | null })[];
-  cajaAssignments: (CajaUserAssignment & { user_name: string | null; caja_name: string })[];
-  businessMembers: { user_id: string; full_name: string | null }[];
-  initialPresent: PresentEmployee[];
-  todaySummary?: TodaySummary;
-  printAgentLastSeenAt: string | null;
-}) {
+export function LocalShell(props: ShellProps) {
   return (
     <Suspense fallback={null}>
       <TabsInner {...props} />
