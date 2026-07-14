@@ -527,6 +527,8 @@ export function MozoPedirClient({
             product_id: sc.product_id,
             modifier_ids: sc.modifier_ids,
           })),
+          // _key estable de la línea → idempotencia server (spec 42).
+          client_line_key: c._key,
         };
       }
       return {
@@ -535,6 +537,8 @@ export function MozoPedirClient({
         notes: c.notes || null,
         modifier_ids: c.modifiers.map((m) => m.id),
         seat_number: c.seat_number,
+        // _key estable de la línea → idempotencia server (spec 42).
+        client_line_key: c._key,
       };
     });
     startTransition(async () => {
@@ -543,8 +547,10 @@ export function MozoPedirClient({
         r = await enviarComanda({ tableId: table.id, items, slug });
       } catch (e) {
         // Fallo de red / respuesta perdida: no sabemos si el server procesó el
-        // envío. NO reenviar a ciegas — puede duplicar la comanda (la action
-        // no es idempotente; idempotencia server = spec 042). FR-008.
+        // envío. El server ahora es idempotente por `client_line_key` (spec 42),
+        // así que un reenvío de las mismas líneas no duplica; aun así mantenemos
+        // la UX conservadora (avisar al mozo que verifique) en vez de reenviar
+        // solo. FR-008.
         console.error("enviarComanda", e);
         toast.error(
           "No pudimos confirmar el envío. Revisá la comanda de la mesa antes de reenviar.",

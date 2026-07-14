@@ -1886,6 +1886,7 @@ export type Database = {
           cancelled_at: string | null
           cancelled_by: string | null
           cancelled_reason: string | null
+          client_line_key: string | null
           daily_menu_id: string | null
           daily_menu_snapshot: Json | null
           id: string
@@ -1907,6 +1908,7 @@ export type Database = {
           cancelled_at?: string | null
           cancelled_by?: string | null
           cancelled_reason?: string | null
+          client_line_key?: string | null
           daily_menu_id?: string | null
           daily_menu_snapshot?: Json | null
           id?: string
@@ -1928,6 +1930,7 @@ export type Database = {
           cancelled_at?: string | null
           cancelled_by?: string | null
           cancelled_reason?: string | null
+          client_line_key?: string | null
           daily_menu_id?: string | null
           daily_menu_snapshot?: Json | null
           id?: string

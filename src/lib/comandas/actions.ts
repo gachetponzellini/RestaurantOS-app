@@ -31,6 +31,8 @@ export type EnviarComandaItem = {
   notes?: string | null;
   modifier_ids?: string[];
   seat_number?: number | null;
+  /** _key estable de la línea del carrito. Idempotencia (spec 42). */
+  client_line_key?: string | null;
 };
 
 export type EnviarComandaDailyMenuItem = {
@@ -43,6 +45,8 @@ export type EnviarComandaDailyMenuItem = {
     product_id: string;
     modifier_ids?: string[];
   }[];
+  /** _key estable de la línea del carrito. Idempotencia (spec 42). */
+  client_line_key?: string | null;
 };
 
 export type EnviarComandaInput = {
@@ -252,6 +256,30 @@ export async function enviarComanda(
     orderId = (created as { id: string }).id;
   }
 
+  // ── Idempotencia (spec 42) ───────────────────────────────────────────────
+  // Cada línea trae un `client_line_key` estable (el `_key` del carrito del
+  // mozo). Si ya existe un order_item con ese key en esta orden, la línea ya se
+  // envió (doble-tap / reenvío) → la salteamos. Chequeo up-front para el caso
+  // secuencial; el índice UNIQUE parcial (order_id, client_line_key) cierra
+  // además la carrera concurrente en el propio insert (violación 23505).
+  const inputKeys = input.items
+    .map((i) => i.client_line_key)
+    .filter((k): k is string => !!k);
+  const dispatchedKeyToItemId = new Map<string, string>();
+  if (inputKeys.length > 0) {
+    const { data: existingRows } = await service
+      .from("order_items")
+      .select("id, client_line_key")
+      .eq("order_id", orderId)
+      .in("client_line_key", inputKeys);
+    for (const row of (existingRows ?? []) as {
+      id: string;
+      client_line_key: string | null;
+    }[]) {
+      if (row.client_line_key) dispatchedKeyToItemId.set(row.client_line_key, row.id);
+    }
+  }
+
   // Insertamos order_items con station_id resuelto + snapshots de modifiers.
   // Items sin station resoluble (ej: bebidas en negocios sin sector "Barra")
   // se insertan con `station_id=null` y NO generan comanda — el mozo los
@@ -259,6 +287,14 @@ export async function enviarComanda(
   const itemsByStation = new Map<string, string[]>();
 
   for (const inputItem of productItems) {
+    // Idempotencia (spec 42): línea ya enviada → saltear (no reinsertar).
+    if (
+      inputItem.client_line_key &&
+      dispatchedKeyToItemId.has(inputItem.client_line_key)
+    ) {
+      continue;
+    }
+
     const product = productById.get(inputItem.product_id)!;
     const stationId = resolveStation(
       { station_id: product.station_id, category: product.category },
@@ -296,10 +332,14 @@ export async function enviarComanda(
         loaded_by: user.id,
         kitchen_status: isStockItem ? "delivered" : "pending",
         seat_number: seatNum,
+        client_line_key: inputItem.client_line_key ?? null,
       } as any)
       .select("id")
       .single();
     if (itemErr || !itemRow) {
+      // 23505 sobre el índice (order_id, client_line_key): carrera concurrente
+      // con otro envío de la misma línea → ya está insertada, la salteamos.
+      if ((itemErr as { code?: string } | null)?.code === "23505") continue;
       console.error("enviarComanda · item insert", itemErr);
       return actionError("No pudimos guardar los items.");
     }
@@ -331,6 +371,14 @@ export async function enviarComanda(
 
   // ── Daily menu items: crear padre + hijos ──
   for (const menuItem of dailyMenuItems) {
+    // Idempotencia (spec 42): combo ya enviado → saltear padre + hijos.
+    if (
+      menuItem.client_line_key &&
+      dispatchedKeyToItemId.has(menuItem.client_line_key)
+    ) {
+      continue;
+    }
+
     const { data: menuRow } = await service
       .from("daily_menus")
       .select(
@@ -419,10 +467,13 @@ export async function enviarComanda(
         subtotal_cents: menuSubtotal,
         loaded_by: user.id,
         kitchen_status: "pending",
+        client_line_key: menuItem.client_line_key ?? null,
       } as any)
       .select("id")
       .single();
     if (parentErr || !parentRow) {
+      // 23505 (order_id, client_line_key): combo ya enviado → saltear.
+      if ((parentErr as { code?: string } | null)?.code === "23505") continue;
       console.error("enviarComanda · daily_menu parent insert", parentErr);
       return actionError("No pudimos guardar el menú del día.");
     }
@@ -496,7 +547,21 @@ export async function enviarComanda(
   // Una comanda por sector con batch autoincremental dentro de (order, station).
   const routeResult = await createComandasForItems(service, orderId, itemsByStation);
   if (!routeResult.ok) return actionError(routeResult.error);
-  const comandaIds = routeResult.comanda_ids;
+  let comandaIds = routeResult.comanda_ids;
+
+  // Idempotencia (spec 42): si hubo líneas ya despachadas (retry), devolvemos
+  // también las comandas a las que pertenecen → respuesta estable en el reenvío.
+  if (dispatchedKeyToItemId.size > 0) {
+    const dupItemIds = [...dispatchedKeyToItemId.values()];
+    const { data: dupComandaItems } = await service
+      .from("comanda_items")
+      .select("comanda_id")
+      .in("order_item_id", dupItemIds);
+    const dupComandaIds = (
+      (dupComandaItems ?? []) as { comanda_id: string }[]
+    ).map((r) => r.comanda_id);
+    comandaIds = [...new Set([...comandaIds, ...dupComandaIds])];
+  }
 
   // Recalculamos totales de la orden (suma de todos los items, no solo
   // los nuevos — la orden puede tener items previos de tandas anteriores).

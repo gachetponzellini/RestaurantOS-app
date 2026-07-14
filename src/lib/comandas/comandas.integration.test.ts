@@ -1,4 +1,6 @@
 // @vitest-environment node
+import { randomUUID } from "node:crypto";
+
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { config } from "dotenv";
 import { createClient } from "@supabase/supabase-js";
@@ -398,6 +400,83 @@ describe.skipIf(!dbAvailable)("comandas (integration)", () => {
       .eq("station_id", stationParrillaId);
     // Parrilla no tuvo segundo envío → sigue en batch 1.
     expect(parrillaComandas!.map((c) => c.batch)).toEqual([1]);
+  });
+
+  it("idempotencia (spec 42): reenviar la misma línea (client_line_key) no duplica order_items ni comandas", { timeout: 30_000 }, async () => {
+    // Mesa nueva para aislarnos del estado de los tests previos.
+    const { data: fp } = await supabase
+      .from("floor_plans")
+      .insert({ business_id: businessId, name: "Salón idempotencia" })
+      .select("id")
+      .single();
+    const { data: tableRow } = await supabase
+      .from("tables")
+      .insert({
+        floor_plan_id: fp!.id,
+        label: "IDEM",
+        seats: 2,
+        shape: "circle",
+        x: 0,
+        y: 0,
+        width: 80,
+        height: 80,
+      })
+      .select("id")
+      .single();
+    const idemTableId = tableRow!.id as string;
+
+    // Mismo payload con el MISMO client_line_key = doble-submit del mozo.
+    const lineKey = randomUUID();
+    const items = [
+      { product_id: prodMilanesaId, quantity: 2, client_line_key: lineKey },
+    ];
+
+    const first = await enviarComanda({
+      tableId: idemTableId,
+      slug: businessSlug,
+      items,
+    });
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+    expect(first.data.comanda_ids).toHaveLength(1);
+
+    // Segundo envío idéntico (retry / doble-tap).
+    const second = await enviarComanda({
+      tableId: idemTableId,
+      slug: businessSlug,
+      items,
+    });
+    expect(second.ok).toBe(true);
+    if (!second.ok) return;
+
+    // Misma orden.
+    expect(second.data.order_id).toBe(first.data.order_id);
+
+    // NO se duplicó el order_item de esa línea.
+    const { data: itemRows } = await supabase
+      .from("order_items")
+      .select("id")
+      .eq("order_id", first.data.order_id)
+      .eq("client_line_key", lineKey);
+    expect(itemRows).toHaveLength(1);
+
+    // NO se creó una comanda extra.
+    const { data: comandas } = await supabase
+      .from("comandas")
+      .select("id")
+      .eq("order_id", first.data.order_id);
+    expect(comandas).toHaveLength(1);
+
+    // Total de la orden = 1 milanesa x2 (no se dobló).
+    const { data: order } = await supabase
+      .from("orders")
+      .select("total_cents")
+      .eq("id", first.data.order_id)
+      .single();
+    expect(Number(order!.total_cents)).toBe(1000000);
+
+    // Respuesta idempotente: el reenvío devuelve la misma comanda.
+    expect(second.data.comanda_ids).toEqual(first.data.comanda_ids);
   });
 
   it("items sin sector resoluble: se insertan con station_id=null y NO generan comanda", { timeout: 30_000 }, async () => {
