@@ -14,6 +14,11 @@ import { PresentEmployeeCard } from "@/components/shared/present-employee-card";
 import { RoleBadge } from "@/components/shared/role-badge";
 import { Button } from "@/components/ui/button";
 import {
+  Dialog,
+  DialogContent,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
   ClockFeedback,
   type FeedbackState,
 } from "@/components/fichar/clock-feedback";
@@ -186,45 +191,52 @@ export function FichajeTab({
       )}
 
       {/* Numpad dialog */}
-      {dialogOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-          <div className="relative w-full max-w-sm rounded-3xl bg-zinc-950 p-8 text-white shadow-2xl">
-            <button
-              type="button"
-              onClick={() => {
-                setDialogOpen(false);
-                setPin("");
-                setFeedback({ status: "idle" });
-              }}
-              aria-label="Cerrar"
-              className="absolute right-4 top-4 rounded-lg p-1 text-zinc-400 transition hover:text-white"
-            >
-              <X className="size-5" />
-            </button>
+      <Dialog
+        open={dialogOpen}
+        onOpenChange={(o) => {
+          setDialogOpen(o);
+          if (!o) {
+            setPin("");
+            setFeedback({ status: "idle" });
+          }
+        }}
+      >
+        <DialogContent
+          showCloseButton={false}
+          className="max-w-sm rounded-3xl bg-zinc-950 p-8 text-white shadow-2xl ring-0"
+        >
+          <DialogTitle className="sr-only">Marcar asistencia</DialogTitle>
+          <button
+            type="button"
+            onClick={() => setDialogOpen(false)}
+            aria-label="Cerrar"
+            className="absolute right-4 top-4 rounded-lg p-1 text-zinc-400 transition hover:text-white"
+          >
+            <X className="size-5" />
+          </button>
 
-            <div className="flex flex-col items-center gap-6">
-              <div className="flex items-center gap-2 text-zinc-400">
-                <Fingerprint className="size-5" />
-                <span className="text-sm font-semibold uppercase tracking-wider">
-                  Ingresá tu PIN
-                </span>
-              </div>
-
-              <PinDisplay length={pin.length} size="md" />
-
-              <div className="h-16 w-full">
-                <ClockFeedback feedback={feedback} size="md" />
-              </div>
-
-              <Numpad
-                onDigit={handleDigit}
-                onDelete={handleDelete}
-                disabled={feedback.status === "loading"}
-              />
+          <div className="flex flex-col items-center gap-6">
+            <div className="flex items-center gap-2 text-zinc-400">
+              <Fingerprint className="size-5" />
+              <span className="text-sm font-semibold uppercase tracking-wider">
+                Ingresá tu PIN
+              </span>
             </div>
+
+            <PinDisplay length={pin.length} size="md" />
+
+            <div className="h-16 w-full">
+              <ClockFeedback feedback={feedback} size="md" />
+            </div>
+
+            <Numpad
+              onDigit={handleDigit}
+              onDelete={handleDelete}
+              disabled={feedback.status === "loading"}
+            />
           </div>
-        </div>
-      )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

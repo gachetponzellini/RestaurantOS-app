@@ -21,6 +21,11 @@ import type {
 } from "@/lib/ingredients/queries";
 import type { IngredientUnit } from "@/lib/ingredients/types";
 import { ingresarStockCocina, ajustarStockCocina } from "@/lib/ingredients/actions";
+import {
+  Dialog,
+  DialogContent,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 
 // ── Helpers ──────────────────────────────────────────────────────
@@ -380,7 +385,13 @@ function IngresoModal({
 
   return (
     <ModalOverlay onClose={onClose}>
-      <div className="space-y-5">
+      <form
+        className="space-y-5"
+        onSubmit={(e) => {
+          e.preventDefault();
+          handleSubmit();
+        }}
+      >
         <ModalHeader
           title={`Ingresar: ${ingredient.name}`}
           onClose={onClose}
@@ -483,8 +494,7 @@ function IngresoModal({
             Cancelar
           </button>
           <button
-            type="button"
-            onClick={handleSubmit}
+            type="submit"
             disabled={isPending || unitsNum <= 0}
             className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700 disabled:opacity-50"
           >
@@ -496,7 +506,7 @@ function IngresoModal({
             Ingresar
           </button>
         </div>
-      </div>
+      </form>
     </ModalOverlay>
   );
 }
@@ -555,7 +565,13 @@ function AjusteModal({
 
   return (
     <ModalOverlay onClose={onClose}>
-      <div className="space-y-5">
+      <form
+        className="space-y-5"
+        onSubmit={(e) => {
+          e.preventDefault();
+          handleSubmit();
+        }}
+      >
         <ModalHeader
           title={`Ajustar: ${ingredient.name}`}
           onClose={onClose}
@@ -657,8 +673,7 @@ function AjusteModal({
             Cancelar
           </button>
           <button
-            type="button"
-            onClick={handleSubmit}
+            type="submit"
             disabled={isPending || !isValid}
             className="inline-flex items-center gap-2 rounded-lg bg-zinc-900 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-zinc-800 disabled:opacity-50"
           >
@@ -670,7 +685,7 @@ function AjusteModal({
             Ajustar
           </button>
         </div>
-      </div>
+      </form>
     </ModalOverlay>
   );
 }
@@ -687,16 +702,16 @@ function ModalOverlay({
   onClose: () => void;
 }) {
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
+    <Dialog
+      open
+      onOpenChange={(o) => {
+        if (!o) onClose();
       }}
     >
-      <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
+      <DialogContent showCloseButton={false} className="max-w-md p-6">
         {children}
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -709,7 +724,9 @@ function ModalHeader({
 }) {
   return (
     <div className="flex items-center justify-between">
-      <h3 className="text-base font-semibold text-zinc-900">{title}</h3>
+      <DialogTitle className="text-base font-semibold text-zinc-900">
+        {title}
+      </DialogTitle>
       <button
         type="button"
         onClick={onClose}

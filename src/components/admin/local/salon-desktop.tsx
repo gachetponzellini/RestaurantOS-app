@@ -26,6 +26,14 @@ import { OrderSummaryCard } from "@/components/mozo/order-summary-card";
 import { TransferTableModal } from "@/components/mozo/transfer-table-modal";
 import { WalkInModal } from "@/components/mozo/walk-in-modal";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import type { BusinessRole } from "@/lib/admin/context";
 import type { FloorPlanWithTables } from "@/lib/admin/floor-plan/queries";
 import { MozoPedirClient } from "@/app/[business_slug]/mozo/mesa/[id]/pedir/pedir-client";
@@ -1137,44 +1145,37 @@ export function SalonDesktop({
 
       {/* ── Anular mesa prompt ── */}
       {anularPrompt && (
-        <div
-          onClick={() => {
-            setAnularPrompt(null);
-            setAnularReason("");
+        <Dialog
+          open
+          onOpenChange={(o) => {
+            if (!o) {
+              setAnularPrompt(null);
+              setAnularReason("");
+            }
           }}
-          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40"
         >
-          <div
-            onClick={(e) => e.stopPropagation()}
-            className="w-full max-w-md rounded-2xl bg-white p-5 shadow-xl"
-          >
-            <div className="flex items-start justify-between gap-3">
-              <h3 className="text-base font-bold text-zinc-900">
+          <DialogContent className="max-w-md p-5">
+            <DialogHeader>
+              <DialogTitle className="text-base font-bold text-zinc-900">
                 Anular {anularPrompt.label}
-              </h3>
-              <button
-                onClick={() => {
-                  setAnularPrompt(null);
-                  setAnularReason("");
-                }}
-                className="rounded-full p-1.5 text-zinc-500 hover:bg-zinc-100"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-            <p className="mt-1 text-xs text-zinc-500">
-              Cancela la orden activa con motivo. La mesa queda libre.
-            </p>
+              </DialogTitle>
+              <DialogDescription className="text-xs text-zinc-500">
+                Cancela la orden activa con motivo. La mesa queda libre.
+              </DialogDescription>
+            </DialogHeader>
+            {/* Acción destructiva: Enter en el textarea inserta salto de línea
+                (no envía); anular requiere click explícito. Esc cancela. */}
             <textarea
               value={anularReason}
               onChange={(e) => setAnularReason(e.target.value.slice(0, 200))}
               placeholder="ej: cliente se fue, error de carga, ..."
-              className="mt-3 block w-full rounded-2xl border border-zinc-200 px-3 py-2 text-sm focus:border-red-400 focus:outline-none focus:ring-2 focus:ring-red-100"
+              className="block w-full rounded-2xl border border-zinc-200 px-3 py-2 text-sm focus:border-red-400 focus:outline-none focus:ring-2 focus:ring-red-100"
               rows={3}
               autoFocus
             />
-            <div className="mt-4 flex gap-2">
+            <DialogFooter>
               <Button
+                type="button"
                 variant="outline"
                 onClick={() => {
                   setAnularPrompt(null);
@@ -1185,6 +1186,7 @@ export function SalonDesktop({
                 Volver
               </Button>
               <Button
+                type="button"
                 variant="destructive"
                 onClick={handleAnular}
                 disabled={pending || !anularReason.trim()}
@@ -1192,9 +1194,9 @@ export function SalonDesktop({
               >
                 Anular
               </Button>
-            </div>
-          </div>
-        </div>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       )}
 
       {/* El overlay "Distribuir mozos" vive en LocalShell para alinear el

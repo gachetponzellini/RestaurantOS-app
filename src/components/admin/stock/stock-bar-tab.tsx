@@ -9,13 +9,19 @@ import {
   Plus,
   Search,
   Trash2,
-  X,
 } from "lucide-react";
 import { toast } from "sonner";
 
 import { StockHistorySheet } from "@/components/admin/stock/stock-history-sheet";
 import { StockMovementSheet } from "@/components/admin/stock/stock-movement-sheet";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { formatCurrency } from "@/lib/currency";
 import { setBarStock, setStockLevels } from "@/lib/stock/actions";
@@ -307,27 +313,19 @@ function AddBarProduct({
   }
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
+    <Dialog
+      open
+      onOpenChange={(o) => {
+        if (!o) onClose();
       }}
     >
-      <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
-        <div className="flex items-center justify-between">
-          <h3 className="text-base font-semibold text-zinc-900">
-            Agregar producto al stock de bar
-          </h3>
-          <button
-            onClick={onClose}
-            className="rounded-lg p-1 text-zinc-400 transition hover:bg-zinc-100 hover:text-zinc-700"
-          >
-            <X className="size-5" />
-          </button>
-        </div>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>Agregar producto al stock de bar</DialogTitle>
+        </DialogHeader>
 
         {!selected ? (
-          <div className="mt-4 space-y-3">
+          <div className="space-y-3">
             <div className="relative">
               <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-zinc-400" />
               <Input
@@ -348,6 +346,7 @@ function AddBarProduct({
                   {filtered.map((c) => (
                     <li key={c.id}>
                       <button
+                        type="button"
                         onClick={() => setSelected(c)}
                         className="flex w-full items-center justify-between px-4 py-2.5 text-left text-sm transition hover:bg-zinc-50"
                       >
@@ -363,7 +362,13 @@ function AddBarProduct({
             </div>
           </div>
         ) : (
-          <div className="mt-4 space-y-4">
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              handleAdd();
+            }}
+            className="space-y-4"
+          >
             <div className="rounded-xl bg-zinc-50 px-4 py-3 ring-1 ring-zinc-200/60">
               <p className="text-xs font-semibold uppercase tracking-wider text-zinc-500">
                 Producto
@@ -381,18 +386,23 @@ function AddBarProduct({
                 onChange={(e) => setQty(e.target.value)}
               />
             </div>
-            <div className="flex justify-end gap-2">
-              <Button variant="ghost" onClick={() => setSelected(null)} disabled={pending}>
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => setSelected(null)}
+                disabled={pending}
+              >
                 Volver
               </Button>
-              <Button onClick={handleAdd} disabled={pending} className="gap-2">
+              <Button type="submit" disabled={pending} className="gap-2">
                 <Plus className="size-4" />
                 Agregar
               </Button>
-            </div>
-          </div>
+            </DialogFooter>
+          </form>
         )}
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }

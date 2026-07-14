@@ -145,6 +145,15 @@
   html {
     @apply font-sans;
   }
+  /* Tailwind v4 dropped Preflight's `cursor: pointer` on buttons; restore it for
+     interactive controls so every button / role=button / summary shows the
+     pointer affordance on hover. Disabled controls keep the default cursor
+     (they're not actionable). Spec 043. */
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]),
+  summary {
+    cursor: pointer;
+  }
 }
 
 /* ─────────────────────────────────────────────────────────────

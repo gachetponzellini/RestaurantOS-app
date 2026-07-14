@@ -2,9 +2,17 @@
 
 import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { CalendarPlus, Loader2, Minus, Plus, X } from "lucide-react";
+import { CalendarPlus, Loader2, Minus, Plus } from "lucide-react";
 import { toast } from "sonner";
 
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetFooter,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
 import { fetchAvailability } from "@/lib/reservations/availability-actions";
 import { createReservationFromAdmin } from "@/lib/reservations/booking-actions";
 import type { FloorTable } from "@/lib/reservations/types";
@@ -109,37 +117,35 @@ export function NewReservationModal({
   );
 
   return (
-    <div
-      className="fixed inset-0 z-[60] flex items-end justify-center bg-black/50 sm:items-center sm:p-4"
-      onClick={onClose}
+    <Sheet
+      open
+      onOpenChange={(o) => {
+        if (!o) onClose();
+      }}
     >
-      <div
-        className="flex max-h-[90vh] w-full max-w-lg flex-col rounded-t-3xl bg-white shadow-2xl sm:rounded-3xl"
-        onClick={(e) => e.stopPropagation()}
+      <SheetContent
+        side="bottom"
+        className="max-h-[90vh] rounded-t-3xl sm:mx-auto sm:max-w-lg"
       >
-        {/* Header */}
-        <div className="flex items-start justify-between gap-3 p-5 pb-0">
-          <div className="min-w-0">
-            <h3 className="font-heading flex items-center gap-2 text-lg font-bold leading-tight">
-              <CalendarPlus className="h-5 w-5 text-blue-600" />
-              Nueva reserva
-            </h3>
-            <p className="mt-0.5 text-sm text-zinc-500">
-              Crea una reserva manual desde el admin.
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Cerrar"
-            className="-mr-1 -mt-1 rounded-full p-2 text-zinc-500 transition active:scale-95 active:bg-zinc-100"
-          >
-            <X className="h-5 w-5" />
-          </button>
-        </div>
+        <SheetHeader>
+          <SheetTitle className="font-heading flex items-center gap-2 text-lg font-bold">
+            <CalendarPlus className="h-5 w-5 text-blue-600" />
+            Nueva reserva
+          </SheetTitle>
+          <SheetDescription>
+            Crea una reserva manual desde el admin.
+          </SheetDescription>
+        </SheetHeader>
 
-        {/* Scrollable content */}
-        <div className="flex-1 space-y-4 overflow-y-auto p-5">
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            handleSubmit();
+          }}
+          className="flex min-h-0 flex-1 flex-col"
+        >
+          {/* Scrollable content */}
+          <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 pb-4">
           {/* Name */}
           <div>
             <label className="text-[11px] font-bold uppercase tracking-wider text-zinc-500">
@@ -281,28 +287,28 @@ export function NewReservationModal({
           </div>
         </div>
 
-        {/* Footer — submit button */}
-        <div className="border-t border-zinc-200 p-5 pt-3">
-          <button
-            type="button"
-            onClick={handleSubmit}
-            disabled={!canSubmit}
-            className="flex h-14 w-full items-center justify-center gap-2 rounded-2xl bg-blue-600 text-base font-bold text-white shadow-sm transition active:scale-[0.98] disabled:opacity-60"
-          >
-            {pending ? (
-              <>
-                <Loader2 className="h-5 w-5 animate-spin" />
-                Creando…
-              </>
-            ) : (
-              <>
-                <CalendarPlus className="h-5 w-5" />
-                Crear reserva
-              </>
-            )}
-          </button>
-        </div>
-      </div>
-    </div>
+          {/* Footer — submit button */}
+          <SheetFooter className="border-t border-zinc-200">
+            <button
+              type="submit"
+              disabled={!canSubmit}
+              className="flex h-14 w-full items-center justify-center gap-2 rounded-2xl bg-blue-600 text-base font-bold text-white shadow-sm transition active:scale-[0.98] disabled:opacity-60"
+            >
+              {pending ? (
+                <>
+                  <Loader2 className="h-5 w-5 animate-spin" />
+                  Creando…
+                </>
+              ) : (
+                <>
+                  <CalendarPlus className="h-5 w-5" />
+                  Crear reserva
+                </>
+              )}
+            </button>
+          </SheetFooter>
+        </form>
+      </SheetContent>
+    </Sheet>
   );
 }

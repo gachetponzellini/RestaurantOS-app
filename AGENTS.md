@@ -80,6 +80,16 @@ floor-plan, local, orders, promos, reports, rrhh, salones, settings, stock, user
 público/operación: `menu`, `cart`, `checkout`, `delivery`, `mozo`, `fichar`, `reservations`,
 `notifications`, `public`, `super` / `super-categories`, `ui` (primitivos shadcn), `shared`.
 
+**Modales y formularios (convención — spec 043):**
+- **Modales = componente `Dialog`/`Sheet` compartido** (`components/ui`, sobre Base UI). Nunca un
+  `<div className="fixed inset-0 …">` a mano: el compartido ya trae **cerrar con Esc**, focus-trap,
+  backdrop y botón de cierre. Para una vista **full-screen que no es un diálogo**, cerrá con Esc vía
+  el hook `useEscapeToClose` (`src/lib/ui/use-escape-to-close.ts`).
+- **Formularios = `<form onSubmit>` real** con el botón primario en `type="submit"` (así **Enter
+  envía**). Los controles no-primarios (cancelar, +agregar, steppers) van en `type="button"`.
+- **Acciones destructivas** (anular, borrar): no cablees Enter→submit; que el disparo sea un click
+  explícito (dejá el único campo como `<textarea>`, donde Enter = salto de línea).
+
 ---
 
 ## 4. Datos (Supabase)

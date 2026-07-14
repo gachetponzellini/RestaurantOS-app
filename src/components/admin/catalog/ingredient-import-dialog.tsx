@@ -2,10 +2,19 @@
 
 import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { FileUp, Upload, X } from "lucide-react";
+import { FileUp, Upload } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 import { importIngredients, type ImportError } from "@/lib/ingredients/actions";
 
 // Filas crudas que se envían a la action (la action las valida con Zod).
@@ -159,117 +168,105 @@ export function IngredientImportDialog({ slug }: { slug: string }) {
   }
 
   return (
-    <>
-      <Button
-        variant="outline"
-        onClick={() => setOpen(true)}
-        className="gap-2"
-      >
-        <FileUp className="size-4" />
-        Importar CSV
-      </Button>
+    <Dialog
+      open={open}
+      onOpenChange={(o) => {
+        setOpen(o);
+        if (!o) reset();
+      }}
+    >
+      <DialogTrigger
+        render={
+          <Button variant="outline" className="gap-2">
+            <FileUp className="size-4" />
+            Importar CSV
+          </Button>
+        }
+      />
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Importar insumos desde CSV</DialogTitle>
+          <DialogDescription>
+            Exportá el Excel de MaxiRest a CSV. Columnas reconocidas:{" "}
+            <code>nombre</code>, <code>unidad</code> (kg/lt/un/g/ml),{" "}
+            <code>presentacion</code>, <code>neto</code>, <code>costo</code> (en
+            pesos), <code>merma</code> (%), <code>stock</code>.
+          </DialogDescription>
+        </DialogHeader>
 
-      {open && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4"
-          onClick={(e) => {
-            if (e.target === e.currentTarget) {
-              setOpen(false);
-              reset();
-            }
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            handleImport();
           }}
+          className="space-y-4"
         >
-          <div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-xl">
-            <div className="flex items-center justify-between">
-              <h3 className="text-base font-semibold text-zinc-900">
-                Importar insumos desde CSV
-              </h3>
-              <button
-                onClick={() => {
-                  setOpen(false);
-                  reset();
-                }}
-                className="rounded-lg p-1 text-zinc-400 transition hover:bg-zinc-100 hover:text-zinc-700"
-              >
-                <X className="size-5" />
-              </button>
-            </div>
+          <input
+            ref={fileRef}
+            type="file"
+            accept=".csv,text/csv"
+            className="hidden"
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) handleFile(f);
+            }}
+          />
+          <button
+            type="button"
+            onClick={() => fileRef.current?.click()}
+            className="flex w-full flex-col items-center gap-2 rounded-xl border border-dashed border-zinc-300 bg-zinc-50/50 py-8 text-zinc-500 transition hover:border-zinc-400 hover:bg-zinc-50"
+          >
+            <Upload className="size-7" strokeWidth={1.5} />
+            <span className="text-sm font-medium">
+              {fileName || "Elegí un archivo CSV"}
+            </span>
+            {rows.length > 0 && (
+              <span className="text-xs text-emerald-600">
+                {rows.length} fila(s) detectada(s)
+              </span>
+            )}
+          </button>
 
-            <p className="mt-2 text-xs text-zinc-500">
-              Exportá el Excel de MaxiRest a CSV. Columnas reconocidas:{" "}
-              <code>nombre</code>, <code>unidad</code> (kg/lt/un/g/ml),{" "}
-              <code>presentacion</code>, <code>neto</code>, <code>costo</code> (en
-              pesos), <code>merma</code> (%), <code>stock</code>.
-            </p>
-
-            <div className="mt-4 space-y-4">
-              <input
-                ref={fileRef}
-                type="file"
-                accept=".csv,text/csv"
-                className="hidden"
-                onChange={(e) => {
-                  const f = e.target.files?.[0];
-                  if (f) handleFile(f);
-                }}
-              />
-              <button
-                type="button"
-                onClick={() => fileRef.current?.click()}
-                className="flex w-full flex-col items-center gap-2 rounded-xl border border-dashed border-zinc-300 bg-zinc-50/50 py-8 text-zinc-500 transition hover:border-zinc-400 hover:bg-zinc-50"
-              >
-                <Upload className="size-7" strokeWidth={1.5} />
-                <span className="text-sm font-medium">
-                  {fileName || "Elegí un archivo CSV"}
-                </span>
-                {rows.length > 0 && (
-                  <span className="text-xs text-emerald-600">
-                    {rows.length} fila(s) detectada(s)
-                  </span>
-                )}
-              </button>
-
-              {result && (
-                <div className="space-y-2 rounded-xl bg-zinc-50 p-4 ring-1 ring-zinc-200/60">
-                  <p className="text-sm font-semibold text-zinc-900">
-                    {result.imported} importado(s) · {result.errors.length} con error
-                  </p>
-                  {result.errors.length > 0 && (
-                    <ul className="max-h-40 space-y-1 overflow-auto text-xs text-red-700">
-                      {result.errors.map((e, i) => (
-                        <li key={i}>
-                          Fila {e.row} ({e.name}): {e.reason}
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
+          {result && (
+            <div className="space-y-2 rounded-xl bg-zinc-50 p-4 ring-1 ring-zinc-200/60">
+              <p className="text-sm font-semibold text-zinc-900">
+                {result.imported} importado(s) · {result.errors.length} con error
+              </p>
+              {result.errors.length > 0 && (
+                <ul className="max-h-40 space-y-1 overflow-auto text-xs text-red-700">
+                  {result.errors.map((e, i) => (
+                    <li key={i}>
+                      Fila {e.row} ({e.name}): {e.reason}
+                    </li>
+                  ))}
+                </ul>
               )}
-
-              <div className="flex justify-end gap-2">
-                <Button
-                  variant="ghost"
-                  onClick={() => {
-                    setOpen(false);
-                    reset();
-                  }}
-                  disabled={pending}
-                >
-                  Cerrar
-                </Button>
-                <Button
-                  onClick={handleImport}
-                  disabled={pending || rows.length === 0}
-                  className="gap-2"
-                >
-                  <FileUp className="size-4" />
-                  {pending ? "Importando…" : `Importar ${rows.length || ""}`}
-                </Button>
-              </div>
             </div>
-          </div>
-        </div>
-      )}
-    </>
+          )}
+
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => {
+                setOpen(false);
+                reset();
+              }}
+              disabled={pending}
+            >
+              Cerrar
+            </Button>
+            <Button
+              type="submit"
+              disabled={pending || rows.length === 0}
+              className="gap-2"
+            >
+              <FileUp className="size-4" />
+              {pending ? "Importando…" : `Importar ${rows.length || ""}`}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }

@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { formatInTimeZone } from "date-fns-tz";
 import { es } from "date-fns/locale";
 import {
@@ -23,6 +24,7 @@ import type {
   CustomerChatbotConversation,
   CustomerChatbotMessage,
 } from "@/lib/admin/customers-query";
+import { useEscapeToClose } from "@/lib/ui/use-escape-to-close";
 import { cn } from "@/lib/utils";
 
 // Vista dedicada del chat con el bot, presentada como si abrieras el chat
@@ -55,6 +57,11 @@ export function CustomerChatbotView({
   );
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+
+  // Esc cierra la vista full-screen → mismo destino que el link "Volver a la
+  // demo" (no es un Dialog, por eso usa el hook en vez de migrar). Spec 043.
+  const router = useRouter();
+  useEscapeToClose(() => router.push(`/${slug}/demo`));
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
