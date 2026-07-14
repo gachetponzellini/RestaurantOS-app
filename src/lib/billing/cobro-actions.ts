@@ -307,7 +307,27 @@ export type RegistrarPagoInput = {
   adjustment_percent?: number;
   adjustment_cents?: number;
   slug: string;
+  /** Idempotency key por intento de cobro (issue #58). Dedup en la RPC. */
+  requestId?: string;
 };
+
+/**
+ * Mapea los errores que levanta la RPC `registrar_pago_tx` (raise exception en
+ * plpgsql → texto crudo en error.message) a mensajes de usuario.
+ */
+function mapRegistrarPagoError(message: string): string {
+  if (message.includes("SPLIT_ALREADY_PAID")) return "Este split ya fue cobrado.";
+  if (message.includes("ORDER_ALREADY_PAID")) return "La orden ya fue cobrada.";
+  if (message.includes("ORDER_CLOSED")) return "La orden ya está cerrada.";
+  if (message.includes("SPLIT_CANCELLED")) return "El split fue cancelado.";
+  if (message.includes("SPLIT_ORDER_MISMATCH"))
+    return "El split no corresponde a esta orden.";
+  if (message.includes("ORDER_NOT_FOUND")) return "Orden no encontrada.";
+  if (message.includes("SPLIT_NOT_FOUND")) return "Split no encontrado.";
+  if (message.includes("payments_business_request_uidx"))
+    return "El pago ya se estaba registrando. Refrescá para ver el estado.";
+  return `No se pudo registrar el pago: ${message}`;
+}
 
 export async function registrarPago(
   input: RegistrarPagoInput,
@@ -371,53 +391,45 @@ export async function registrarPago(
   }
 
   const attributed = await deriveAttributedMozo(service, order.id);
-  const payment_status =
-    input.method === "cash" || input.method === "card_manual" || input.method === "transfer" || input.method === "other"
-      ? "paid"
-      : "pending";
 
-  const { data: inserted, error } = await service
-    .from("payments")
-    .insert({
-      order_id: order.id,
-      business_id: business.id,
-      split_id: input.splitId,
-      caja_id: input.caja_id,
-      operated_by: ctx.userId,
-      attributed_mozo_id: attributed,
-      method: input.method,
-      amount_cents: input.amount_cents,
-      tip_cents: input.tip_cents,
-      last_four: input.last_four ?? null,
-      card_brand: input.card_brand ?? null,
-      payment_status,
-      notes: input.notes?.trim() || null,
-      adjustment_percent: input.adjustment_percent ?? 0,
-      adjustment_cents: input.adjustment_cents ?? 0,
-    })
-    .select(
-      "id, order_id, business_id, split_id, caja_id, operated_by, attributed_mozo_id, method, amount_cents, tip_cents, last_four, card_brand, mp_payment_id, mp_preference_id, payment_status, notes, refunded_at, refunded_reason, created_at",
-    )
-    .single();
+  // El registro del pago va por una RPC transaccional (migración 0007): lock
+  // FOR UPDATE de la orden/split + guarda anti-duplicado (split/orden ya
+  // saldada) + insert idempotente por request_id. Cierra de raíz el
+  // doble-submit que inflaba la caja (issue #58 / spec 42). En este path el
+  // pago siempre entra 'paid' (cash/card_manual/transfer/other; MP va aparte).
+  const { data: rpcData, error } = await service.rpc("registrar_pago_tx", {
+    p_order_id: order.id,
+    p_business_id: business.id,
+    p_split_id: input.splitId,
+    p_caja_id: input.caja_id,
+    p_operated_by: ctx.userId,
+    p_attributed_mozo_id: attributed,
+    p_method: input.method,
+    p_amount_cents: input.amount_cents,
+    p_tip_cents: input.tip_cents,
+    p_last_four: input.last_four ?? null,
+    p_card_brand: input.card_brand ?? null,
+    p_notes: input.notes?.trim() || null,
+    p_adjustment_percent: input.adjustment_percent ?? 0,
+    p_adjustment_cents: input.adjustment_cents ?? 0,
+    p_request_id: input.requestId ?? null,
+  });
 
-  if (error) return actionError(`No se pudo registrar el pago: ${error.message}`);
-  const payment = inserted as Payment;
+  if (error) return actionError(mapRegistrarPagoError(error.message));
 
-  let splitDone = false;
-  if (split && payment_status === "paid") {
-    const newPaid = split.paid_amount_cents + input.amount_cents;
-    splitDone = newPaid >= split.expected_amount_cents;
-    await service
-      .from("order_splits")
-      .update({
-        paid_amount_cents: newPaid,
-        status: splitDone ? "paid" : "pending",
-      })
-      .eq("id", split.id);
-  }
+  const row = (Array.isArray(rpcData) ? rpcData[0] : rpcData) as
+    | { payment: Payment; split_done: boolean; fully_paid: boolean; idempotent: boolean }
+    | undefined;
+  if (!row) return actionError("No se pudo registrar el pago.");
 
+  const payment = row.payment;
+  const splitDone = row.split_done;
+
+  // El cierre de la orden + liberación de mesa se mantienen en TS
+  // (closeOrderIfFullyPaid, guardado por lifecycle_status e idempotente): no se
+  // duplica esa lógica en SQL. En un retry idempotente la orden ya está cerrada.
   let orderClosed = false;
-  if (payment_status === "paid") {
+  if (row.fully_paid && !row.idempotent) {
     const r = await closeOrderIfFullyPaid(service, order.id, input.slug);
     orderClosed = r.orderClosed;
   }

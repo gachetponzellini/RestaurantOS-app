@@ -431,4 +431,75 @@ describe.skipIf(!dbAvailable)("billing/cobro (integration)", () => {
       .single();
     expect(tbl!.operational_status).toBe("libre");
   });
+
+  // ── Anti doble-submit (bug #58) ─────────────────────────────────────
+  it("doble-submit con el MISMO request_id → un solo pago (idempotente)", { timeout: 30_000 }, async () => {
+    const { orderId } = await newOrder("H");
+    CURRENT_USER_ID = mozoId;
+    await dividirPorPersonas(orderId, 2, businessSlug); // 2 splits de 5.000 → la order queda open tras pagar uno
+    const init = await iniciarCobro(orderId, businessSlug);
+    expect(init.ok).toBe(true);
+    if (!init.ok) return;
+    const [s1] = init.data.splits;
+
+    const pago = {
+      orderId,
+      splitId: s1.id,
+      method: "cash" as const,
+      amount_cents: s1.expected_amount_cents,
+      tip_cents: 0,
+      caja_id: cajaId,
+      slug: businessSlug,
+      requestId: crypto.randomUUID(),
+    };
+    const r1 = await registrarPago(pago);
+    const r2 = await registrarPago(pago); // segundo tap, mismo request_id
+
+    expect(r1.ok).toBe(true);
+    expect(r2.ok).toBe(true);
+    // Idempotente: el 2º devuelve el pago ya creado, no uno nuevo.
+    if (r1.ok && r2.ok) expect(r2.data.payment.id).toBe(r1.data.payment.id);
+
+    const { data: pays } = await supabase
+      .from("payments")
+      .select("id")
+      .eq("order_id", orderId)
+      .eq("split_id", s1.id);
+    expect(pays).toHaveLength(1);
+  });
+
+  it("doble-submit del bug real: split saldado + otro request_id → rechazo, un solo pago", { timeout: 30_000 }, async () => {
+    const { orderId } = await newOrder("I");
+    CURRENT_USER_ID = mozoId;
+    await dividirPorPersonas(orderId, 2, businessSlug);
+    const init = await iniciarCobro(orderId, businessSlug);
+    expect(init.ok).toBe(true);
+    if (!init.ok) return;
+    const [s1] = init.data.splits;
+
+    const base = {
+      orderId,
+      splitId: s1.id,
+      method: "cash" as const,
+      amount_cents: s1.expected_amount_cents,
+      tip_cents: 0,
+      caja_id: cajaId,
+      slug: businessSlug,
+    };
+    const r1 = await registrarPago({ ...base, requestId: crypto.randomUUID() });
+    expect(r1.ok).toBe(true);
+
+    // Segundo tap con request_id distinto (como el caso real golf-jcr: 3 pagos al mismo split).
+    const r2 = await registrarPago({ ...base, requestId: crypto.randomUUID() });
+    expect(r2.ok).toBe(false);
+    if (!r2.ok) expect(r2.error).toMatch(/cobrad|saldad/i);
+
+    const { data: pays } = await supabase
+      .from("payments")
+      .select("id")
+      .eq("order_id", orderId)
+      .eq("split_id", s1.id)
+      .eq("payment_status", "paid");
+    expect(pays).toHaveLength(1);
+  });
 });

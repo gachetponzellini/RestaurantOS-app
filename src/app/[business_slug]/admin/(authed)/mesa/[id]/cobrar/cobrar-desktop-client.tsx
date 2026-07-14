@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
   ArrowRight,
@@ -515,6 +515,10 @@ function CobrarSplitPanel({
   // tocar "Confirmar" varias veces registra N pagos e infla la caja (bug
   // crítico cobro-doble-submit, reproducido en datos reales). spec 41 · FR-007.
   const [isRegistering, startTransition] = useTransition();
+  // Idempotency key por intento de cobro (spec 42): estable entre taps del
+  // mismo pago, se regenera tras un cobro OK. El server dedup por
+  // (business_id, request_id) → un retry/tab/tap no duplica el pago (issue #58).
+  const requestIdRef = useRef<string | null>(null);
   const remaining = split.expected_amount_cents - split.paid_amount_cents;
   const [method, setMethod] = useState<PaymentMethod | null>(null);
   const configForMethod = methodConfigs.find((c) => c.method === method);
@@ -605,11 +609,13 @@ function CobrarSplitPanel({
         adjustment_percent: adjustmentPercent,
         adjustment_cents: adjustmentCents,
         slug,
+        requestId: (requestIdRef.current ??= crypto.randomUUID()),
       });
       if (!r.ok) {
         toast.error(r.error);
         return;
       }
+      requestIdRef.current = null; // pago OK → el próximo cobro usa una clave nueva
       toast.success("Pago registrado");
       onPaid({ orderClosed: r.data.orderClosed });
     });
