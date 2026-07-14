@@ -512,6 +512,9 @@ export function MozoPedirClient({
   // ── Acciones server ──
   const handleSend = () => {
     if (cart.length === 0) return;
+    // Snapshot de los _key que se envían: al terminar quitamos SOLO estos del
+    // carrito, preservando ítems agregados durante el envío en curso (FR-009).
+    const sentKeys = new Set(cart.map((c) => c._key));
     const items: (EnviarComandaItem | EnviarComandaDailyMenuItem)[] = cart.map((c) => {
       if (isDailyMenuCart(c)) {
         return {
@@ -535,7 +538,19 @@ export function MozoPedirClient({
       };
     });
     startTransition(async () => {
-      const r = await enviarComanda({ tableId: table.id, items, slug });
+      let r: Awaited<ReturnType<typeof enviarComanda>>;
+      try {
+        r = await enviarComanda({ tableId: table.id, items, slug });
+      } catch (e) {
+        // Fallo de red / respuesta perdida: no sabemos si el server procesó el
+        // envío. NO reenviar a ciegas — puede duplicar la comanda (la action
+        // no es idempotente; idempotencia server = spec 042). FR-008.
+        console.error("enviarComanda", e);
+        toast.error(
+          "No pudimos confirmar el envío. Revisá la comanda de la mesa antes de reenviar.",
+        );
+        return;
+      }
       if (!r.ok) {
         toast.error(r.error);
         return;
@@ -543,7 +558,8 @@ export function MozoPedirClient({
       toast.success(
         `Enviado · ${r.data.comanda_ids.length} ${r.data.comanda_ids.length === 1 ? "comanda" : "comandas"}`,
       );
-      setCart([]);
+      // Quitamos solo los ítems enviados (no vaciamos el carrito) — FR-009.
+      setCart((prev) => prev.filter((c) => !sentKeys.has(c._key)));
       // Embebido (panel del salón): cerramos el panel y refrescamos vía onSent,
       // sin navegar. Si no, volvemos al origen: el mozo a /mozo con el drawer de
       // la mesa abierto; el admin (ruta) a la vista de operación (homeHref).

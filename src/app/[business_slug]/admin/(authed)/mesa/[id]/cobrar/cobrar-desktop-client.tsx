@@ -511,7 +511,10 @@ function CobrarSplitPanel({
   onPaid: (result: { orderClosed: boolean }) => void;
   onClear: () => void;
 }) {
-  const [, startTransition] = useTransition();
+  // `isRegistering` bloquea el botón mientras el pago está en vuelo: sin esto,
+  // tocar "Confirmar" varias veces registra N pagos e infla la caja (bug
+  // crítico cobro-doble-submit, reproducido en datos reales). spec 41 · FR-007.
+  const [isRegistering, startTransition] = useTransition();
   const remaining = split.expected_amount_cents - split.paid_amount_cents;
   const [method, setMethod] = useState<PaymentMethod | null>(null);
   const configForMethod = methodConfigs.find((c) => c.method === method);
@@ -871,6 +874,7 @@ function CobrarSplitPanel({
           <button
             type="button"
             disabled={
+              isRegistering ||
               amount <= 0 ||
               ((method === "other" || method === "transfer") && notes.trim() === "") ||
               (method === "card_manual" &&
@@ -880,8 +884,14 @@ function CobrarSplitPanel({
             onClick={handleConfirm}
             className="flex h-14 w-full items-center justify-center gap-2 rounded-2xl bg-emerald-600 text-base font-semibold text-white shadow-sm transition hover:brightness-105 active:scale-[0.98] disabled:opacity-50"
           >
-            <Check className="size-5" />
-            Confirmar {formatCurrency(amount)}
+            {isRegistering ? (
+              "Registrando…"
+            ) : (
+              <>
+                <Check className="size-5" />
+                Confirmar {formatCurrency(amount)}
+              </>
+            )}
           </button>
         </div>
       )}

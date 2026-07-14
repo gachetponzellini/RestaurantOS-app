@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useCallback, useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
   ArrowRight,
@@ -29,6 +29,11 @@ import {
   registrarPago,
   type IniciarCobroResult,
 } from "@/lib/billing/cobro-actions";
+import {
+  applyPayment,
+  type CobroMergeState,
+  type RegistrarPagoResult,
+} from "@/lib/billing/split-merge";
 import type {
   CuentaState,
   OrderSplit,
@@ -86,15 +91,43 @@ export function CobrarClient({
   existingInvoice,
 }: Props) {
   const router = useRouter();
-  const splits = init.hasImplicitSplit
-    ? [
-        implicitSplit(
-          cuenta.order.id,
-          cuenta.order.business_id,
-          cuenta.totals.total_cents,
-        ),
-      ]
-    : init.splits;
+
+  // Estado local de cobro (spec 41). Reflejamos el pago que el server YA
+  // persistió mergeando su fila, en vez de `router.refresh()`. `closed` lo
+  // marca el server (lifecycle / orderClosed), nunca una suma del cliente.
+  const buildInitial = useCallback(
+    (): CobroMergeState => ({
+      splits: init.hasImplicitSplit
+        ? [
+            implicitSplit(
+              cuenta.order.id,
+              cuenta.order.business_id,
+              cuenta.totals.total_cents,
+            ),
+          ]
+        : init.splits,
+      appliedPaymentIds: [],
+      closed: cuenta.order.lifecycle_status !== "open",
+    }),
+    [
+      init,
+      cuenta.order.id,
+      cuenta.order.business_id,
+      cuenta.order.lifecycle_status,
+      cuenta.totals.total_cents,
+    ],
+  );
+
+  const [merge, setMerge] = useState<CobroMergeState>(buildInitial);
+  // Re-sync tras `router.refresh()` (MP / anulación): props nuevas del server
+  // → resetear a su verdad, sin conservar merges viejos ni pagos ya contados.
+  // En un merge local (efectivo/tarjeta) `init`/`cuenta` no cambian → no corre.
+  useEffect(() => {
+    setMerge(buildInitial());
+  }, [buildInitial]);
+
+  const splits = merge.splits;
+  const closed = merge.closed;
 
   const [activeSplitId, setActiveSplitId] = useState<string | null>(null);
   const [cajaId, setCajaId] = useState<string>(init.cajas[0].id);
@@ -109,15 +142,16 @@ export function CobrarClient({
   );
   const totalPending = Math.max(0, total - totalPaid);
   const progressPct = total === 0 ? 0 : Math.min(100, (totalPaid / total) * 100);
-  const allPaid = totalPending === 0;
+  // Cobrado/cierre = señal del server, NO math del cliente (FR-005).
+  const allPaid = closed;
 
-  // Redirigir al salón automáticamente cuando se cobra todo.
+  // Redirigir al salón cuando el server cierra la orden.
   useEffect(() => {
-    if (allPaid) {
+    if (closed) {
       const t = setTimeout(() => router.push(`/${slug}/mozo`), 1500);
       return () => clearTimeout(t);
     }
-  }, [allPaid, slug, router]);
+  }, [closed, slug, router]);
 
   return (
     <div className="min-h-dvh bg-zinc-100/60 pb-12">
@@ -268,9 +302,16 @@ export function CobrarClient({
           methodConfigs={init.methodConfigs}
           orderTipCents={cuenta.order.tip_cents}
           onClose={() => setActiveSplitId(null)}
-          onPaid={() => {
+          onPaid={(result) => {
             setActiveSplitId(null);
-            router.refresh();
+            if (result) {
+              // Efectivo/tarjeta: mergeamos la fila que el server persistió
+              // (instantáneo, sin recargar). Nunca antes del `ok`.
+              setMerge((prev) => applyPayment(prev, result, init.hasImplicitSplit));
+            } else {
+              // MP: lo registra el webhook, no hay fila local que mergear → refresh.
+              router.refresh();
+            }
           }}
         />
       )}
@@ -467,9 +508,10 @@ function CobrarSplitSheet({
   methodConfigs: PaymentMethodConfig[];
   orderTipCents: number;
   onClose: () => void;
-  onPaid: () => void;
+  /** `result` presente = efectivo/tarjeta (mergear); `null` = MP (refresh). */
+  onPaid: (result: RegistrarPagoResult | null) => void;
 }) {
-  const [, startTransition] = useTransition();
+  const [isRegistering, startTransition] = useTransition();
   const remaining = split.expected_amount_cents - split.paid_amount_cents;
   const [method, setMethod] = useState<PaymentMethod | null>(null);
   const configForMethod = methodConfigs.find((c) => c.method === method);
@@ -505,7 +547,7 @@ function CobrarSplitSheet({
         if (data?.payment_status === "paid") {
           toast.success("Pago MP confirmado");
           clearInterval(interval);
-          onPaid();
+          onPaid(null); // MP → refresh (lo registra el webhook)
         } else if (data?.payment_status === "failed") {
           toast.error("MP rechazó el pago");
           clearInterval(interval);
@@ -566,7 +608,7 @@ function CobrarSplitSheet({
         return;
       }
       toast.success("Pago registrado");
-      onPaid();
+      onPaid(r.data); // efectivo/tarjeta → mergear la fila persistida
     });
   };
 
@@ -843,6 +885,7 @@ function CobrarSplitSheet({
             <button
               type="button"
               disabled={
+                isRegistering ||
                 amount <= 0 ||
                 ((method === "other" || method === "transfer") && notes.trim() === "") ||
                 (method === "card_manual" &&
@@ -852,7 +895,7 @@ function CobrarSplitSheet({
               onClick={handleConfirm}
               className="flex h-14 w-full items-center justify-center rounded-2xl bg-emerald-600 text-base font-bold text-white shadow-sm transition active:scale-[0.98] disabled:opacity-50"
             >
-              Confirmar {formatCurrency(amount)}
+              {isRegistering ? "Registrando…" : `Confirmar ${formatCurrency(amount)}`}
             </button>
             <button
               type="button"
