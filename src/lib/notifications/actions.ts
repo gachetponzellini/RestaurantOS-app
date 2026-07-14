@@ -279,13 +279,17 @@ function canManageWhatsappCreds(ctx: {
 }
 
 export type WhatsappStatus = {
+  businessId: string;
   connected: boolean;
   hasApiKey: boolean;
+  hasWebhookToken: boolean;
+  provider: string;
   fromPhone: string | null;
+  appName: string | null;
   channelId: string | null;
 };
 
-/** Estado de conexión a 360dialog para la UI. NUNCA devuelve el valor de la key. */
+/** Estado de conexión de WhatsApp para la UI. NUNCA devuelve el valor de la key ni del token. */
 export async function getWhatsappStatus(
   businessSlug: string,
 ): Promise<ActionResult<WhatsappStatus>> {
@@ -301,29 +305,41 @@ export async function getWhatsappStatus(
   const service = createSupabaseServiceClient() as unknown as GenericClient;
   const { data } = await service
     .from("whatsapp_credentials")
-    .select("api_key, from_phone, channel_id")
+    .select("provider, api_key, from_phone, app_name, channel_id, webhook_token")
     .eq("business_id", business.id)
     .maybeSingle();
 
   const row = data as {
+    provider: string | null;
     api_key: string | null;
     from_phone: string | null;
+    app_name: string | null;
     channel_id: string | null;
+    webhook_token: string | null;
   } | null;
   const hasApiKey = Boolean(row?.api_key);
   return actionOk({
+    businessId: business.id,
     connected: hasApiKey,
     hasApiKey,
+    hasWebhookToken: Boolean(row?.webhook_token),
+    provider: row?.provider ?? "360dialog",
     fromPhone: row?.from_phone ?? null,
+    appName: row?.app_name ?? null,
     channelId: row?.channel_id ?? null,
   });
 }
 
 const SetWhatsappCredsInput = z.object({
   businessSlug: z.string().min(1),
+  provider: z.enum(["360dialog", "gupshup"]).optional(),
   // Write-only: si viene vacío/ausente, se conserva la key actual.
   apiKey: z.string().trim().optional(),
   fromPhone: z.string().trim().max(40).optional(),
+  // Gupshup: nombre de la App (src.name).
+  appName: z.string().trim().max(120).optional(),
+  // Gupshup: secreto del webhook entrante. Write-only, igual que apiKey.
+  webhookToken: z.string().trim().max(200).optional(),
   channelId: z.string().trim().max(120).optional(),
 });
 
@@ -339,7 +355,15 @@ export async function setWhatsappCredentials(
   if (!parsed.success) {
     return actionError(parsed.error.issues[0]?.message ?? "Datos inválidos.");
   }
-  const { businessSlug, apiKey, fromPhone, channelId } = parsed.data;
+  const {
+    businessSlug,
+    provider,
+    apiKey,
+    fromPhone,
+    appName,
+    webhookToken,
+    channelId,
+  } = parsed.data;
 
   const business = await getBusiness(businessSlug);
   if (!business) return actionError("Negocio no encontrado.");
@@ -353,27 +377,40 @@ export async function setWhatsappCredentials(
   const service = createSupabaseServiceClient() as unknown as GenericClient;
   const { data: existing } = await service
     .from("whatsapp_credentials")
-    .select("api_key, from_phone, channel_id")
+    .select("provider, api_key, from_phone, app_name, channel_id, webhook_token")
     .eq("business_id", business.id)
     .maybeSingle();
   const prev = existing as {
+    provider: string | null;
     api_key: string | null;
     from_phone: string | null;
+    app_name: string | null;
     channel_id: string | null;
+    webhook_token: string | null;
   } | null;
 
+  const nextProvider = provider ?? prev?.provider ?? "360dialog";
   const nextApiKey = apiKey && apiKey.length > 0 ? apiKey : (prev?.api_key ?? null);
   const nextFromPhone =
     fromPhone !== undefined ? fromPhone : (prev?.from_phone ?? null);
+  const nextAppName =
+    appName !== undefined ? appName : (prev?.app_name ?? null);
+  // Write-only: token vacío = conservar el existente.
+  const nextWebhookToken =
+    webhookToken && webhookToken.length > 0
+      ? webhookToken
+      : (prev?.webhook_token ?? null);
   const nextChannelId =
     channelId !== undefined ? channelId : (prev?.channel_id ?? null);
 
   const { error: upErr } = await service.from("whatsapp_credentials").upsert(
     {
       business_id: business.id,
-      provider: "360dialog",
+      provider: nextProvider,
       api_key: nextApiKey,
       from_phone: nextFromPhone,
+      app_name: nextAppName,
+      webhook_token: nextWebhookToken,
       channel_id: nextChannelId,
       updated_at: new Date().toISOString(),
     },

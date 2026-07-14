@@ -1,7 +1,20 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import {
+  GUPSHUP_SESSION_URL,
+  GUPSHUP_TEMPLATE_URL,
+} from "./whatsapp-gupshup";
+
 // Credenciales que devuelve el "service client" mockeado. null = no conectado.
-let credsRow: { api_key: string | null; from_phone: string | null } | null = null;
+let credsRow: {
+  provider?: string | null;
+  api_key: string | null;
+  from_phone: string | null;
+  app_name?: string | null;
+} | null = null;
+
+// Id de template que resuelve el mapa (mockeado). null = sin mapeo.
+let gupshupTemplateId: string | null = "gs-uuid-xyz";
 
 vi.mock("@/lib/supabase/service", () => ({
   createSupabaseServiceClient: () => ({
@@ -13,11 +26,15 @@ vi.mock("@/lib/supabase/service", () => ({
   }),
 }));
 
+vi.mock("./template-map", () => ({
+  resolveProviderTemplateId: async () => gupshupTemplateId,
+}));
+
 const { sendWhatsapp, isWhatsappConnected } = await import("./whatsapp-sender");
 
 const SECRET = "D360-secret-key-xyz";
 
-describe("sendWhatsapp", () => {
+describe("sendWhatsapp · 360dialog (default)", () => {
   beforeEach(() => {
     credsRow = { api_key: SECRET, from_phone: "5491100000000" };
   });
@@ -91,6 +108,112 @@ describe("sendWhatsapp", () => {
     const res = await sendWhatsapp({ businessId: "b1", to: "x", text: "y" });
     expect(res.ok).toBe(false);
     if (!res.ok) expect(res.error).not.toContain(SECRET);
+  });
+});
+
+describe("sendWhatsapp · gupshup (puente temporal)", () => {
+  const GKEY = "gupshup-apikey-abc";
+  beforeEach(() => {
+    credsRow = {
+      provider: "gupshup",
+      api_key: GKEY,
+      from_phone: "5491100000000",
+      app_name: "GolfHouse",
+    };
+    gupshupTemplateId = "gs-uuid-xyz";
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it("texto → POST form-urlencoded al endpoint de sesión con header apikey", async () => {
+    const fetchMock = vi.fn(async () => ({
+      status: 200,
+      json: async () => ({ status: "submitted", messageId: "gs1" }),
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const res = await sendWhatsapp({
+      businessId: "b1",
+      to: "+5491122334455",
+      text: "Hola",
+    });
+
+    expect(res.ok).toBe(true);
+    if (res.ok) expect(res.messageId).toBe("gs1");
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe(GUPSHUP_SESSION_URL);
+    expect((init.headers as Record<string, string>)["apikey"]).toBe(GKEY);
+    expect((init.headers as Record<string, string>)["Content-Type"]).toBe(
+      "application/x-www-form-urlencoded",
+    );
+    // El cuerpo es form-urlencoded con el mensaje como JSON-string.
+    expect(String(init.body)).toContain("channel=whatsapp");
+    expect(String(init.body)).toContain("src.name=GolfHouse");
+  });
+
+  it("template con mapeo → POST al endpoint de template con el id del proveedor", async () => {
+    const fetchMock = vi.fn(async () => ({
+      status: 200,
+      json: async () => ({ status: "submitted", messageId: "gs2" }),
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const res = await sendWhatsapp({
+      businessId: "b1",
+      to: "5491122334455",
+      template: { name: "delivery_preparing", lang: "es_AR", params: ["Ana"] },
+    });
+
+    expect(res.ok).toBe(true);
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe(GUPSHUP_TEMPLATE_URL);
+    expect(decodeURIComponent(String(init.body))).toContain("gs-uuid-xyz");
+  });
+
+  it("template SIN mapeo → ok:false y no llama a la red (no envía a ciegas)", async () => {
+    gupshupTemplateId = null;
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const res = await sendWhatsapp({
+      businessId: "b1",
+      to: "5491122334455",
+      template: { name: "sin_mapa", lang: "es_AR", params: [] },
+    });
+
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.error.toLowerCase()).toContain("template");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("falta app_name → ok:false y no llama a la red", async () => {
+    credsRow = { provider: "gupshup", api_key: GKEY, from_phone: "549110", app_name: null };
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const res = await sendWhatsapp({ businessId: "b1", to: "x", text: "y" });
+
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.error.toLowerCase()).toContain("gupshup");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("error del provider → ok:false saneado, sin filtrar la key", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        status: 401,
+        json: async () => ({ status: "error", message: "Authentication Failed" }),
+      })),
+    );
+    const res = await sendWhatsapp({ businessId: "b1", to: "x", text: "y" });
+    expect(res.ok).toBe(false);
+    if (!res.ok) {
+      expect(res.error).toContain("Authentication Failed");
+      expect(res.error).not.toContain(GKEY);
+    }
   });
 });
 
