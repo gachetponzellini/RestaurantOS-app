@@ -2328,6 +2328,7 @@ export type Database = {
           payment_status: string
           refunded_at: string | null
           refunded_reason: string | null
+          request_id: string | null
           split_id: string | null
           tip_cents: number
         }
@@ -2351,6 +2352,7 @@ export type Database = {
           payment_status?: string
           refunded_at?: string | null
           refunded_reason?: string | null
+          request_id?: string | null
           split_id?: string | null
           tip_cents?: number
         }
@@ -2374,6 +2376,7 @@ export type Database = {
           payment_status?: string
           refunded_at?: string | null
           refunded_reason?: string | null
+          request_id?: string | null
           split_id?: string | null
           tip_cents?: number
         }
