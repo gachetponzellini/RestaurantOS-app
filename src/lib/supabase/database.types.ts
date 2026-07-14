@@ -696,6 +696,7 @@ export type Database = {
       }
       chatbot_conversations: {
         Row: {
+          agent_enabled: boolean
           business_id: string
           cart_state: Json
           cart_token: string | null
@@ -708,6 +709,7 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          agent_enabled?: boolean
           business_id: string
           cart_state?: Json
           cart_token?: string | null
@@ -720,6 +722,7 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          agent_enabled?: boolean
           business_id?: string
           cart_state?: Json
           cart_token?: string | null
