@@ -28,50 +28,59 @@ const OptionalUrl = z
   .transform((v) => (v === "" ? null : (v ?? null)))
   .nullable();
 
-const UpdateInput = z.object({
+// ─── Field fragments ─────────────────────────────────────────────────────────
+// Reutilizables entre las 3 mutaciones (perfil / marca / pagos) para no repetir
+// transforms. Cada mutación compone sólo su slice de columnas: así guardar una
+// sección de Ajustes nunca pisa las columnas de otra (spec 40).
+const emptyToNull = (v: string | undefined) => (v === "" ? null : (v ?? null));
+
+const slugField = z
+  .string()
+  .trim()
+  .min(2, "Mínimo 2 caracteres.")
+  .max(60, "Máximo 60 caracteres.")
+  .regex(SLUG_PATTERN, "Sólo minúsculas, números y guiones.");
+const nameField = z.string().min(1, "Requerido.").max(120);
+const phoneField = z.string().trim().max(40).optional().transform(emptyToNull);
+const emailField = z
+  .string()
+  .trim()
+  .max(120)
+  .optional()
+  .transform(emptyToNull)
+  .refine((v) => v === null || /^\S+@\S+\.\S+$/.test(v), "Email inválido.");
+const addressField = z.string().trim().max(200).optional().transform(emptyToNull);
+const timezoneField = z.string().min(1, "Requerido.");
+const centsField = z.coerce
+  .number()
+  .int("Tiene que ser un número entero.")
+  .min(0, "No puede ser negativo.");
+const minutesField = z
+  .union([z.coerce.number().int().min(0), z.null(), z.literal("")])
+  .transform((v) => (v === "" || v === null ? null : v));
+const mpSecretField = z.string().trim().max(300).optional().transform(emptyToNull);
+
+// ─── Input schemas (uno por sección de Ajustes) ─────────────────────────────
+
+// Negocio: contacto + slug (única que toca la URL pública) + envío.
+const ProfileInput = z.object({
   business_slug: z.string().min(1),
-  slug: z
-    .string()
-    .trim()
-    .min(2, "Mínimo 2 caracteres.")
-    .max(60, "Máximo 60 caracteres.")
-    .regex(SLUG_PATTERN, "Sólo minúsculas, números y guiones."),
-  name: z.string().min(1, "Requerido.").max(120),
-  phone: z
-    .string()
-    .trim()
-    .max(40)
-    .optional()
-    .transform((v) => (v === "" ? null : (v ?? null))),
-  email: z
-    .string()
-    .trim()
-    .max(120)
-    .optional()
-    .transform((v) => (v === "" ? null : (v ?? null)))
-    .refine(
-      (v) => v === null || /^\S+@\S+\.\S+$/.test(v),
-      "Email inválido.",
-    ),
-  address: z
-    .string()
-    .trim()
-    .max(200)
-    .optional()
-    .transform((v) => (v === "" ? null : (v ?? null))),
-  timezone: z.string().min(1, "Requerido."),
-  logo_url: z
-    .string()
-    .url()
-    .optional()
-    .transform((v) => (v === "" ? null : (v ?? null)))
-    .nullable(),
-  cover_image_url: z
-    .string()
-    .url()
-    .optional()
-    .transform((v) => (v === "" ? null : (v ?? null)))
-    .nullable(),
+  slug: slugField,
+  name: nameField,
+  phone: phoneField,
+  email: emailField,
+  address: addressField,
+  timezone: timezoneField,
+  delivery_fee_cents: centsField,
+  min_order_cents: centsField,
+  estimated_delivery_minutes: minutesField,
+});
+
+// Apariencia: logos + cover (columnas) + paleta/tipografía/forma (settings JSONB).
+const BrandingInput = z.object({
+  business_slug: z.string().min(1),
+  logo_url: OptionalUrl,
+  cover_image_url: OptionalUrl,
   primary_color: HexColor,
   primary_foreground: HexColor,
   // Extended brand palette (all optional)
@@ -103,35 +112,14 @@ const UpdateInput = z.object({
   logo_mark_url: OptionalUrl,
   logo_mono_url: OptionalUrl,
   favicon_url: OptionalUrl,
-  delivery_fee_cents: z.coerce
-    .number()
-    .int("Tiene que ser un número entero.")
-    .min(0, "No puede ser negativo."),
-  min_order_cents: z.coerce
-    .number()
-    .int("Tiene que ser un número entero.")
-    .min(0, "No puede ser negativo."),
-  estimated_delivery_minutes: z
-    .union([z.coerce.number().int().min(0), z.null(), z.literal("")])
-    .transform((v) => (v === "" || v === null ? null : v)),
-  mp_access_token: z
-    .string()
-    .trim()
-    .max(300)
-    .optional()
-    .transform((v) => (v === "" ? null : (v ?? null))),
-  mp_public_key: z
-    .string()
-    .trim()
-    .max(300)
-    .optional()
-    .transform((v) => (v === "" ? null : (v ?? null))),
-  mp_webhook_secret: z
-    .string()
-    .trim()
-    .max(300)
-    .optional()
-    .transform((v) => (v === "" ? null : (v ?? null))),
+});
+
+// Cobros: credenciales de Mercado Pago.
+const PaymentsInput = z.object({
+  business_slug: z.string().min(1),
+  mp_access_token: mpSecretField,
+  mp_public_key: mpSecretField,
+  mp_webhook_secret: mpSecretField,
   mp_accepts_payments: z.coerce.boolean(),
 });
 
@@ -199,10 +187,15 @@ export async function toggleBusinessOpen(
   return actionOk(null);
 }
 
-export async function updateBusinessSettings(
+/**
+ * Ajustes › Negocio: contacto, URL pública (slug) y envío.
+ * Es la única mutación que puede cambiar el slug (y por ende redirigir la URL
+ * del admin), así que concentra la validación de slug reservado / colisión.
+ */
+export async function updateBusinessProfile(
   input: unknown,
 ): Promise<ActionResult<{ slug: string }>> {
-  const parsed = UpdateInput.safeParse(input);
+  const parsed = ProfileInput.safeParse(input);
   if (!parsed.success) {
     return actionError(parsed.error.issues[0]?.message ?? "Datos inválidos.");
   }
@@ -214,6 +207,72 @@ export async function updateBusinessSettings(
     email,
     address,
     timezone,
+    delivery_fee_cents,
+    min_order_cents,
+    estimated_delivery_minutes,
+  } = parsed.data;
+
+  const guard = await assertCanManage(business_slug);
+  if (!guard.ok) return actionError(guard.error);
+
+  // Slug change validation — only run if it actually changed.
+  const service = createSupabaseServiceClient();
+  if (nextSlug !== business_slug) {
+    if (RESERVED_SLUGS.has(nextSlug)) {
+      return actionError(`"${nextSlug}" está reservado por la plataforma.`);
+    }
+    const { data: clash } = await service
+      .from("businesses")
+      .select("id")
+      .eq("slug", nextSlug)
+      .maybeSingle();
+    if (clash && clash.id !== guard.businessId) {
+      return actionError(`Ya existe otro negocio con el slug "${nextSlug}".`);
+    }
+  }
+
+  const { error } = await service
+    .from("businesses")
+    .update({
+      slug: nextSlug,
+      name,
+      phone,
+      email,
+      address,
+      timezone,
+      delivery_fee_cents,
+      min_order_cents,
+      estimated_delivery_minutes,
+    })
+    .eq("id", guard.businessId);
+
+  if (error) {
+    console.error("updateBusinessProfile", error);
+    return actionError("No pudimos guardar los cambios.");
+  }
+
+  // Contact/name live in the tenant layout too; revalidate. On slug change,
+  // invalidate both paths (old so cached pages 404 properly, new so it paints).
+  revalidatePath(`/${business_slug}`, "layout");
+  if (nextSlug !== business_slug) {
+    revalidatePath(`/${nextSlug}`, "layout");
+  }
+  return actionOk({ slug: nextSlug });
+}
+
+/**
+ * Ajustes › Apariencia: logos + cover (columnas) y paleta/tipografía/forma
+ * (JSONB `settings`, mergeado sobre lo actual para no pisar tokens no tocados).
+ */
+export async function updateBusinessBranding(
+  input: unknown,
+): Promise<ActionResult<null>> {
+  const parsed = BrandingInput.safeParse(input);
+  if (!parsed.success) {
+    return actionError(parsed.error.issues[0]?.message ?? "Datos inválidos.");
+  }
+  const {
+    business_slug,
     logo_url,
     cover_image_url,
     primary_color,
@@ -241,43 +300,10 @@ export async function updateBusinessSettings(
     logo_mark_url,
     logo_mono_url,
     favicon_url,
-    delivery_fee_cents,
-    min_order_cents,
-    estimated_delivery_minutes,
-    mp_access_token,
-    mp_public_key,
-    mp_webhook_secret,
-    mp_accepts_payments,
   } = parsed.data;
-
-  // Guardrail: can't enable MP without the 2 credentials needed to create
-  // preferences + reconcile payments on redirect. The webhook_secret is
-  // optional (only needed if you wire up the /api/mp/webhook endpoint in
-  // production for edge cases like closed tabs or refunds).
-  if (mp_accepts_payments && (!mp_access_token || !mp_public_key)) {
-    return actionError(
-      "Para activar Mercado Pago necesitás cargar Access Token y Public Key.",
-    );
-  }
 
   const guard = await assertCanManage(business_slug);
   if (!guard.ok) return actionError(guard.error);
-
-  // Slug change validation — only run if it actually changed.
-  const service0 = createSupabaseServiceClient();
-  if (nextSlug !== business_slug) {
-    if (RESERVED_SLUGS.has(nextSlug)) {
-      return actionError(`"${nextSlug}" está reservado por la plataforma.`);
-    }
-    const { data: clash } = await service0
-      .from("businesses")
-      .select("id")
-      .eq("slug", nextSlug)
-      .maybeSingle();
-    if (clash && clash.id !== guard.businessId) {
-      return actionError(`Ya existe otro negocio con el slug "${nextSlug}".`);
-    }
-  }
 
   const service = createSupabaseServiceClient();
   // Only keep optional branding keys that were provided; undefined values are
@@ -322,36 +348,70 @@ export async function updateBusinessSettings(
   const { error } = await service
     .from("businesses")
     .update({
-      slug: nextSlug,
-      name,
-      phone,
-      email,
-      address,
-      timezone,
       logo_url,
       cover_image_url,
-      delivery_fee_cents,
-      min_order_cents,
-      estimated_delivery_minutes,
-      mp_access_token,
-      mp_public_key,
-      mp_webhook_secret,
-      mp_accepts_payments,
       settings: nextSettings,
     })
     .eq("id", guard.businessId);
 
   if (error) {
-    console.error("updateBusinessSettings", error);
+    console.error("updateBusinessBranding", error);
     return actionError("No pudimos guardar los cambios.");
   }
 
-  // Invalidate everything branded by this tenant (theme + logo live in
-  // layout). If the slug changed, invalidate both the old path (so cached
-  // pages 404 properly) and the new one.
+  // Theme + logo live in the tenant layout — invalidate everything branded.
   revalidatePath(`/${business_slug}`, "layout");
-  if (nextSlug !== business_slug) {
-    revalidatePath(`/${nextSlug}`, "layout");
+  return actionOk(null);
+}
+
+/**
+ * Ajustes › Cobros: credenciales de Mercado Pago.
+ */
+export async function updateBusinessPayments(
+  input: unknown,
+): Promise<ActionResult<null>> {
+  const parsed = PaymentsInput.safeParse(input);
+  if (!parsed.success) {
+    return actionError(parsed.error.issues[0]?.message ?? "Datos inválidos.");
   }
-  return actionOk({ slug: nextSlug });
+  const {
+    business_slug,
+    mp_access_token,
+    mp_public_key,
+    mp_webhook_secret,
+    mp_accepts_payments,
+  } = parsed.data;
+
+  // Guardrail: can't enable MP without the 2 credentials needed to create
+  // preferences + reconcile payments on redirect. The webhook_secret is
+  // optional (only needed if you wire up the /api/mp/webhook endpoint in
+  // production for edge cases like closed tabs or refunds).
+  if (mp_accepts_payments && (!mp_access_token || !mp_public_key)) {
+    return actionError(
+      "Para activar Mercado Pago necesitás cargar Access Token y Public Key.",
+    );
+  }
+
+  const guard = await assertCanManage(business_slug);
+  if (!guard.ok) return actionError(guard.error);
+
+  const service = createSupabaseServiceClient();
+  const { error } = await service
+    .from("businesses")
+    .update({
+      mp_access_token,
+      mp_public_key,
+      mp_webhook_secret,
+      mp_accepts_payments,
+    })
+    .eq("id", guard.businessId);
+
+  if (error) {
+    console.error("updateBusinessPayments", error);
+    return actionError("No pudimos guardar los cambios.");
+  }
+
+  // MP config affects the public checkout — revalidate the tenant.
+  revalidatePath(`/${business_slug}`, "layout");
+  return actionOk(null);
 }
