@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { isValidTransition } from "./status";
+import { isOnlinePendingAdvance, isValidTransition } from "./status";
 
 describe("isValidTransition", () => {
   it("allows the happy delivery path", () => {
@@ -37,11 +37,38 @@ describe("isValidTransition", () => {
     expect(isValidTransition("confirmed", "ready")).toBe(false);
   });
 
-  it("allows auto-march: pending → preparing (skip confirmed)", () => {
+  it("allows pending → preparing (skip confirmed)", () => {
     expect(isValidTransition("pending", "preparing")).toBe(true);
   });
 
   it("allows salon skip-ready: preparing → delivered", () => {
     expect(isValidTransition("preparing", "delivered")).toBe(true);
+  });
+});
+
+// spec 047 — guard server: un pedido online en `pending` solo se manda a cocina
+// con "Confirmar" (routeOrderToCocina). updateOrderStatus lo rechaza para no
+// dejarlo en `preparing` sin comandas ni impresión (pérdida silenciosa).
+describe("isOnlinePendingAdvance", () => {
+  it("blocks advancing an online pending order (pickup/delivery)", () => {
+    expect(isOnlinePendingAdvance("pending", "pickup", "confirmed")).toBe(true);
+    expect(isOnlinePendingAdvance("pending", "pickup", "preparing")).toBe(true);
+    expect(isOnlinePendingAdvance("pending", "delivery", "confirmed")).toBe(true);
+  });
+
+  it("allows cancelling an online pending order", () => {
+    expect(isOnlinePendingAdvance("pending", "pickup", "cancelled")).toBe(false);
+    expect(isOnlinePendingAdvance("pending", "delivery", "cancelled")).toBe(false);
+  });
+
+  it("does not apply to dine-in (marcha por el mozo)", () => {
+    expect(isOnlinePendingAdvance("pending", "dine_in", "preparing")).toBe(false);
+    expect(isOnlinePendingAdvance("pending", "dine_in", "confirmed")).toBe(false);
+  });
+
+  it("does not apply once past pending", () => {
+    expect(isOnlinePendingAdvance("confirmed", "pickup", "preparing")).toBe(false);
+    expect(isOnlinePendingAdvance("preparing", "pickup", "ready")).toBe(false);
+    expect(isOnlinePendingAdvance("ready", "delivery", "on_the_way")).toBe(false);
   });
 });

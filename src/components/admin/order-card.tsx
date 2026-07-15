@@ -244,6 +244,7 @@ export function OrderCard({
         slug={slug}
         timezone={timezone}
         onAdvance={onAdvance}
+        onConfirm={onConfirm}
       />
     </>
   );

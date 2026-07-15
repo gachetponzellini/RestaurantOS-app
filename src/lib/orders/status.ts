@@ -26,3 +26,18 @@ export function isValidTransition(
 ): boolean {
   return FORWARD[from].includes(to);
 }
+
+/**
+ * spec 047 — un pedido online (no dine-in) en `pending` solo se manda a cocina
+ * con `confirmarPedido()` → `routeOrderToCocina` (crea comandas + dispara la
+ * impresión). Avanzarlo por `updateOrderStatus` (cambio de columna) lo dejaría
+ * en `preparing` SIN comandas ni impresión: pérdida silenciosa. Cancelar sí se
+ * permite. Devuelve true cuando el avance debe rechazarse por este motivo.
+ */
+export function isOnlinePendingAdvance(
+  from: OrderStatus,
+  deliveryType: string,
+  to: OrderStatus,
+): boolean {
+  return from === "pending" && deliveryType !== "dine_in" && to !== "cancelled";
+}

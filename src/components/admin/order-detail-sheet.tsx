@@ -103,6 +103,7 @@ export function OrderDetailSheet({
   slug,
   timezone,
   onAdvance,
+  onConfirm,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -110,6 +111,7 @@ export function OrderDetailSheet({
   slug: string;
   timezone: string;
   onAdvance: (order: AdminOrder, next: OrderStatus) => void;
+  onConfirm?: (order: AdminOrder) => void;
 }) {
   const [detail, setDetail] = useState<Detail | null>(null);
   const [loading, setLoading] = useState(false);
@@ -187,6 +189,13 @@ export function OrderDetailSheet({
 
   const isTerminal =
     order.status === "delivered" || order.status === "cancelled";
+
+  // spec 047 — un pedido online en `pending` se manda a cocina con "Confirmar"
+  // (onConfirm → confirmarPedido → routeOrderToCocina: crea comandas + imprime),
+  // igual que el botón inline de la card. Avanzarlo por `onAdvance`/updateOrderStatus
+  // lo dejaría en preparing sin comanda ni impresión.
+  const isPendingOnline =
+    order.status === "pending" && order.delivery_type !== "dine_in";
 
   const nextForDelivery =
     order.delivery_type === "pickup" && order.status === "ready"
@@ -437,17 +446,31 @@ export function OrderDetailSheet({
 
         {!isTerminal && !showCancel && (
           <footer className="border-border/60 flex flex-col gap-2 border-t px-5 py-4">
-            {advanceLabel && nextForDelivery && (
+            {isPendingOnline && onConfirm ? (
               <Button
                 size="lg"
                 className="w-full font-semibold"
                 onClick={() => {
-                  onAdvance(order, nextForDelivery);
+                  onConfirm(order);
                   onOpenChange(false);
                 }}
               >
-                {advanceLabel}
+                Confirmar
               </Button>
+            ) : (
+              advanceLabel &&
+              nextForDelivery && (
+                <Button
+                  size="lg"
+                  className="w-full font-semibold"
+                  onClick={() => {
+                    onAdvance(order, nextForDelivery);
+                    onOpenChange(false);
+                  }}
+                >
+                  {advanceLabel}
+                </Button>
+              )
             )}
             <Button
               variant="ghost"

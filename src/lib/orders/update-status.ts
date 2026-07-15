@@ -7,7 +7,12 @@ import { actionError, actionOk, type ActionResult } from "@/lib/actions";
 import { notifyDeliveryStatusChange } from "@/lib/notifications/delivery-notify";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
-import { ORDER_STATUSES, isValidTransition, type OrderStatus } from "./status";
+import {
+  ORDER_STATUSES,
+  isOnlinePendingAdvance,
+  isValidTransition,
+  type OrderStatus,
+} from "./status";
 
 const UpdateStatusInput = z.object({
   order_id: z.string().uuid(),
@@ -37,7 +42,7 @@ export async function updateOrderStatus(
 
   const { data: current, error: fetchErr } = await supabase
     .from("orders")
-    .select("id, status")
+    .select("id, status, delivery_type")
     .eq("id", order_id)
     .maybeSingle();
   if (fetchErr || !current) return actionError("Pedido no encontrado.");
@@ -47,6 +52,13 @@ export async function updateOrderStatus(
     return actionError(
       `No se puede pasar de "${from}" a "${next_status}".`,
     );
+  }
+
+  // spec 047 — un pedido online en `pending` solo se manda a cocina con
+  // "Confirmar" (confirmarPedido → routeOrderToCocina, que crea las comandas e
+  // imprime). Avanzarlo por acá lo dejaría en preparing sin comanda ni impresión.
+  if (isOnlinePendingAdvance(from, current.delivery_type, next_status)) {
+    return actionError('Usá "Confirmar" para mandar el pedido a cocina.');
   }
 
   const { error: updateErr } = await supabase

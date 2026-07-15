@@ -129,6 +129,16 @@ describe.skipIf(!seedReady)("persistOrder (integration)", () => {
       .select("status")
       .eq("order_id", result.data.order_id);
     expect(history!.map((h) => h.status)).toContain("pending");
+
+    // spec 047 — el efectivo remoto NO marcha al crearse: queda en `pending`
+    // (arriba), sin comandas y sin haber pasado por `preparing`. La marcha la
+    // hace el encargado a mano (confirmarPedido → routeOrderToCocina).
+    const { count: comandaCount } = await supabase
+      .from("comandas")
+      .select("id", { count: "exact", head: true })
+      .eq("order_id", result.data.order_id);
+    expect(comandaCount ?? 0).toBe(0);
+    expect(history!.map((h) => h.status)).not.toContain("preparing");
   });
 
   it("applies delivery fee for delivery orders", async () => {

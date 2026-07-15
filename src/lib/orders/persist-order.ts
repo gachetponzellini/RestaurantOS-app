@@ -11,8 +11,7 @@ import { createSupabaseServiceClient } from "@/lib/supabase/service";
 import type { BusinessHourSlot } from "@/lib/business-hours/schema";
 
 import { resolveComboUpcharge } from "./combo-pricing";
-import { routeOrderToCocina } from "./route-to-cocina";
-import { isScheduledForLater, validateScheduledOrder } from "./scheduled";
+import { validateScheduledOrder } from "./scheduled";
 import type { CreateOrderInput } from "./schema";
 
 export type CreateOrderResult = {
@@ -716,17 +715,13 @@ export async function persistOrder(
     },
   });
 
-  // Auto-march (spec-05): pedidos cash van directo a cocina al crearse.
-  // Pedidos MP esperan el webhook de pago aprobado.
-  // Diferido (spec 31): si es para más tarde, no marcha ahora aunque sea cash
-  // (defensa extra — el schema ya fuerza MP en los programados).
-  if (paymentMethod === "cash" && !isScheduledForLater(scheduledAtIso)) {
-    try {
-      await routeOrderToCocina(order.id, business.id);
-    } catch (e) {
-      console.error("auto-march failed (cash)", e);
-    }
-  }
+  // Auto-march (spec 047): ningún pedido marcha a cocina al crearse. Nace en
+  // `pending` (columna «Nuevos») con la notif `order.pending` de arriba.
+  // - Efectivo: lo marcha el encargado a mano (confirmarPedido → routeOrderToCocina).
+  // - MP: marcha el webhook cuando el pago pasa a `paid` (mp/webhook/route.ts).
+  // Antes (spec 05) el efectivo marchaba acá; se quitó para no imprimir ni
+  // cocinar pedidos remotos sin confirmar ni cobrar. Solo lo pagado imprime
+  // directo. Ver specs/047-auto-march-solo-si-pagado.
 
   return actionOk({
     order_id: order.id,
