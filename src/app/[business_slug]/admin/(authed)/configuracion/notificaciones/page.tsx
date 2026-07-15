@@ -1,12 +1,14 @@
 import { notFound } from "next/navigation";
 
-import { Bell, Mail, MessageCircle, Smartphone } from "lucide-react";
+import { Bell, Mail, MessageCircle, Send, Smartphone } from "lucide-react";
 
+import { CustomerChannelForm } from "@/components/admin/settings/customer-channel-form";
 import { DeliveryTemplatesForm } from "@/components/admin/settings/delivery-templates-form";
 import { NotificationPreferencesForm } from "@/components/admin/settings/notification-preferences-form";
 import { SettingsSection } from "@/components/admin/settings/settings-section";
 import { ShiftSummaryForm } from "@/components/admin/settings/shift-summary-form";
 import { WhatsappConfigForm } from "@/components/admin/settings/whatsapp-config-form";
+import { normalizeCustomerChannel } from "@/lib/notifications/customer-channel";
 import { getBusiness, getBusinessSettings } from "@/lib/tenant";
 
 // Ajustes › Notificaciones y mensajes: conexión de WhatsApp, avisos internos,
@@ -24,6 +26,19 @@ export default async function ConfiguracionNotificacionesPage({
 
   return (
     <>
+      <SettingsSection
+        icon={<Send className="size-5" />}
+        title="Canal de avisos al cliente"
+        description="Por dónde le llegan al cliente los avisos de su pedido y reservas: WhatsApp, email o ambos. El email usa la dirección del login con Google y no depende de la habilitación de Meta."
+      >
+        <CustomerChannelForm
+          slug={business_slug}
+          initial={normalizeCustomerChannel(
+            (business as { customer_channel?: string }).customer_channel,
+          )}
+        />
+      </SettingsSection>
+
       <SettingsSection
         icon={<Smartphone className="size-5" />}
         title="WhatsApp"

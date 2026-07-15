@@ -6,6 +6,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { actionError, actionOk, type ActionResult } from "@/lib/actions";
 import { createNotification } from "@/lib/notifications/create";
+import { notifyReservationConfirmed } from "@/lib/notifications/reservation-notify";
 import { canManageReservations } from "@/lib/permissions/can";
 import { isTableAvailableForReservation, pickTableExcluding } from "@/lib/reservations/assign-table";
 import {
@@ -48,6 +49,8 @@ type CreateContext = {
   businessId: string;
   timezone: string;
   userId: string | null;
+  /** Email del cliente logueado (auth), para el canal email (spec 45). */
+  customerEmail: string | null;
   date: string;
   slot: string;
   partySize: number;
@@ -143,6 +146,7 @@ async function createReservationCommon(
         user_id: ctx.userId,
         customer_name: ctx.customerName,
         customer_phone: ctx.customerPhone,
+        customer_email: ctx.customerEmail,
         party_size: ctx.partySize,
         starts_at: start.toISOString(),
         ends_at: end.toISOString(),
@@ -186,6 +190,7 @@ async function createReservationCommon(
         user_id: ctx.userId,
         customer_name: ctx.customerName,
         customer_phone: ctx.customerPhone,
+        customer_email: ctx.customerEmail,
         party_size: ctx.partySize,
         starts_at: start.toISOString(),
         ends_at: end.toISOString(),
@@ -240,6 +245,7 @@ export async function createReservationFromCustomer(
     businessId: business.id,
     timezone: business.timezone,
     userId: user.id,
+    customerEmail: user.email ?? null,
     date: parsed.data.date,
     slot: parsed.data.slot,
     partySize: parsed.data.party_size,
@@ -263,6 +269,8 @@ export async function createReservationFromCustomer(
         nombre: parsed.data.customer_name,
       },
     });
+    // spec 45 — acuse de reserva al cliente por el canal del negocio (best-effort).
+    await notifyReservationConfirmed({ reservationId: result.data.id });
   }
   return result;
 }
@@ -289,6 +297,7 @@ export async function createReservationFromAdmin(
     businessId: business.id,
     timezone: business.timezone,
     userId: null,
+    customerEmail: null,
     date: parsed.data.date,
     slot: parsed.data.slot,
     partySize: parsed.data.party_size,

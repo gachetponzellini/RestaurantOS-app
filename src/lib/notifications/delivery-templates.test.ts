@@ -3,7 +3,9 @@ import { describe, expect, it } from "vitest";
 import {
   DEFAULT_DELIVERY_TEMPLATES,
   isDeliveryNotifyStatus,
+  renderDeliveryBody,
   renderDeliveryMessage,
+  shouldNotifyDeliveryStatus,
 } from "./delivery-templates";
 
 const baseOrder = {
@@ -81,6 +83,49 @@ describe("renderDeliveryMessage", () => {
       now: new Date("2026-06-08T23:30:00Z"),
     });
     expect(msg).toBe("Listo a las 20:30");
+  });
+});
+
+describe("shouldNotifyDeliveryStatus (agnóstico de canal)", () => {
+  it("delivery notificable → true; dine_in → false", () => {
+    expect(shouldNotifyDeliveryStatus({ status: "ready", deliveryType: "delivery" })).toBe(true);
+    expect(shouldNotifyDeliveryStatus({ status: "ready", deliveryType: "dine_in" })).toBe(false);
+  });
+
+  it("'en camino' solo para delivery", () => {
+    expect(shouldNotifyDeliveryStatus({ status: "on_the_way", deliveryType: "pickup" })).toBe(false);
+    expect(shouldNotifyDeliveryStatus({ status: "on_the_way", deliveryType: "delivery" })).toBe(true);
+  });
+
+  it("estado no notificable → false", () => {
+    expect(shouldNotifyDeliveryStatus({ status: "pending", deliveryType: "delivery" })).toBe(false);
+  });
+});
+
+describe("renderDeliveryBody (sin exigir teléfono, para email)", () => {
+  it("renderiza aunque no haya teléfono (a diferencia de renderDeliveryMessage)", () => {
+    const body = renderDeliveryBody({
+      status: "ready",
+      deliveryType: "delivery",
+      customerName: "Ana",
+      orderNumber: 42,
+      businessName: "Golf",
+      timezone: "America/Argentina/Buenos_Aires",
+    });
+    expect(body).toContain("42");
+  });
+
+  it("plantilla apagada → null", () => {
+    expect(
+      renderDeliveryBody({
+        status: "ready",
+        deliveryType: "delivery",
+        customerName: "Ana",
+        orderNumber: 42,
+        businessName: "Golf",
+        template: { body: "x", enabled: false },
+      }),
+    ).toBeNull();
   });
 });
 

@@ -5,6 +5,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { actionError, actionOk, type ActionResult } from "@/lib/actions";
 import { requireMozoActionContext } from "@/lib/mozo/auth";
+import { notifyInvoiceIssued } from "@/lib/notifications/invoice-notify";
 import { canAnularFactura } from "@/lib/permissions/can";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 import { getBusiness } from "@/lib/tenant";
@@ -317,6 +318,11 @@ export async function emitInvoice(
     );
   }
 
+  // spec 45 — comprobante al cliente por email (best-effort, idempotente).
+  if (invoice.status === "authorized") {
+    await notifyInvoiceIssued({ invoiceId: invoice.id });
+  }
+
   return actionOk({ invoice });
 }
 
@@ -389,7 +395,13 @@ export async function pollInvoiceStatus(
     .select()
     .maybeSingle();
 
-  if (updated) return actionOk({ invoice: updated as Invoice });
+  if (updated) {
+    // spec 45 — al resolverse el CAE async, avisar el comprobante (idempotente).
+    if ((updated as Invoice).status === "authorized") {
+      await notifyInvoiceIssued({ invoiceId: (updated as Invoice).id });
+    }
+    return actionOk({ invoice: updated as Invoice });
+  }
 
   // Otra llamada ganó la carrera: devolver la fila fresca.
   const { data: fresh } = await service

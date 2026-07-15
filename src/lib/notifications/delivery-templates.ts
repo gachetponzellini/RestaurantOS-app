@@ -69,33 +69,40 @@ function fillPlaceholders(
     .replaceAll("{hora}", vars.hora);
 }
 
-export function renderDeliveryMessage(input: {
+/**
+ * ¿Corresponde notificar este cambio de estado al cliente? Reglas AGNÓSTICAS de
+ * canal (spec 45): estado notificable, salón (dine_in) no recibe, take-away sin
+ * "en camino". No mira el destinatario (teléfono/email) — eso lo chequea cada
+ * canal por separado.
+ */
+export function shouldNotifyDeliveryStatus(input: {
   status: string;
-  /** 'delivery' | 'pickup' | 'dine_in' */
+  deliveryType: string;
+}): input is { status: DeliveryNotifyStatus; deliveryType: string } {
+  if (!isDeliveryNotifyStatus(input.status)) return false;
+  if (input.deliveryType === "dine_in") return false;
+  if (input.status === "on_the_way" && input.deliveryType !== "delivery") {
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Texto del aviso de estado, SIN chequear el destinatario. Devuelve `null` si el
+ * estado no corresponde (supresión agnóstica) o la plantilla está apagada. Sirve
+ * para cualquier canal (WhatsApp o email).
+ */
+export function renderDeliveryBody(input: {
+  status: string;
   deliveryType: string;
   customerName: string;
-  customerPhone: string | null;
   orderNumber: number;
   businessName: string;
   template?: { body: string; enabled: boolean } | null;
   timezone?: string;
   now?: Date;
 }): string | null {
-  // Sólo los estados de delivery notificables.
-  if (!isDeliveryNotifyStatus(input.status)) return null;
-
-  // Pedido en salón: no es delivery, no recibe estos avisos.
-  if (input.deliveryType === "dine_in") return null;
-
-  // Take-away (retiro en local) no tiene "en camino".
-  if (input.status === "on_the_way" && input.deliveryType !== "delivery") {
-    return null;
-  }
-
-  // Sin teléfono válido del cliente no hay a quién mandarle.
-  if (!input.customerPhone || input.customerPhone.trim().length === 0) {
-    return null;
-  }
+  if (!shouldNotifyDeliveryStatus(input)) return null;
 
   // Plantilla explícitamente deshabilitada por el dueño → no se envía.
   if (input.template && !input.template.enabled) return null;
@@ -112,4 +119,23 @@ export function renderDeliveryMessage(input: {
     negocio: input.businessName,
     hora,
   });
+}
+
+export function renderDeliveryMessage(input: {
+  status: string;
+  /** 'delivery' | 'pickup' | 'dine_in' */
+  deliveryType: string;
+  customerName: string;
+  customerPhone: string | null;
+  orderNumber: number;
+  businessName: string;
+  template?: { body: string; enabled: boolean } | null;
+  timezone?: string;
+  now?: Date;
+}): string | null {
+  // Canal WhatsApp: sin teléfono válido no hay a quién mandarle.
+  if (!input.customerPhone || input.customerPhone.trim().length === 0) {
+    return null;
+  }
+  return renderDeliveryBody(input);
 }

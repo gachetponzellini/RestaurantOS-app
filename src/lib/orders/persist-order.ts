@@ -448,6 +448,9 @@ export async function persistOrder(
     customer_id: customer.id,
     customer_name: data.customer_name,
     customer_phone: data.customer_phone,
+    // Snapshot del email para el canal email (spec 45). El checkout con login
+    // Google lo trae; si no hay, el canal email simplemente se saltea.
+    customer_email: data.customer_email ?? null,
     delivery_type: data.delivery_type,
     delivery_address: data.delivery_address ?? null,
     delivery_notes: data.delivery_notes ?? null,

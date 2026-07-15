@@ -145,6 +145,7 @@ export type Database = {
           cover_image_url: string | null
           created_at: string
           currency: string
+          customer_channel: string
           delivery_fee_cents: number
           email: string | null
           estimated_delivery_minutes: number | null
@@ -178,6 +179,7 @@ export type Database = {
           cover_image_url?: string | null
           created_at?: string
           currency?: string
+          customer_channel?: string
           delivery_fee_cents?: number
           email?: string | null
           estimated_delivery_minutes?: number | null
@@ -211,6 +213,7 @@ export type Database = {
           cover_image_url?: string | null
           created_at?: string
           currency?: string
+          customer_channel?: string
           delivery_fee_cents?: number
           email?: string | null
           estimated_delivery_minutes?: number | null
@@ -1018,6 +1021,50 @@ export type Database = {
             columns: ["customer_id"]
             isOneToOne: false
             referencedRelation: "customers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      customer_message_log: {
+        Row: {
+          business_id: string
+          channel: string
+          created_at: string
+          event: string
+          id: string
+          reason: string | null
+          ref_id: string | null
+          sent_at: string | null
+          status: string
+        }
+        Insert: {
+          business_id: string
+          channel: string
+          created_at?: string
+          event: string
+          id?: string
+          reason?: string | null
+          ref_id?: string | null
+          sent_at?: string | null
+          status: string
+        }
+        Update: {
+          business_id?: string
+          channel?: string
+          created_at?: string
+          event?: string
+          id?: string
+          reason?: string | null
+          ref_id?: string | null
+          sent_at?: string | null
+          status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "customer_message_log_business_id_fkey"
+            columns: ["business_id"]
+            isOneToOne: false
+            referencedRelation: "businesses"
             referencedColumns: ["id"]
           },
         ]
@@ -2128,6 +2175,7 @@ export type Database = {
           cancelled_reason: string | null
           closed_at: string | null
           created_at: string
+          customer_email: string | null
           customer_id: string | null
           customer_name: string
           customer_phone: string
@@ -2166,6 +2214,7 @@ export type Database = {
           cancelled_reason?: string | null
           closed_at?: string | null
           created_at?: string
+          customer_email?: string | null
           customer_id?: string | null
           customer_name: string
           customer_phone: string
@@ -2204,6 +2253,7 @@ export type Database = {
           cancelled_reason?: string | null
           closed_at?: string | null
           created_at?: string
+          customer_email?: string | null
           customer_id?: string | null
           customer_name?: string
           customer_phone?: string
@@ -2733,7 +2783,9 @@ export type Database = {
         Row: {
           business_id: string
           client_confirmed_at: string | null
+          confirm_token: string
           created_at: string
+          customer_email: string | null
           customer_name: string
           customer_phone: string
           ends_at: string
@@ -2750,7 +2802,9 @@ export type Database = {
         Insert: {
           business_id: string
           client_confirmed_at?: string | null
+          confirm_token?: string
           created_at?: string
+          customer_email?: string | null
           customer_name: string
           customer_phone: string
           ends_at: string
@@ -2767,7 +2821,9 @@ export type Database = {
         Update: {
           business_id?: string
           client_confirmed_at?: string | null
+          confirm_token?: string
           created_at?: string
+          customer_email?: string | null
           customer_name?: string
           customer_phone?: string
           ends_at?: string
