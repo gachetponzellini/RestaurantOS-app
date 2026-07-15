@@ -21,7 +21,7 @@
 
 ## Fase C — Descarga self-service
 
-- [ ] **T009** _(MANUAL — pendiente)_ Crear el bucket privado `print-agent-releases` en el dashboard de Supabase y subir el `.exe` (path `print-agent.exe`). Hasta entonces la descarga entrega el `config.json` y avisa que el `.exe` no está publicado (se usa el de la carpeta).
+- [x] **T009** Bucket privado `print-agent-releases` creado (dashboard) + `print-agent.exe` subido a la raíz (54.9 MB, `application/x-msdownload`). Global file size limit del proyecto subido a 100 MB. Verificado por SQL: bucket privado + objeto presente → la signed URL de `getPrintAgentInstaller` ya resuelve.
 - [x] **T010** Implementado como **server action** `getPrintAgentInstaller(slug)` (no route handler — más simple y sin auth ad-hoc): gate admin → `ensurePrintAgentKey` lazy → devuelve `configJson` (con `serverUrl` del host actual + key) + `exeUrl` (signed URL best-effort, null si no hay binario). **FR-006, FR-007**. _(Test del action = diferido con T004.)_
 
 ## Fase D — UI card
