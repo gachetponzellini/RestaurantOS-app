@@ -339,30 +339,40 @@ function Cover({ businessName }: { businessName: string }) {
         <Ornament width={116} />
       </div>
 
-      <a
-        href="#carta-menu"
-        aria-label="Ver la carta"
+      {/* Wrapper flex para centrar horizontal: la animación del óvalo usa su
+          propio transform (translateY), así que el centrado NO puede depender
+          de translateX o se pisan. */}
+      <div
         style={{
           position: "absolute",
           bottom: 34,
-          left: "50%",
-          transform: "translateX(-50%)",
-          display: "inline-flex",
-          alignItems: "center",
+          left: 0,
+          right: 0,
+          display: "flex",
           justifyContent: "center",
-          width: 42,
-          height: 62,
-          borderRadius: 40,
-          border: "1.5px solid rgba(255,255,255,0.7)",
-          color: "#fff",
-          textDecoration: "none",
-          animation: "carta-bob 2.4s ease-in-out infinite",
         }}
       >
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
-          <path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-      </a>
+        <a
+          href="#carta-menu"
+          aria-label="Ver la carta"
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            justifyContent: "center",
+            width: 42,
+            height: 62,
+            borderRadius: 40,
+            border: "1.5px solid rgba(255,255,255,0.7)",
+            color: "#fff",
+            textDecoration: "none",
+            animation: "carta-bob 2.4s ease-in-out infinite",
+          }}
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
+            <path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </a>
+      </div>
     </header>
   );
 }
