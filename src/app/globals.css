@@ -227,3 +227,41 @@
   from { opacity: 0; }
   to { opacity: 1; }
 }
+
+/* ─────────────────────────────────────────────────────────────
+   Carta visual (QR mesa) — tema «Restaurant del Golf» (spec 44)
+   Estética de carta impresa elegante: título de sección en script
+   dorado + líder punteado dorado plato···precio + cover de lino.
+   Scoped a `.carta-theme` para no tocar el resto de rutas públicas.
+   Sustitutos: Angelic→Great Vibes (script), Gotham→Montserrat (sans).
+   ───────────────────────────────────────────────────────────── */
+.carta-theme {
+  --carta-gold: #b0956b;
+  --carta-gold-2: #c7a16c;
+  --carta-ink: #333333;
+  --carta-ink-2: #6b6b6b;
+  --carta-paper: #ffffff;
+  --carta-cover: #2b2f38;
+  --carta-script: var(--font-great-vibes), "Snell Roundhand", cursive;
+  --carta-sans: var(--font-montserrat), -apple-system, system-ui, sans-serif;
+  background: var(--carta-paper);
+  color: var(--carta-ink);
+  font-family: var(--carta-sans);
+}
+/* La carta impresa es clara por naturaleza; en dark mode: papel cálido oscuro. */
+.dark .carta-theme {
+  --carta-ink: #ece7df;
+  --carta-ink-2: #b0a794;
+  --carta-paper: #16181d;
+}
+.carta-theme .carta-script {
+  font-family: var(--carta-script);
+  font-weight: 400;
+  color: var(--carta-gold);
+  line-height: 1;
+}
+/* Cue de scroll del cover: baja suave y en loop. */
+@keyframes carta-bob {
+  0%, 100% { transform: translateY(0); opacity: 0.85; }
+  50% { transform: translateY(6px); opacity: 1; }
+}

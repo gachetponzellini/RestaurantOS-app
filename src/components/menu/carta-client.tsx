@@ -3,15 +3,25 @@
 import { useEffect, useMemo, useState } from "react";
 import Image from "next/image";
 
-import { ImageTile, StatusDot } from "@/components/delivery/primitives";
 import { computeIsOpen, type BusinessHour } from "@/lib/business-hours";
 import { formatCurrency } from "@/lib/currency";
 import type { MenuCategory, MenuDailyMenu, MenuProduct } from "@/lib/menu";
 
 // Carta SOLO VISUAL (read-only) para el QR de la mesa. El comensal mira y le
-// pide al mozo: sin carrito, sin "+", sin checkout. Estética de carta impresa
-// (serif de display, secciones, líder de puntos plato···precio). Reusa el mismo
-// catálogo (getMenu) que /menu.
+// pide al mozo: sin carrito, sin "+", sin checkout. Estética «Restaurant del
+// Golf» (spec 44): cover de lino + golfista + título de sección en script
+// dorado + líder de puntos dorado plato···precio, en scroll único, sin fotos.
+// Reusa el mismo catálogo (getMenu) que /menu.
+
+// Cover art de la carta. Hoy es la identidad de golf-house (único cliente de
+// carta pre-go-live), con sus assets reales en public/carta/golf/. Parametrizar
+// el arte por business (settings/storage) es el fast-follow de spec 44.
+const COVER = {
+  linen: "/carta/golf/linen.png",
+  figure: "/carta/golf/golfista.svg",
+  wordmark: "/carta/golf/wordmark-blanco.svg",
+  ornament: "/carta/golf/ornamento.svg",
+};
 
 type DisplayTab = {
   id: string;
@@ -47,127 +57,109 @@ function buildDisplayTabs(
   return tabs;
 }
 
-// Fila de plato con líder de puntos: nombre ······ precio, descripción debajo.
+// Flourish dorado reutilizable (ornamento real del cliente).
+function Ornament({ width = 104 }: { width?: number }) {
+  return (
+    <Image
+      src={COVER.ornament}
+      alt=""
+      aria-hidden
+      unoptimized
+      width={width}
+      height={Math.round((width * 22) / 107)}
+      style={{ opacity: 0.95 }}
+    />
+  );
+}
+
+// Fila de plato con líder de puntos dorado: nombre ······ precio, descripción
+// debajo. Sin foto (la carta impresa no las lleva).
 function ProductRow({ product }: { product: MenuProduct }) {
   const soldOut = !product.is_available;
   return (
-    <li
-      style={{
-        listStyle: "none",
-        display: "flex",
-        gap: 14,
-        padding: "13px 0",
-        borderBottom: "1px solid var(--hairline)",
-        opacity: soldOut ? 0.5 : 1,
-      }}
-    >
-      {product.image_url && (
-        <ImageTile
-          src={product.image_url}
-          alt={product.name}
-          tone="#D9C9A8"
-          radius={10}
-          sizes="72px"
-          style={{ width: 72, height: 72, flexShrink: 0 }}
+    <li style={{ listStyle: "none", padding: "11px 0", opacity: soldOut ? 0.5 : 1 }}>
+      {/* Nombre ······ Precio */}
+      <div style={{ display: "flex", alignItems: "flex-end" }}>
+        <span
+          style={{
+            fontWeight: 600,
+            fontSize: 15.5,
+            lineHeight: 1.25,
+            color: "var(--carta-ink)",
+            textDecoration: soldOut ? "line-through" : "none",
+          }}
+        >
+          {product.name}
+        </span>
+        <span
+          aria-hidden
+          style={{
+            flex: 1,
+            margin: "0 8px 5px",
+            borderBottom: "1px dotted var(--carta-gold)",
+            minWidth: 16,
+          }}
         />
-      )}
-      <div style={{ flex: 1, minWidth: 0 }}>
-        {/* Nombre ······ Precio */}
-        <div style={{ display: "flex", alignItems: "flex-end", gap: 0 }}>
-          <span
-            className="d-display"
-            style={{
-              fontSize: 18,
-              lineHeight: 1.2,
-              color: "var(--ink)",
-              textDecoration: soldOut ? "line-through" : "none",
-            }}
-          >
-            {product.name}
-          </span>
-          <span
-            aria-hidden
-            style={{
-              flex: 1,
-              margin: "0 8px 5px",
-              borderBottom: "1.5px dotted var(--hairline-2)",
-              minWidth: 16,
-            }}
-          />
-          <span
-            className="d-display"
-            style={{
-              fontSize: 16,
-              color: "var(--ink)",
-              whiteSpace: "nowrap",
-              flexShrink: 0,
-            }}
-          >
-            {formatCurrency(product.price_cents)}
-          </span>
-        </div>
-        {product.description && (
-          <div
-            style={{
-              fontSize: 13,
-              fontStyle: "italic",
-              color: "var(--ink-2)",
-              lineHeight: 1.4,
-              marginTop: 4,
-              maxWidth: "42ch",
-            }}
-          >
-            {product.description}
-          </div>
-        )}
-        {soldOut && (
-          <span
-            style={{
-              display: "inline-block",
-              marginTop: 6,
-              fontSize: 10.5,
-              padding: "2px 7px",
-              borderRadius: 4,
-              background: "var(--hairline)",
-              color: "var(--ink-2)",
-              fontWeight: 600,
-              textTransform: "uppercase",
-              letterSpacing: 0.4,
-            }}
-          >
-            Sin stock
-          </span>
-        )}
+        <span
+          style={{
+            fontWeight: 600,
+            fontSize: 15.5,
+            color: "var(--carta-ink)",
+            whiteSpace: "nowrap",
+            flexShrink: 0,
+          }}
+        >
+          {formatCurrency(product.price_cents)}
+        </span>
       </div>
+      {product.description && (
+        <div
+          style={{
+            fontSize: 13,
+            color: "var(--carta-ink-2)",
+            lineHeight: 1.4,
+            marginTop: 3,
+            maxWidth: "44ch",
+          }}
+        >
+          {product.description}
+        </div>
+      )}
+      {soldOut && (
+        <span
+          style={{
+            display: "inline-block",
+            marginTop: 6,
+            fontSize: 10.5,
+            padding: "2px 7px",
+            borderRadius: 4,
+            background: "color-mix(in srgb, var(--carta-gold) 16%, transparent)",
+            color: "var(--carta-ink-2)",
+            fontWeight: 600,
+            textTransform: "uppercase",
+            letterSpacing: 0.4,
+          }}
+        >
+          Sin stock
+        </span>
+      )}
     </li>
   );
 }
 
-// Cenefa: título de sección centrado con reglas finas a los lados.
+// Título de sección: script dorado centrado + ornamento debajo.
 function SectionTitle({ children }: { children: React.ReactNode }) {
   return (
-    <div
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: 14,
-        padding: "26px 0 12px",
-      }}
-    >
-      <span style={{ flex: 1, height: 1, background: "var(--hairline-2)" }} />
+    <div style={{ textAlign: "center", padding: "38px 0 8px" }}>
       <h2
-        className="d-display"
-        style={{
-          margin: 0,
-          fontSize: 24,
-          lineHeight: 1,
-          color: "var(--ink)",
-          textAlign: "center",
-        }}
+        className="carta-script"
+        style={{ margin: 0, fontSize: 46, lineHeight: 1 }}
       >
         {children}
       </h2>
-      <span style={{ flex: 1, height: 1, background: "var(--hairline-2)" }} />
+      <div style={{ marginTop: 6, display: "flex", justifyContent: "center" }}>
+        <Ornament width={104} />
+      </div>
     </div>
   );
 }
@@ -182,91 +174,63 @@ function DailyMenuCard({
   return (
     <div
       style={{
-        display: "flex",
-        gap: 14,
-        padding: 14,
-        marginTop: 10,
-        background: "var(--bg)",
-        borderRadius: 14,
-        border: "1px solid var(--accent-soft)",
-        boxShadow: "0 1px 3px rgba(0,0,0,0.05)",
+        padding: "14px 16px",
+        marginTop: 12,
+        borderRadius: 12,
+        border: "1px solid color-mix(in srgb, var(--carta-gold) 40%, transparent)",
+        background: "color-mix(in srgb, var(--carta-gold) 6%, transparent)",
       }}
     >
-      {menu.image_url && (
-        <ImageTile
-          src={menu.image_url}
-          alt={menu.name}
-          tone="#E9C88A"
-          radius={10}
-          sizes="96px"
-          style={{ width: 96, height: 96, flexShrink: 0 }}
-        />
-      )}
-      <div
-        style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column" }}
-      >
-        <div
-          style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 4 }}
-        >
+      <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+        <span style={{ fontSize: 16, fontWeight: 700, color: "var(--carta-ink)" }}>
+          {menu.name}
+        </span>
+        {isSuggestion && (
           <span
-            className="d-display"
-            style={{ fontSize: 19, color: "var(--ink)", lineHeight: 1.15 }}
-          >
-            {menu.name}
-          </span>
-          {isSuggestion && (
-            <span
-              style={{
-                fontSize: 10,
-                fontWeight: 700,
-                textTransform: "uppercase",
-                letterSpacing: 0.5,
-                color: "var(--accent)",
-                flexShrink: 0,
-              }}
-            >
-              Sugerencia
-            </span>
-          )}
-        </div>
-        {menu.description && (
-          <div
             style={{
-              fontSize: 13,
-              fontStyle: "italic",
-              color: "var(--ink-2)",
-              lineHeight: 1.4,
-              marginBottom: 8,
+              fontSize: 10,
+              fontWeight: 700,
+              textTransform: "uppercase",
+              letterSpacing: 0.5,
+              color: "var(--carta-gold)",
             }}
           >
-            {menu.description}
-          </div>
+            Sugerencia
+          </span>
         )}
+      </div>
+      {menu.description && (
+        <div
+          style={{
+            fontSize: 13,
+            color: "var(--carta-ink-2)",
+            lineHeight: 1.4,
+            marginTop: 4,
+          }}
+        >
+          {menu.description}
+        </div>
+      )}
+      {menu.components.length > 0 && (
         <ul
           style={{
             listStyle: "none",
-            margin: 0,
+            margin: "8px 0 0",
             padding: 0,
-            display: "flex",
-            flexDirection: "column",
-            gap: 2,
             fontSize: 13,
-            color: "var(--ink-2)",
-            lineHeight: 1.4,
+            color: "var(--carta-ink-2)",
+            lineHeight: 1.5,
           }}
         >
           {menu.components.map((c) => (
             <li key={c.id}>· {c.label}</li>
           ))}
         </ul>
-        <div style={{ marginTop: "auto", paddingTop: 10 }}>
-          <span
-            className="d-display"
-            style={{ fontSize: 18, color: "var(--ink)" }}
-          >
-            {formatCurrency(menu.price_cents)}
-          </span>
-        </div>
+      )}
+      <div
+        style={{ marginTop: 10, fontWeight: 700, color: "var(--carta-ink)", fontSize: 16 }}
+      >
+        {formatCurrency(menu.price_cents)}
       </div>
     </div>
   );
@@ -284,34 +248,17 @@ function DailyMenu({
   if (menus.length === 0) return null;
 
   return (
-    <div
-      style={{
-        padding: "18px 20px 22px",
-        background: "var(--accent-soft)",
-        borderBottom: "1px solid var(--hairline)",
-      }}
-    >
+    <section>
+      <SectionTitle>Menú del día</SectionTitle>
       <div
         style={{
+          textAlign: "center",
           fontSize: 11,
-          fontWeight: 700,
+          fontWeight: 600,
           textTransform: "uppercase",
-          letterSpacing: 1,
-          color: "var(--accent)",
-          textAlign: "center",
-        }}
-      >
-        Menú del día
-      </div>
-      <div
-        className="d-display"
-        style={{
-          marginTop: 4,
-          fontSize: 20,
-          lineHeight: 1.15,
-          color: "var(--ink)",
-          textAlign: "center",
-          textTransform: "capitalize",
+          letterSpacing: 2,
+          color: "var(--carta-gold)",
+          marginTop: -2,
         }}
       >
         {todayLabel}
@@ -322,15 +269,107 @@ function DailyMenu({
       {suggestions.map((m) => (
         <DailyMenuCard key={m.id} menu={m} isSuggestion />
       ))}
-    </div>
+    </section>
+  );
+}
+
+// Cover a pantalla: lino navy + golfista dorado + wordmark + RESTAURANTE +
+// ornamento + cue de scroll hacia el menú.
+function Cover({ businessName }: { businessName: string }) {
+  return (
+    <header
+      style={{
+        position: "relative",
+        minHeight: "100svh",
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+        textAlign: "center",
+        padding: "56px 24px",
+        color: "#fff",
+        backgroundColor: "var(--carta-cover)",
+        backgroundImage: `linear-gradient(rgba(20,23,28,0.45), rgba(20,23,28,0.6)), url(${COVER.linen})`,
+        backgroundSize: "cover",
+        backgroundPosition: "center",
+      }}
+    >
+      {/* Golfista + wordmark superpuesto (identidad del cliente) */}
+      <div style={{ position: "relative", width: 210, maxWidth: "72%", aspectRatio: "177 / 254" }}>
+        <Image
+          src={COVER.figure}
+          alt=""
+          aria-hidden
+          fill
+          priority
+          unoptimized
+          sizes="210px"
+          style={{ objectFit: "contain" }}
+        />
+        <Image
+          src={COVER.wordmark}
+          alt={businessName}
+          width={333}
+          height={88}
+          priority
+          unoptimized
+          style={{
+            position: "absolute",
+            left: "50%",
+            top: "54%",
+            transform: "translate(-50%, -50%)",
+            width: "150%",
+            maxWidth: "none",
+            height: "auto",
+          }}
+        />
+      </div>
+
+      <div
+        style={{
+          marginTop: 34,
+          fontWeight: 500,
+          letterSpacing: "0.3em",
+          fontSize: 16,
+        }}
+      >
+        RESTAURANTE
+      </div>
+      <div style={{ marginTop: 16 }}>
+        <Ornament width={116} />
+      </div>
+
+      <a
+        href="#carta-menu"
+        aria-label="Ver la carta"
+        style={{
+          position: "absolute",
+          bottom: 34,
+          left: "50%",
+          transform: "translateX(-50%)",
+          display: "inline-flex",
+          alignItems: "center",
+          justifyContent: "center",
+          width: 42,
+          height: 62,
+          borderRadius: 40,
+          border: "1.5px solid rgba(255,255,255,0.7)",
+          color: "#fff",
+          textDecoration: "none",
+          animation: "carta-bob 2.4s ease-in-out infinite",
+        }}
+      >
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
+          <path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </a>
+    </header>
   );
 }
 
 export function CartaClient({
   businessName,
   tagline,
-  coverImageUrl,
-  logoUrl,
   categories,
   beverageSuperCategoryId,
   todaysMenus,
@@ -355,7 +394,6 @@ export function CartaClient({
     () => buildDisplayTabs(categories, beverageSuperCategoryId),
     [categories, beverageSuperCategoryId],
   );
-  const [active, setActive] = useState(displayTabs[0]?.id ?? "");
   const [isOpen, setIsOpen] = useState(isOpenInitial);
   useEffect(() => {
     const tick = () => setIsOpen(computeIsOpen(hours, timezone));
@@ -363,240 +401,93 @@ export function CartaClient({
     return () => clearInterval(id);
   }, [hours, timezone]);
 
-  const activeTab = useMemo(
-    () => displayTabs.find((t) => t.id === active) ?? displayTabs[0],
-    [active, displayTabs],
-  );
+  // Cada tab se apila como sección; bebidas se despliega en sus subcategorías,
+  // cada una con su propio título script (Vinos Tintos, Cervezas, …).
+  const sections = useMemo(() => {
+    const out: { key: string; name: string; products: MenuProduct[] }[] = [];
+    for (const tab of displayTabs) {
+      if (tab.subcategories) {
+        for (const sub of tab.subcategories) {
+          out.push({ key: `${tab.id}:${sub.name}`, name: sub.name, products: sub.products });
+        }
+      } else {
+        out.push({ key: tab.id, name: tab.name, products: tab.products });
+      }
+    }
+    return out.filter((s) => s.products.length > 0);
+  }, [displayTabs]);
 
   return (
-    <div
-      style={{
-        maxWidth: 560,
-        margin: "0 auto",
-        minHeight: "100vh",
-        paddingBottom: 40,
-        background: "var(--bg)",
-      }}
-    >
-      {/* ── Masthead ── */}
-      {coverImageUrl ? (
-        <div style={{ position: "relative", height: 220 }}>
-          <Image
-            src={coverImageUrl}
-            alt={businessName}
-            fill
-            priority
-            sizes="560px"
-            style={{ objectFit: "cover" }}
-          />
-          <div
-            style={{
-              position: "absolute",
-              inset: 0,
-              background:
-                "linear-gradient(180deg, rgba(20,14,8,0.15) 0%, rgba(20,14,8,0.72) 100%)",
-            }}
-          />
-          <div
-            style={{
-              position: "absolute",
-              left: 0,
-              right: 0,
-              bottom: 0,
-              padding: "0 20px 20px",
-              textAlign: "center",
-            }}
-          >
-            {logoUrl && (
-              <div
-                style={{
-                  position: "relative",
-                  width: 56,
-                  height: 56,
-                  margin: "0 auto 8px",
-                  borderRadius: 999,
-                  overflow: "hidden",
-                  border: "2px solid rgba(255,255,255,0.85)",
-                  boxShadow: "0 2px 10px rgba(0,0,0,0.3)",
-                }}
-              >
-                <Image
-                  src={logoUrl}
-                  alt={businessName}
-                  fill
-                  sizes="56px"
-                  style={{ objectFit: "cover" }}
-                />
-              </div>
-            )}
-            <div
-              className="d-display"
-              style={{
-                fontSize: 38,
-                lineHeight: 1.05,
-                color: "#fff",
-                textShadow: "0 1px 12px rgba(0,0,0,0.4)",
-              }}
-            >
-              {businessName}
-            </div>
-          </div>
-        </div>
-      ) : (
-        <div style={{ padding: "36px 20px 20px", textAlign: "center" }}>
-          {logoUrl && (
-            <div
-              style={{
-                position: "relative",
-                width: 64,
-                height: 64,
-                margin: "0 auto 12px",
-                borderRadius: 999,
-                overflow: "hidden",
-                border: "1px solid var(--hairline)",
-                boxShadow: "0 1px 4px rgba(0,0,0,0.06)",
-              }}
-            >
-              <Image
-                src={logoUrl}
-                alt={businessName}
-                fill
-                sizes="64px"
-                style={{ objectFit: "cover" }}
-              />
-            </div>
-          )}
-          <div
-            className="d-display"
-            style={{ fontSize: 40, lineHeight: 1.05, color: "var(--ink)" }}
-          >
-            {businessName}
-          </div>
-        </div>
-      )}
+    <div className="carta-theme" style={{ minHeight: "100vh" }}>
+      <Cover businessName={businessName} />
 
-      {/* ── Sub-masthead: tagline + estado ── */}
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          gap: 10,
-          flexWrap: "wrap",
-          padding: "14px 20px",
-          borderBottom: "1px solid var(--hairline)",
-        }}
+      <main
+        id="carta-menu"
+        style={{ maxWidth: 600, margin: "0 auto", padding: "8px 26px 100px" }}
       >
-        {tagline && (
-          <span
-            style={{
-              fontSize: 13,
-              fontStyle: "italic",
-              color: "var(--ink-2)",
-              textAlign: "center",
-            }}
-          >
-            {tagline}
-          </span>
-        )}
-        {tagline && <span style={{ color: "var(--hairline-2)" }}>·</span>}
-        <StatusDot status={isOpen ? "open" : "closed"} />
-      </div>
-
-      {/* ── Menú del día ── */}
-      <DailyMenu menus={todaysMenus} todayLabel={todayLabel} />
-
-      {/* ── Nav de categorías (sticky) ── */}
-      {displayTabs.length > 0 && (
+        {/* Tagline + estado, discreto */}
         <div
           style={{
-            position: "sticky",
-            top: 0,
-            zIndex: 4,
-            background: "color-mix(in oklch, var(--bg) 92%, transparent)",
-            backdropFilter: "saturate(180%) blur(8px)",
-            WebkitBackdropFilter: "saturate(180%) blur(8px)",
-            borderBottom: "1px solid var(--hairline)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 8,
+            flexWrap: "wrap",
+            padding: "18px 0 4px",
+            fontSize: 12.5,
+            color: "var(--carta-ink-2)",
           }}
         >
-          <div
-            className="no-scrollbar"
+          {tagline && <span style={{ fontStyle: "italic" }}>{tagline}</span>}
+          {tagline && <span>·</span>}
+          <span
             style={{
-              display: "flex",
-              gap: 22,
-              overflowX: "auto",
-              padding: "0 20px",
-              scrollbarWidth: "none",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+              fontWeight: 600,
+              color: isOpen ? "var(--carta-gold)" : "var(--carta-ink-2)",
             }}
           >
-            {displayTabs.map((t) => {
-              const isActive = t.id === active;
-              return (
-                <button
-                  key={t.id}
-                  onClick={() => setActive(t.id)}
-                  style={{
-                    flexShrink: 0,
-                    padding: "13px 0 11px",
-                    background: "none",
-                    border: "none",
-                    borderBottom: isActive
-                      ? "2px solid var(--accent)"
-                      : "2px solid transparent",
-                    color: isActive ? "var(--ink)" : "var(--ink-3)",
-                    fontSize: 13.5,
-                    fontWeight: isActive ? 600 : 500,
-                    letterSpacing: 0.2,
-                    cursor: "pointer",
-                    marginBottom: -1,
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  {t.name}
-                </button>
-              );
-            })}
-          </div>
+            <span
+              style={{
+                width: 7,
+                height: 7,
+                borderRadius: 999,
+                background: isOpen ? "var(--carta-gold)" : "var(--carta-ink-2)",
+              }}
+            />
+            {isOpen ? "Abierto ahora" : "Cerrado"}
+          </span>
         </div>
-      )}
 
-      {/* ── Platos de la categoría activa ── */}
-      <div style={{ padding: "0 20px" }}>
-        {activeTab?.subcategories ? (
-          activeTab.subcategories.map((sub) => (
-            <div key={sub.name}>
-              <SectionTitle>{sub.name}</SectionTitle>
-              <ul style={{ margin: 0, padding: 0 }}>
-                {sub.products.map((p) => (
-                  <ProductRow key={p.id} product={p} />
-                ))}
-              </ul>
-            </div>
-          ))
-        ) : (
-          <>
-            {activeTab && <SectionTitle>{activeTab.name}</SectionTitle>}
+        <DailyMenu menus={todaysMenus} todayLabel={todayLabel} />
+
+        {sections.map((s) => (
+          <section key={s.key}>
+            <SectionTitle>{s.name}</SectionTitle>
             <ul style={{ margin: 0, padding: 0 }}>
-              {activeTab?.products.map((p) => (
+              {s.products.map((p) => (
                 <ProductRow key={p.id} product={p} />
               ))}
             </ul>
-          </>
-        )}
-        {activeTab && activeTab.products.length === 0 && (
+          </section>
+        ))}
+
+        {sections.length === 0 && (
           <div
             style={{
-              padding: "48px 16px",
+              padding: "64px 16px",
               textAlign: "center",
-              color: "var(--ink-3)",
+              color: "var(--carta-ink-2)",
               fontSize: 14,
               fontStyle: "italic",
             }}
           >
-            Sin productos en esta categoría.
+            Sin productos para mostrar.
           </div>
         )}
-      </div>
+      </main>
     </div>
   );
 }

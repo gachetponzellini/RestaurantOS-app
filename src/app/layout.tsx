@@ -7,11 +7,13 @@ import {
   Fraunces,
   Geist,
   Geist_Mono,
+  Great_Vibes,
   Instrument_Serif,
   Inter,
   Libre_Baskerville,
   Lora,
   Manrope,
+  Montserrat,
   Outfit,
   Playfair_Display,
   Poppins,
@@ -71,6 +73,17 @@ const libreBaskerville = Libre_Baskerville({
   subsets: ["latin"],
   weight: ["400", "700"],
 });
+// ── Carta theme (spec 44) — sustitutos de Angelic (script) y Gotham (sans) ──
+const greatVibes = Great_Vibes({
+  variable: "--font-great-vibes",
+  subsets: ["latin"],
+  weight: "400",
+});
+const montserrat = Montserrat({
+  variable: "--font-montserrat",
+  subsets: ["latin"],
+  weight: ["400", "500", "600", "700"],
+});
 
 export const metadata: Metadata = {
   title: "Pedidos",
@@ -100,6 +113,8 @@ export default function RootLayout({
     fraunces.variable,
     cormorant.variable,
     libreBaskerville.variable,
+    greatVibes.variable,
+    montserrat.variable,
   ].join(" ");
 
   return (
