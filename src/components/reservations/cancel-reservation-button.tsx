@@ -82,20 +82,20 @@ export function CancelReservationButton({ id }: { id: string }) {
             onClick={(e) => e.stopPropagation()}
             style={{
               width: "100%",
-              maxWidth: 360,
+              maxWidth: 320,
               background: "var(--bg)",
-              border: "1px solid var(--hairline)",
-              borderRadius: 16,
-              padding: 20,
-              boxShadow: "0 12px 40px rgba(0,0,0,0.18)",
+              borderRadius: 20,
+              padding: "24px 20px 20px",
+              boxShadow: "0 20px 60px rgba(0,0,0,0.28)",
+              textAlign: "center",
             }}
           >
             <h2
               style={{
                 margin: 0,
-                fontSize: 17,
+                fontSize: 18,
                 fontWeight: 700,
-                letterSpacing: -0.2,
+                letterSpacing: -0.3,
                 color: "var(--ink)",
               }}
             >
@@ -103,7 +103,7 @@ export function CancelReservationButton({ id }: { id: string }) {
             </h2>
             <p
               style={{
-                margin: "8px 0 18px",
+                margin: "8px 0 20px",
                 fontSize: 14,
                 lineHeight: 1.45,
                 color: "var(--ink-3)",
@@ -111,19 +111,19 @@ export function CancelReservationButton({ id }: { id: string }) {
             >
               Esta acción no se puede deshacer.
             </p>
-            <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+            <div style={{ display: "flex", gap: 10 }}>
               <button
                 type="button"
                 autoFocus
                 onClick={() => setOpen(false)}
                 disabled={pending}
                 style={{
-                  height: 44,
-                  padding: "0 16px",
+                  flex: 1,
+                  height: 46,
                   borderRadius: 12,
                   background: "var(--bg)",
-                  color: "var(--ink-2)",
-                  fontSize: 14,
+                  color: "var(--ink)",
+                  fontSize: 15,
                   fontWeight: 600,
                   border: "1px solid var(--hairline)",
                   cursor: pending ? "default" : "pointer",
@@ -137,12 +137,12 @@ export function CancelReservationButton({ id }: { id: string }) {
                 onClick={confirmCancel}
                 disabled={pending}
                 style={{
-                  height: 44,
-                  padding: "0 16px",
+                  flex: 1,
+                  height: 46,
                   borderRadius: 12,
                   background: "#dc2626",
                   color: "#fff",
-                  fontSize: 14,
+                  fontSize: 15,
                   fontWeight: 600,
                   border: "1px solid #dc2626",
                   cursor: pending ? "default" : "pointer",
