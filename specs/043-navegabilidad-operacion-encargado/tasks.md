@@ -28,7 +28,7 @@
 
 - [x] **T011** `AGENTS.md` — convención documentada (§Componentes): modales = `Dialog`/`Sheet` compartido; forms = `<form onSubmit>` + `type=submit`; destructivas sin Enter→submit. **FR-011**.
 - [x] **T012** `pnpm typecheck` (0 errores) + `pnpm test` (625+ pass; 2 timeouts flaky de cloud confirmados verdes con timeout holgado) + `pnpm build` (OK). **SC-005**.
-- [ ] **T013** Verify en vivo con rol real (encargado): (a) cursor pointer en admin + mozo + carta, disabled sin pointer; (b) Esc cierra los 6 modales + full-screen, reabrir = limpio; (c) Enter envía cada modal-form con validación, sin doble-submit, textarea = salto de línea. **SC-001..005**.
-- [ ] **T014** Cierre: comentar issue #60 (hecho, abierta pendiente T013); commit + bump submódulo (pendiente OK de Juan).
+- [x] **T013** Verify en vivo con rol real (encargado): (a) cursor pointer en admin + mozo + carta, disabled sin pointer; (b) Esc cierra los 6 modales + full-screen, reabrir = limpio; (c) Enter envía cada modal-form con validación, sin doble-submit, textarea = salto de línea. **SC-001..005**. ✅ Validado por Juan (2026-07-14).
+- [x] **T014** Cierre: issue #60 **cerrado** (2026-07-14, tras verify); commit + bump submódulo hechos.
 
 > **T013** requiere sesión con rol real (encargado) + datos reales → verificación manual de Juan antes de cerrar el issue.

@@ -104,8 +104,9 @@ export async function POST(
 
   // 6. Ack rápido + turno en background (presupuesto <10s de Gupshup). Si el
   //    turno falla, es best-effort: Gupshup ya recibió el 200 y no reintenta.
-  //    NOTA (handoff, spec 32): cuando exista `chatbot_conversations.agent_enabled`,
-  //    acá se persiste el entrante y NO se invoca el LLM si el agente está OFF.
+  //    Handoff (spec 32): `runChatbot` chequea `chatbot_conversations.agent_enabled`
+  //    y, si el staff apagó el agente, persiste el entrante y devuelve
+  //    `assistantMessage` vacío → no se manda respuesta (el `.trim()` de abajo).
   const businessSlug = business.slug;
   const businessName = business.name ?? businessSlug;
   const contactIdentifier = normalizePhone(inbound.phone);

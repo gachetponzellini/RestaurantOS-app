@@ -173,6 +173,21 @@ export async function emitInvoice(
     return actionError("Para factura/NC tipo A se requiere CUIT del receptor.");
   }
 
+  // R-C6 (spec 36C · DIFERIDO): un comprobante B con CUIT de receptor exigiría
+  // declarar su condición de IVA real (Monotributo/Exento/RI), que hoy NO se
+  // captura — `condicionIvaFor` derivaría Consumidor Final (5), inconsistente
+  // con un receptor identificado por CUIT (doc_tipo 80) y una mala declaración
+  // ante ARCA. Ningún path de UI produce este combo hoy (el mozo solo captura
+  // CUIT en tipo A); lo rechazamos explícitamente para que nadie lo cablee sin
+  // capturar la condición y convierta el gap latente en un defecto fiscal en
+  // vivo. Al implementar R-C6 (captura de la condición del receptor), quitar
+  // esta guarda. Ver wiki/specs/36-.../tasks.md (R-C6) e issue #51.
+  if ((tipo === "factura_b" || tipo === "nota_credito_b") && input.cuitReceptor) {
+    return actionError(
+      "Comprobante B con CUIT todavía no está soportado (falta capturar la condición de IVA del receptor).",
+    );
+  }
+
   // Guard (spec 09): la orden ya tiene una factura autorizada VIGENTE de este
   // tipo. Sólo bloquea `status = 'authorized'`: si la factura previa quedó
   // `cancelled` (anulada con su nota de crédito), la orden se puede re-facturar.

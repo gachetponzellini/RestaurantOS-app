@@ -21,7 +21,7 @@
 
 ## 5. Verify
 - [x] **T010** `pnpm typecheck` limpio + `pnpm test` (comandas: 12 integración + 25 unit) en verde. **SC-004**.
-- [ ] **T011** Verify en vivo con rol real (mozo): doble-tap real de "Enviar" no duplica la comanda en cocina. **SC-005**. *(manual — requiere sesión mozo + datos reales)*
+- [x] **T011** Verify en vivo con rol real (mozo): doble-tap real de "Enviar" no duplica la comanda en cocina. **SC-005**. ✅ Validado por Juan (2026-07-14) → issue #59 cerrado.
 - [ ] **T012** Cierre: actualizar feature [comandas](../../../../wiki/features/comandas.md) si aplica + `wiki/log.md` + comentar/cerrar #59 + bump submódulo.
 
 ## Notas

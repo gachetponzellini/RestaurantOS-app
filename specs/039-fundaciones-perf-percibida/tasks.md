@@ -31,7 +31,7 @@ Orden por dependencia. `[P]` = paralelizable.
 ## Fase E — Verify gate
 
 - [x] **T013** `pnpm typecheck` + `pnpm test` en verde. **SC-005**.
-- [ ] **T014** Verify en vivo con rol real (mozo + encargado): skeletons en navegación, Salón desbloqueado, pill sin "0" falso, sin-permiso redirige sin exponer contenido. **SC-001/002/003/005/006**.
+- [x] **T014** Verify en vivo con rol real (mozo + encargado): skeletons en navegación, Salón desbloqueado, pill sin "0" falso, sin-permiso redirige sin exponer contenido. **SC-001/002/003/005/006**. ✅ Validado por Juan (2026-07-14) → issue #56 cerrado.
 - [x] **T015** Cierre de loop: features page + `wiki/log.md`, comentar + close #56, bump submódulo.
 
 > **T014** requiere `pnpm dev` + rol real (mozo/encargado) — se deja para verificación manual de Juan (no ejecutable headless con datos reales sin sesión).

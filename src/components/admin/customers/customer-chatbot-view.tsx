@@ -117,6 +117,12 @@ export function CustomerChatbotView({
         throw new Error(body.error ?? `HTTP ${res.status}`);
       }
       const data: { assistantMessage: string } = await res.json();
+      if (!data.assistantMessage?.trim()) {
+        // Respuesta vacía: el agente puede estar en handoff (spec 32, lo atiende
+        // una persona) o el bot no devolvió nada. No pintamos una burbuja vacía.
+        toast.info("Sin respuesta del bot (puede estar en handoff — lo atiende una persona).");
+        return;
+      }
       setMessages((prev) => [
         ...prev,
         {

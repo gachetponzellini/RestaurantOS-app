@@ -245,6 +245,23 @@ export async function runChatbot(
     input.businessId,
     contactId,
   );
+
+  // Handoff humano (spec 32): si el staff apagó el agente para ESTA conversación
+  // desde la bandeja, el bot no responde. Persistimos el mensaje entrante (para
+  // que aparezca en la bandeja y el humano lo vea) y NO invocamos al LLM.
+  // Fail-CLOSED: ante error de lectura NO respondemos (un turno no enviado es
+  // recuperable; un WhatsApp ya enviado no). La invariante dura es "no se pisan".
+  const agentEnabled = await loadConversationAgentEnabled(
+    service,
+    input.businessId,
+    conversationId,
+  );
+  if (!agentEnabled) {
+    await insertMessage(service, conversationId, "user", input.userMessage);
+    await touchConversation(service, conversationId);
+    return { conversationId, assistantMessage: "", toolTrace: [] };
+  }
+
   const history = await fetchHistory(service, conversationId);
   const { enabledTools, toolOverrides } = await loadToolConfig(
     service,
@@ -271,6 +288,22 @@ export async function runChatbot(
     history,
     userMessage: input.userMessage,
   });
+
+  // Re-check de handoff (TOCTOU, spec 32): el turno del LLM dura varios segundos
+  // y el staff pudo tomar la conversación en ese lapso (tomarla al ver el
+  // entrante ES el flujo de la feature). Si el agente se apagó durante el turno,
+  // descartamos la respuesta del bot para no pisar al humano — el entrante ya
+  // quedó persistido arriba. Cierra casi toda la ventana (queda solo el gap
+  // sub-ms hasta el sendWhatsapp del webhook).
+  const stillEnabled = await loadConversationAgentEnabled(
+    service,
+    input.businessId,
+    conversationId,
+  );
+  if (!stillEnabled) {
+    await touchConversation(service, conversationId);
+    return { conversationId, assistantMessage: "", toolTrace };
+  }
 
   await insertMessage(service, conversationId, "assistant", assistantMessage);
   await touchConversation(service, conversationId);
@@ -374,6 +407,45 @@ async function getOrOpenConversation(
   }
   throw new Error(
     `Failed to open conversation: ${error?.message ?? "unknown"}`,
+  );
+}
+
+/**
+ * Decide el gate de handoff (spec 32) a partir del resultado de la lectura.
+ * Pura y testeable sin DB. **Fail-CLOSED ante error**: si no podemos confirmar
+ * el estado, el bot NO responde (un turno no enviado es recuperable; un WhatsApp
+ * ya enviado no; la invariante dura es "bot y humano no se pisan"). Fila ausente
+ * SIN error = conversación nueva legítima → el bot responde (la columna es
+ * NOT NULL DEFAULT true).
+ */
+export function decideAgentEnabled(
+  row: { agent_enabled: boolean } | null,
+  error: unknown,
+): boolean {
+  if (error) return false;
+  if (!row) return true;
+  return row.agent_enabled;
+}
+
+/**
+ * Lee el flag de handoff de la conversación (spec 32). `false` = el staff está
+ * atendiendo y el bot no debe responder. Scopeado por `business_id` (defensa
+ * cross-tenant, en línea con `loadConversationScoped` del lado admin).
+ */
+async function loadConversationAgentEnabled(
+  service: Service,
+  businessId: string,
+  conversationId: string,
+): Promise<boolean> {
+  const { data, error } = await service
+    .from("chatbot_conversations")
+    .select("agent_enabled")
+    .eq("id", conversationId)
+    .eq("business_id", businessId)
+    .maybeSingle();
+  return decideAgentEnabled(
+    data as { agent_enabled: boolean } | null,
+    error,
   );
 }
 

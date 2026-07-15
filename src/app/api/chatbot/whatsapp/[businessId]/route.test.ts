@@ -110,6 +110,21 @@ describe("POST /api/chatbot/whatsapp/[businessId]", () => {
     expect(sendWhatsapp).toHaveBeenCalledOnce();
   });
 
+  it("agente en handoff (assistantMessage vacío) → 200 y NO manda WhatsApp", async () => {
+    // runChatbot devuelve "" cuando el staff apagó el agente para la conversación
+    // (spec 32): el webhook no debe mandar un WhatsApp vacío por encima del humano.
+    runChatbot.mockResolvedValueOnce({
+      conversationId: "c1",
+      assistantMessage: "",
+      toolTrace: [],
+    });
+    const res = await POST(makeReq(textEnvelope()), ctx);
+    expect(res.status).toBe(200);
+    await runAfters();
+    expect(runChatbot).toHaveBeenCalledOnce();
+    expect(sendWhatsapp).not.toHaveBeenCalled();
+  });
+
   it("token inválido → 401 y no corre el bot", async () => {
     const res = await POST(makeReq(textEnvelope(), "wrong"), ctx);
     expect(res.status).toBe(401);

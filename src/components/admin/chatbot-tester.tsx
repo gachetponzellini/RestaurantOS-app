@@ -140,6 +140,12 @@ export function ChatbotTester({
         toolTrace?: ToolTraceEntry[];
       } = await res.json();
       setConversationId(data.conversationId);
+      if (!data.assistantMessage?.trim()) {
+        // Respuesta vacía: agente en handoff (spec 32) o el bot no devolvió nada.
+        // No agregamos una burbuja vacía.
+        toast.info("Sin respuesta del bot (puede estar en handoff — lo atiende una persona).");
+        return;
+      }
       setMessages((prev) => [
         ...prev,
         {
