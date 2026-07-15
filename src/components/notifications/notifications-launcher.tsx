@@ -10,15 +10,14 @@ import {
 import { NotificationsToastHost } from "@/components/notifications/notifications-toast-host";
 import { useNotificationsRealtime } from "@/components/notifications/use-notifications-realtime";
 import { markAllRead, markRead } from "@/lib/notifications/actions";
-import { isMockNotificationId } from "@/lib/notifications/mocks";
 import type { Notification } from "@/lib/notifications/queries";
 
 /**
  * Mount global: campana + drawer + toasts iOS.
  *
  * El hook `useNotificationsRealtime` mantiene la lista en cliente, dispara
- * toasts ante INSERTs y expone helpers para marcar leído localmente
- * (necesarios para los mocks de fallback, que no existen en DB).
+ * toasts ante INSERTs y expone un helper para marcar leído localmente
+ * (optimistic UI; el server reconcilia vía revalidatePath).
  */
 export function NotificationsLauncher({
   notifications: initialNotifications,
@@ -44,36 +43,25 @@ export function NotificationsLauncher({
   const router = useRouter();
   const [open, setOpen] = useState(false);
 
-  const {
-    notifications,
-    unreadCount,
-    markReadLocally,
-    markAllReadLocally,
-  } = useNotificationsRealtime({
-    initialNotifications,
-    initialUnreadCount,
-    businessId,
-    userId,
-    role,
-  });
+  const { notifications, unreadCount, markAllReadLocally } =
+    useNotificationsRealtime({
+      initialNotifications,
+      initialUnreadCount,
+      businessId,
+      userId,
+      role,
+    });
 
   const markOne = async (n: Notification) => {
     if (n.read_at) return;
-    if (isMockNotificationId(n.id)) {
-      markReadLocally(n.id);
-      return;
-    }
     // Server: revalidatePath fuerza al hook a re-syncear desde el snapshot.
     await markRead(n.id, businessSlug);
   };
 
   const markAll = async () => {
-    // Optimistic local update (cubre mocks y mejora UX para reales).
+    // Optimistic local update; el server reconcilia vía revalidatePath.
     markAllReadLocally();
-    const hasReal = notifications.some((n) => !isMockNotificationId(n.id));
-    if (hasReal) {
-      await markAllRead(businessSlug);
-    }
+    await markAllRead(businessSlug);
   };
 
   const handleItemClick = async (n: Notification) => {

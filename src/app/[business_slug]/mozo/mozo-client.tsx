@@ -34,7 +34,6 @@ import { useTablesRealtime } from "@/lib/mozo/use-tables-realtime";
 import { NotificationsToastHost } from "@/components/notifications/notifications-toast-host";
 import { useNotificationsRealtime } from "@/components/notifications/use-notifications-realtime";
 import { markAllRead, markRead } from "@/lib/notifications/actions";
-import { isMockNotificationId } from "@/lib/notifications/mocks";
 import type { Notification } from "@/lib/notifications/queries";
 import {
   NOTI_TONE_STYLES,
@@ -378,7 +377,6 @@ export function MozoClient({
       // server reconcilia con revalidatePath; si falla, el realtime/refresh
       // vuelve a traer el estado real.
       markReadLocally(n.id);
-      if (isMockNotificationId(n.id)) return;
       const r = await markRead(n.id, businessSlug);
       if (r.ok) router.refresh();
     },
@@ -387,11 +385,9 @@ export function MozoClient({
 
   const handleMarkAllRead = useCallback(async () => {
     markAllReadLocally();
-    const hasReal = liveNotifications.some((n) => !isMockNotificationId(n.id));
-    if (!hasReal) return;
     const r = await markAllRead(businessSlug);
     if (r.ok) router.refresh();
-  }, [businessSlug, router, liveNotifications, markAllReadLocally]);
+  }, [businessSlug, router, markAllReadLocally]);
 
   const handleToastClick = useCallback((n: Notification) => {
     // Tocar el toast lleva al tab Avisos. La nav del mozo gestiona la

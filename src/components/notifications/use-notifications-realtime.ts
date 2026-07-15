@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { dispatchNotificationToast } from "@/components/notifications/notifications-toast-host";
-import { MOCK_NOTIFICATIONS } from "@/lib/notifications/mocks";
 import type { Notification } from "@/lib/notifications/queries";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 
@@ -29,27 +28,18 @@ export function useNotificationsRealtime({
   userId: string;
   role: string;
 }) {
-  // Fallback a mocks cuando el snapshot del server viene vacío — útil
-  // mientras todavía no hay notifications generadas en producción. En
-  // cuanto entra una real (realtime o refresh), los mocks desaparecen.
-  const seed =
-    initialNotifications.length > 0 ? initialNotifications : MOCK_NOTIFICATIONS;
-  const [list, setList] = useState<Notification[]>(seed);
+  const [list, setList] = useState<Notification[]>(initialNotifications);
 
   // Resync cuando el snapshot del server cambia (post markRead/markAllRead
-  // que invocan revalidatePath). La fuente de verdad sigue siendo el server.
+  // que invocan revalidatePath). La fuente de verdad es siempre el server.
   useEffect(() => {
-    setList(
-      initialNotifications.length > 0
-        ? initialNotifications
-        : MOCK_NOTIFICATIONS,
-    );
+    setList(initialNotifications);
   }, [initialNotifications]);
 
   const businessIdRef = useRef(businessId);
   const userIdRef = useRef(userId);
   const roleRef = useRef(role);
-  const seenIds = useRef(new Set(seed.map((n) => n.id)));
+  const seenIds = useRef(new Set(initialNotifications.map((n) => n.id)));
 
   useEffect(() => {
     const supabase = createSupabaseBrowserClient();
@@ -102,8 +92,8 @@ export function useNotificationsRealtime({
   // valor — más correcto que el cliente que solo ve los últimos N.
   const displayUnread = Math.max(unread, initialUnreadCount);
 
-  /** Marca una notif como leída solo en el state cliente. Útil para mocks
-   *  (no existen en DB) o para optimistic UI. */
+  /** Marca una notif como leída solo en el state cliente (optimistic UI).
+   *  El server reconcilia luego vía revalidatePath. */
   const markReadLocally = useCallback((id: string) => {
     const nowIso = new Date().toISOString();
     setList((cur) =>
