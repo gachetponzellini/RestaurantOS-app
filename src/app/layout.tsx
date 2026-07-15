@@ -88,6 +88,18 @@ const montserrat = Montserrat({
 export const metadata: Metadata = {
   title: "Pedidos",
   description: "Pedidos online para tu negocio.",
+  // Icono por defecto de la plataforma. Las rutas de negocio lo sobreescriben
+  // con su propio favicon en `[business_slug]/layout.tsx`. Servimos SVG (modern)
+  // + PNG 32 (fallback) + apple-touch desde /public — NO usamos la convención
+  // de archivo `app/favicon.ico` porque se inyecta en todas las rutas y pisaría
+  // al favicon por-negocio (emitía dos <link rel=icon> que competían).
+  icons: {
+    icon: [
+      { url: "/icon.svg", type: "image/svg+xml" },
+      { url: "/icon-32.png", type: "image/png", sizes: "32x32" },
+    ],
+    apple: "/apple-icon.png",
+  },
 };
 
 export default function RootLayout({

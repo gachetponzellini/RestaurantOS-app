@@ -20,10 +20,15 @@ export async function generateMetadata({
   const business = await getBusiness(business_slug);
   if (!business) return {};
   const settings = getBusinessSettings(business);
-  return {
-    title: business.name,
-    icons: settings.favicon_url ? { icon: settings.favicon_url } : undefined,
-  };
+  // Favicon por-negocio: favicon dedicado → isotipo → logo. Si no hay ninguno,
+  // NO seteamos `icons` y se hereda el default de plataforma (los cubiertos de
+  // `app/layout.tsx`). Cuando sí hay, sobreescribe limpio porque ya no existe el
+  // `app/favicon.ico` que antes competía (emitía un 2º <link rel=icon>).
+  const businessIcon =
+    settings.favicon_url ?? settings.logo_mark_url ?? settings.logo_url;
+  const meta: Metadata = { title: business.name };
+  if (businessIcon) meta.icons = { icon: businessIcon };
+  return meta;
 }
 
 export default async function BusinessLayout({
