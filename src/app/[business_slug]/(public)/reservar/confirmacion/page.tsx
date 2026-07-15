@@ -2,6 +2,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { formatInTimeZone } from "date-fns-tz";
+import { es } from "date-fns/locale";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { I } from "@/components/delivery/primitives";
@@ -53,6 +54,7 @@ export default async function ReservarConfirmacionPage({
     new Date(reservation.starts_at),
     tz,
     "EEE d 'de' MMM",
+    { locale: es },
   );
   const timeLabel = formatInTimeZone(new Date(reservation.starts_at), tz, "HH:mm");
   const isCancellable =
@@ -146,8 +148,9 @@ export default async function ReservarConfirmacionPage({
         <div
           className="d-display"
           style={{
-            fontSize: 38,
-            lineHeight: 1.05,
+            fontSize: "clamp(20px, 6.5vw, 30px)",
+            lineHeight: 1.1,
+            whiteSpace: "nowrap",
             color: "var(--ink)",
             marginTop: 4,
             textTransform: "capitalize",
@@ -188,7 +191,7 @@ export default async function ReservarConfirmacionPage({
       ) : null}
 
       {/* Section spacer (8px solid divider, matching order-tracking) */}
-      <div style={{ borderTop: "8px solid #F3EEE4", marginTop: 16 }} />
+      <div style={{ borderTop: "1px solid var(--hairline)", marginTop: 16 }} />
 
       {/* "En" — business block */}
       <div style={{ padding: "16px" }}>
@@ -269,7 +272,7 @@ export default async function ReservarConfirmacionPage({
       </div>
 
       {/* Section spacer */}
-      <div style={{ borderTop: "8px solid #F3EEE4" }} />
+      <div style={{ borderTop: "1px solid var(--hairline)" }} />
 
       {/* Detail rows */}
       <div style={{ padding: "8px 16px" }}>

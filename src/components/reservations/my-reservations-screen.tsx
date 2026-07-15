@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import { formatInTimeZone } from "date-fns-tz";
+import { es } from "date-fns/locale";
 
 import { I } from "@/components/delivery/primitives";
 import { CancelReservationButton } from "@/components/reservations/cancel-reservation-button";
@@ -217,6 +218,7 @@ function ReservationCard({
     new Date(row.starts_at),
     timezone,
     "EEE d 'de' MMM",
+    { locale: es },
   );
   const timeLabel = formatInTimeZone(new Date(row.starts_at), timezone, "HH:mm");
   const canCancel = row.status === "confirmed" || row.status === "seated";
