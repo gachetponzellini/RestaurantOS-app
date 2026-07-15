@@ -14,8 +14,6 @@ import { unauthorized, verifyAgentKey } from "../agent-auth";
  * la señal de salud del ritmo del poll del GET.
  */
 export async function POST(req: Request) {
-  if (!verifyAgentKey(req)) return unauthorized();
-
   let body: { business_id?: string };
   try {
     body = await req.json();
@@ -24,6 +22,8 @@ export async function POST(req: Request) {
   }
 
   const businessId = body.business_id;
+  // Auth con el business_id ya parseado (spec 046): acepta key global o del negocio.
+  if (!(await verifyAgentKey(req, businessId))) return unauthorized();
   if (!businessId) {
     return NextResponse.json({ error: "missing business_id" }, { status: 400 });
   }

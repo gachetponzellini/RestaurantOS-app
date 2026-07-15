@@ -1,8 +1,9 @@
 import { notFound } from "next/navigation";
 
-import { Fingerprint, Printer } from "lucide-react";
+import { Fingerprint, MonitorDown, Printer } from "lucide-react";
 
 import { ClockOriginsForm } from "@/components/admin/settings/clock-origins-form";
+import { PrintAgentCard } from "@/components/admin/settings/print-agent-card";
 import { SettingsSection } from "@/components/admin/settings/settings-section";
 import {
   StationPrintersForm,
@@ -24,14 +25,31 @@ export default async function ConfiguracionLocalPage({
   if (!business) notFound();
 
   const service = createSupabaseServiceClient();
-  const [clockOrigins, { data: stations }] = await Promise.all([
-    listClockOrigins(business.id),
-    service
-      .from("stations")
-      .select("id, name, is_active, printer_ip, printer_port, printer_enabled")
-      .eq("business_id", business.id)
-      .order("sort_order"),
-  ]);
+  const [clockOrigins, { data: stations }, { data: bizFlag }, { data: agentStatus }] =
+    await Promise.all([
+      listClockOrigins(business.id),
+      service
+        .from("stations")
+        .select("id, name, is_active, printer_ip, printer_port, printer_enabled")
+        .eq("business_id", business.id)
+        .order("sort_order"),
+      service
+        .from("businesses")
+        .select("print_agent_key_set")
+        .eq("id", business.id)
+        .maybeSingle(),
+      service
+        .from("print_agent_status")
+        .select("last_seen_at")
+        .eq("business_id", business.id)
+        .maybeSingle(),
+    ]);
+
+  const printAgentKeySet = Boolean(
+    (bizFlag as { print_agent_key_set?: boolean } | null)?.print_agent_key_set,
+  );
+  const printAgentLastSeenAt =
+    (agentStatus as { last_seen_at?: string } | null)?.last_seen_at ?? null;
 
   return (
     <>
@@ -43,6 +61,18 @@ export default async function ConfiguracionLocalPage({
         <StationPrintersForm
           slug={business_slug}
           stations={(stations ?? []) as StationPrinterRow[]}
+        />
+      </SettingsSection>
+
+      <SettingsSection
+        icon={<MonitorDown className="size-5" />}
+        title="Agente de impresión"
+        description="Descargá el agente ya configurado para este negocio e instalalo en UNA PC del local (la que quede siempre prendida). Hace de puente entre el sistema y las comanderas de la red."
+      >
+        <PrintAgentCard
+          slug={business_slug}
+          keySet={printAgentKeySet}
+          lastSeenAt={printAgentLastSeenAt}
         />
       </SettingsSection>
 

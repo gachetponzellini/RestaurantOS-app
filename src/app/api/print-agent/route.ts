@@ -16,10 +16,10 @@ import { unauthorized, verifyAgentKey } from "./agent-auth";
  * negocio. El print agent llama esto en loop (pull).
  */
 export async function GET(req: Request) {
-  if (!verifyAgentKey(req)) return unauthorized();
-
   const url = new URL(req.url);
   const businessId = url.searchParams.get("business_id");
+  // Auth con el business_id ya parseado (spec 046): acepta key global o del negocio.
+  if (!(await verifyAgentKey(req, businessId))) return unauthorized();
   if (!businessId) {
     return NextResponse.json(
       { error: "missing business_id" },
@@ -143,8 +143,6 @@ export async function GET(req: Request) {
  *   estado (sigue `pendiente`, se reintenta).
  */
 export async function POST(req: Request) {
-  if (!verifyAgentKey(req)) return unauthorized();
-
   let body: {
     comanda_id?: string;
     business_id?: string;
@@ -156,6 +154,9 @@ export async function POST(req: Request) {
   } catch {
     return NextResponse.json({ error: "invalid body" }, { status: 400 });
   }
+
+  // Auth con el business_id ya parseado (spec 046): acepta key global o del negocio.
+  if (!(await verifyAgentKey(req, body.business_id))) return unauthorized();
 
   const comandaId = body.comanda_id;
   if (!comandaId) {

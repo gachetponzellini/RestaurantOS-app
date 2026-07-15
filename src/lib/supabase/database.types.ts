@@ -162,6 +162,7 @@ export type Database = {
           name: string
           phone: string | null
           plan: string | null
+          print_agent_key_set: boolean
           settings: Json
           slug: string
           timezone: string
@@ -196,6 +197,7 @@ export type Database = {
           name: string
           phone?: string | null
           plan?: string | null
+          print_agent_key_set?: boolean
           settings?: Json
           slug: string
           timezone?: string
@@ -230,6 +232,7 @@ export type Database = {
           name?: string
           phone?: string | null
           plan?: string | null
+          print_agent_key_set?: boolean
           settings?: Json
           slug?: string
           timezone?: string
@@ -2520,6 +2523,35 @@ export type Database = {
             foreignKeyName: "phone_verification_codes_business_id_fkey"
             columns: ["business_id"]
             isOneToOne: false
+            referencedRelation: "businesses"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      print_agent_credentials: {
+        Row: {
+          api_key: string
+          business_id: string
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          api_key: string
+          business_id: string
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          api_key?: string
+          business_id?: string
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "print_agent_credentials_business_id_fkey"
+            columns: ["business_id"]
+            isOneToOne: true
             referencedRelation: "businesses"
             referencedColumns: ["id"]
           },
