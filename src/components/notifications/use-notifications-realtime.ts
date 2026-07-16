@@ -3,7 +3,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { dispatchNotificationToast } from "@/components/notifications/notifications-toast-host";
+import type { BusinessRole } from "@/lib/admin/context";
 import type { Notification } from "@/lib/notifications/queries";
+import { visibleTargetRoles } from "@/lib/notifications/visibility";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 
 /**
@@ -38,7 +40,11 @@ export function useNotificationsRealtime({
 
   const businessIdRef = useRef(businessId);
   const userIdRef = useRef(userId);
-  const roleRef = useRef(role);
+  // Roles cuyos broadcasts ve este usuario (jerarquía; debe coincidir con
+  // `listForUser`/`countUnread` del server para no divergir toast ↔ bell).
+  const visibleRolesRef = useRef(
+    new Set<string>(visibleTargetRoles(role as BusinessRole)),
+  );
   const seenIds = useRef(new Set(initialNotifications.map((n) => n.id)));
 
   useEffect(() => {
@@ -70,7 +76,8 @@ export function useNotificationsRealtime({
             const n = payload.new as Notification;
             const isMine =
               n.user_id === userIdRef.current ||
-              n.target_role === roleRef.current;
+              (n.target_role != null &&
+                visibleRolesRef.current.has(n.target_role));
             if (!isMine) return;
             if (seenIds.current.has(n.id)) return;
             seenIds.current.add(n.id);

@@ -3,13 +3,15 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { BusinessRole } from "@/lib/admin/context";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
+import { notificationOrFilter } from "@/lib/notifications/visibility";
 
-// SEGURIDAD — estas queries usan `.or(\`user_id.eq.${userId},target_role.eq.${role}\`)`
-// con interpolación directa. `userId` y `role` DEBEN venir de session/types del
-// backend (`ctx.user.id`, `ctx.role`), NUNCA de input externo crudo. El patrón
-// con interpolación no escapa contra injection en PostgREST .or() — si algún día
-// estos params vinieran de afuera, hay que reescribir usando filtros separados.
-// Ver DT-007 en wiki/deuda-tecnica.md.
+// SEGURIDAD — estas queries arman el filtro `.or(...)` de PostgREST por
+// interpolación (ver `notificationOrFilter`). `userId` DEBE venir de session
+// (`ctx.user.id`), NUNCA de input externo crudo. Los `target_role` salen de
+// `visibleTargetRoles` (allowlist fijo derivado del rol de sesión), no de input
+// externo. El patrón con interpolación no escapa contra injection en PostgREST
+// .or() — si algún día estos params vinieran de afuera, hay que reescribir con
+// filtros separados. Ver DT-007 en wiki/deuda-tecnica.md.
 
 type GenericClient = SupabaseClient;
 
@@ -33,7 +35,8 @@ type ListParams = {
 
 /**
  * Lista las notifs visibles para este usuario en este business:
- * dirigidas explícitamente a él, o broadcast a su rol.
+ * dirigidas explícitamente a él, o broadcast a un rol que pueda ver (jerarquía
+ * en `visibleTargetRoles`: el dueño ve todo, el mozo ve lo suyo).
  * Order desc por created_at, paginadas con `limit` (default 10).
  */
 export async function listForUser({
@@ -47,7 +50,7 @@ export async function listForUser({
     .from("notifications")
     .select("id, business_id, user_id, target_role, type, payload, read_at, created_at")
     .eq("business_id", businessId)
-    .or(`user_id.eq.${userId},target_role.eq.${role}`)
+    .or(notificationOrFilter(userId, role))
     .order("created_at", { ascending: false })
     .limit(limit);
 
@@ -71,7 +74,7 @@ export async function countUnread({
     .select("id", { count: "exact", head: true })
     .eq("business_id", businessId)
     .is("read_at", null)
-    .or(`user_id.eq.${userId},target_role.eq.${role}`);
+    .or(notificationOrFilter(userId, role));
 
   if (error) {
     console.error("notifications.countUnread", error);

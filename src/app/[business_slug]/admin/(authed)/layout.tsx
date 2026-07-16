@@ -54,8 +54,8 @@ export default async function AdminAuthedLayout({
   const settings = getBusinessSettings(business);
 
   // Notificaciones globales para el layout admin. Para platform admin sin
-  // membership usamos "admin" como rol nominal para la suscripción —
-  // visualmente el bell + mocks de fallback se renderizan igual.
+  // membership usamos "admin" como rol nominal — la jerarquía de
+  // `visibleTargetRoles` hace que el dueño/admin vea también lo del encargado.
   const notiRole = ctx.role ?? "admin";
   const [notifications, unreadCount] = await Promise.all([
     listForUser({
