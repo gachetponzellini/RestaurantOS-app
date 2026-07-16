@@ -1,13 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Clock } from "lucide-react";
 
 import { clockPunch, type PresentEmployee } from "@/lib/rrhh/clock-actions";
 
 import { ClockFeedback, type FeedbackState } from "./clock-feedback";
-import { Numpad } from "./numpad";
-import { PinDisplay } from "./pin-display";
 import { PresentList } from "./present-list";
 
 function useLiveClock() {
@@ -44,24 +42,22 @@ export function ClockScreen({
   const [feedback, setFeedback] = useState<FeedbackState>({ status: "idle" });
   const [present, setPresent] = useState(initialPresent);
   const liveClock = useLiveClock();
+  const inputRef = useRef<HTMLInputElement>(null);
 
-  const handleDigit = useCallback(
-    (d: string) => {
+  const handlePinChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
       if (feedback.status === "loading") return;
       if (feedback.status !== "idle") {
         setFeedback({ status: "idle" });
       }
-      setPin((prev) => (prev.length < 4 ? prev + d : prev));
+      setPin(e.target.value.replace(/\D/g, "").slice(0, 4));
     },
     [feedback.status],
   );
 
-  const handleDelete = useCallback(() => {
-    if (feedback.status === "loading") return;
-    if (feedback.status !== "idle") {
-      setFeedback({ status: "idle" });
-    }
-    setPin((prev) => prev.slice(0, -1));
+  // Kiosco: el input debe quedar siempre listo para el próximo PIN.
+  useEffect(() => {
+    if (feedback.status !== "loading") inputRef.current?.focus();
   }, [feedback.status]);
 
   useEffect(() => {
@@ -99,47 +95,54 @@ export function ClockScreen({
   }, [pin, slug]);
 
   const pinSection = (
-    <div className="flex flex-col items-center gap-6">
+    <div className="flex flex-col items-center gap-2">
       {/* Live clock */}
-      <p className="text-5xl font-bold tabular-nums text-white/90">
+      <p className="text-2xl font-bold tabular-nums text-white/90">
         {liveClock}
       </p>
 
       {/* Header */}
-      <div className="flex items-center gap-2 text-zinc-400">
-        <Clock className="size-5" />
-        <span className="text-sm font-semibold uppercase tracking-wider">
+      <div className="flex items-center gap-1.5 text-zinc-400">
+        <Clock className="size-3.5" />
+        <span className="text-xs font-semibold uppercase tracking-wider">
           Fichada
         </span>
       </div>
 
-      {/* PIN display */}
-      <PinDisplay length={pin.length} size="lg" />
+      {/* PIN input */}
+      <input
+        ref={inputRef}
+        type="tel"
+        inputMode="numeric"
+        pattern="[0-9]*"
+        autoComplete="off"
+        autoFocus
+        maxLength={4}
+        value={pin}
+        onChange={handlePinChange}
+        disabled={feedback.status === "loading"}
+        placeholder="····"
+        aria-label="PIN"
+        className="mt-1 w-36 rounded-xl border-2 border-zinc-700 bg-zinc-900 py-2 text-center text-2xl font-bold tracking-[0.4em] text-white outline-none placeholder:text-zinc-700 focus:border-white disabled:opacity-40"
+      />
 
       {/* Feedback */}
-      <div className="h-24 w-full">
-        <ClockFeedback feedback={feedback} size="lg" />
+      <div className="h-14 w-full">
+        <ClockFeedback feedback={feedback} size="md" />
       </div>
-
-      {/* Numpad */}
-      <Numpad
-        onDigit={handleDigit}
-        onDelete={handleDelete}
-        disabled={feedback.status === "loading"}
-      />
     </div>
   );
 
   return (
-    <div className="flex min-h-screen bg-zinc-950 text-white">
+    <div className="flex h-dvh flex-col overflow-hidden bg-zinc-950 text-white landscape:flex-row">
       {/* Portrait: single column. Landscape: two columns */}
-      <div className="flex w-full flex-col items-center justify-center p-6 landscape:w-1/2 landscape:sm:w-1/2">
-        <div className="w-full max-w-md">{pinSection}</div>
+      <div className="flex shrink-0 flex-col items-center justify-center p-3 landscape:h-full landscape:w-1/2">
+        <div className="w-full max-w-xs">{pinSection}</div>
       </div>
 
-      {/* Present list — below in portrait, right side in landscape */}
-      <div className="w-full border-t border-zinc-800 p-6 landscape:w-1/2 landscape:overflow-y-auto landscape:border-l landscape:border-t-0 landscape:sm:w-1/2">
-        <div className="mx-auto max-w-md landscape:max-w-none">
+      {/* Present list — below in portrait, right side in landscape. Scrollea internamente, la pantalla nunca scrollea. */}
+      <div className="min-h-0 flex-1 overflow-y-auto border-t border-zinc-800 p-3 landscape:h-full landscape:w-1/2 landscape:border-l landscape:border-t-0">
+        <div className="mx-auto max-w-xs landscape:max-w-none">
           <PresentList present={present} />
         </div>
       </div>
