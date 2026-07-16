@@ -9,6 +9,7 @@ import { requireMozoActionContext } from "@/lib/mozo/auth";
 import { canManageNotificationPrefs } from "@/lib/permissions/can";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 import { getBusiness } from "@/lib/tenant";
+import type { BusinessRole } from "@/lib/admin/context";
 
 import { DELIVERY_NOTIFY_STATUSES } from "./delivery-templates";
 import {
@@ -17,6 +18,7 @@ import {
   NOTIFICATION_TARGET_ROLES,
   type NotificationChannel,
 } from "./preferences";
+import { notificationOrFilter, visibleTargetRoles } from "./visibility";
 import { sendWhatsapp } from "./whatsapp-sender";
 
 type GenericClient = SupabaseClient;
@@ -39,7 +41,7 @@ export async function markAllRead(
     .update({ read_at: nowIso })
     .eq("business_id", business.id)
     .is("read_at", null)
-    .or(`user_id.eq.${ctx.userId},target_role.eq.${ctx.role}`);
+    .or(notificationOrFilter(ctx.userId, ctx.role as BusinessRole));
 
   if (error) {
     console.error("notifications.markAllRead", error);
@@ -555,7 +557,12 @@ export async function markRead(
   if (!row || row.business_id !== business.id) {
     return actionError("Notificación no encontrada.");
   }
-  const isMine = row.user_id === ctx.userId || row.target_role === ctx.role;
+  const isMine =
+    row.user_id === ctx.userId ||
+    (row.target_role != null &&
+      visibleTargetRoles(ctx.role as BusinessRole).includes(
+        row.target_role as BusinessRole,
+      ));
   if (!isMine) return actionError("Notificación no encontrada.");
 
   const { error } = await service

@@ -43,7 +43,7 @@ export function NotificationsLauncher({
   const router = useRouter();
   const [open, setOpen] = useState(false);
 
-  const { notifications, unreadCount, markAllReadLocally } =
+  const { notifications, unreadCount, markReadLocally, markAllReadLocally } =
     useNotificationsRealtime({
       initialNotifications,
       initialUnreadCount,
@@ -54,7 +54,9 @@ export function NotificationsLauncher({
 
   const markOne = async (n: Notification) => {
     if (n.read_at) return;
-    // Server: revalidatePath fuerza al hook a re-syncear desde el snapshot.
+    // Optimistic local para feedback inmediato; el server reconcilia vía
+    // revalidatePath / router.refresh.
+    markReadLocally(n.id);
     await markRead(n.id, businessSlug);
   };
 
@@ -62,6 +64,7 @@ export function NotificationsLauncher({
     // Optimistic local update; el server reconcilia vía revalidatePath.
     markAllReadLocally();
     await markAllRead(businessSlug);
+    router.refresh();
   };
 
   const handleItemClick = async (n: Notification) => {
