@@ -431,6 +431,11 @@ export function MenuClient({
               display: "flex",
               gap: 20,
               overflowX: "auto",
+              // Fija el scroll y el gesto táctil al eje horizontal: sin esto, al
+              // deslizar las categorías el gesto se filtra a scroll vertical y la
+              // barra "salta" para arriba y abajo.
+              overflowY: "hidden",
+              touchAction: "pan-x",
               padding: "4px 16px 0",
               scrollbarWidth: "none",
             }}
