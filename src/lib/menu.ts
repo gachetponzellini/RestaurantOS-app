@@ -82,11 +82,18 @@ export type BusinessHour = {
   closes_at: string;
 };
 
+export type MenuSuperCategory = {
+  id: string;
+  name: string;
+  sort_order: number;
+};
+
 export type MenuData = {
   categories: MenuCategory[];
   hours: BusinessHour[];
   todaysMenus: MenuDailyMenu[];
   beverageSuperCategoryId: string | null;
+  superCategories: MenuSuperCategory[];
 };
 
 /**
@@ -137,7 +144,7 @@ export const getMenu = cache(
         .order("sort_order"),
       supabase
         .from("super_categories")
-        .select("id, slug, sort_order")
+        .select("id, slug, sort_order, name")
         .eq("business_id", businessId)
         .order("sort_order"),
     ]);
@@ -252,5 +259,10 @@ export const getMenu = cache(
     todaysMenus,
     beverageSuperCategoryId:
       (superCategories ?? []).find((s) => s.slug === "bebidas")?.id ?? null,
+    superCategories: (superCategories ?? []).map((s) => ({
+      id: s.id,
+      name: s.name,
+      sort_order: s.sort_order,
+    })),
   };
 });

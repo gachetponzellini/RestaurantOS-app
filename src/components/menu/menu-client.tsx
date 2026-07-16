@@ -9,7 +9,12 @@ import { I, ImageTile, StatusDot } from "@/components/delivery/primitives";
 import { computeIsOpen, type BusinessHour } from "@/lib/business-hours";
 import type { ActiveOrder } from "@/lib/customers/active-orders";
 import { formatCurrency } from "@/lib/currency";
-import type { MenuCategory, MenuDailyMenu, MenuProduct } from "@/lib/menu";
+import type {
+  MenuCategory,
+  MenuDailyMenu,
+  MenuProduct,
+  MenuSuperCategory,
+} from "@/lib/menu";
 import { cartCount, cartTotal, useCart } from "@/stores/cart";
 
 import { DailyMenuSection } from "./daily-menu-section";
@@ -26,47 +31,38 @@ type DisplayTab = {
 
 function buildDisplayTabs(
   categories: MenuCategory[],
-  beverageSuperCategoryId: string | null,
+  superCategories: MenuSuperCategory[],
 ): DisplayTab[] {
-  if (!beverageSuperCategoryId) {
-    return categories.map((c) => ({
-      id: c.id,
-      name: c.name,
-      products: c.products,
-    }));
+  const tabs: DisplayTab[] = [];
+  const used = new Set<string>();
+
+  // Un tab por super-categoría (en su orden), con sus categorías como
+  // subcategorías diferenciadas adentro. Con una sola categoría no se muestra
+  // la sub-sección (evita un encabezado redundante).
+  const sortedSupers = [...superCategories].sort(
+    (a, b) => a.sort_order - b.sort_order,
+  );
+  for (const sup of sortedSupers) {
+    const supCats = categories.filter((c) => c.super_category_id === sup.id);
+    if (supCats.length === 0) continue;
+    supCats.forEach((c) => used.add(c.id));
+    tabs.push({
+      id: `super-${sup.id}`,
+      name: sup.name,
+      products: supCats.flatMap((c) => c.products),
+      subcategories:
+        supCats.length > 1
+          ? supCats.map((c) => ({ name: c.name, products: c.products }))
+          : undefined,
+    });
   }
 
-  const bevCats = categories.filter(
-    (c) => c.super_category_id === beverageSuperCategoryId,
-  );
-  const nonBevCats = categories.filter(
-    (c) => c.super_category_id !== beverageSuperCategoryId,
-  );
-
-  if (bevCats.length === 0) {
-    return categories.map((c) => ({
-      id: c.id,
-      name: c.name,
-      products: c.products,
-    }));
+  // Categorías sin super-categoría → cada una su propio tab, al final.
+  for (const c of categories) {
+    if (used.has(c.id)) continue;
+    tabs.push({ id: c.id, name: c.name, products: c.products });
   }
 
-  const bevTab: DisplayTab = {
-    id: "bebidas-grouped",
-    name: "Bebidas",
-    products: bevCats.flatMap((c) => c.products),
-    subcategories: bevCats.map((c) => ({
-      name: c.name,
-      products: c.products,
-    })),
-  };
-
-  const tabs: DisplayTab[] = nonBevCats.map((c) => ({
-    id: c.id,
-    name: c.name,
-    products: c.products,
-  }));
-  tabs.push(bevTab);
   return tabs;
 }
 
@@ -77,7 +73,7 @@ export function MenuClient({
   coverImageUrl,
   logoUrl,
   categories,
-  beverageSuperCategoryId,
+  superCategories,
   todaysMenus,
   todayLabel,
   deliveryFeeCents,
@@ -95,7 +91,7 @@ export function MenuClient({
   coverImageUrl: string | null;
   logoUrl: string | null;
   categories: MenuCategory[];
-  beverageSuperCategoryId: string | null;
+  superCategories: MenuSuperCategory[];
   todaysMenus: MenuDailyMenu[];
   todayLabel: string;
   deliveryFeeCents: number;
@@ -108,8 +104,8 @@ export function MenuClient({
   user: { name?: string; email: string } | null;
 }) {
   const displayTabs = useMemo(
-    () => buildDisplayTabs(categories, beverageSuperCategoryId),
-    [categories, beverageSuperCategoryId],
+    () => buildDisplayTabs(categories, superCategories),
+    [categories, superCategories],
   );
 
   const [active, setActive] = useState(displayTabs[0]?.id ?? "");
