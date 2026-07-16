@@ -137,10 +137,9 @@ export const getMenu = cache(
         .order("sort_order"),
       supabase
         .from("super_categories")
-        .select("id, slug")
+        .select("id, slug, sort_order")
         .eq("business_id", businessId)
-        .eq("slug", "bebidas")
-        .maybeSingle(),
+        .order("sort_order"),
     ]);
 
   const productsList: MenuProduct[] = (products ?? []).map((p) => ({
@@ -184,6 +183,21 @@ export const getMenu = cache(
     super_category_id: (c as any).super_category_id ?? null,
     products: productsList.filter((p) => p.category_id === c.id),
   }));
+
+  // Orden por super-categoría (como el mozo): las categorías se agrupan por el
+  // sort_order de su super-categoría; dentro de cada una, por su propio
+  // sort_order. Sin super-categoría → al final.
+  const superOrderById = new Map<string, number>(
+    (superCategories ?? []).map((s) => [s.id, s.sort_order] as const),
+  );
+  const superRank = (superCategoryId: string | null): number =>
+    superCategoryId != null
+      ? (superOrderById.get(superCategoryId) ?? Number.MAX_SAFE_INTEGER)
+      : Number.MAX_SAFE_INTEGER;
+  cats.sort((a, b) => {
+    const diff = superRank(a.super_category_id) - superRank(b.super_category_id);
+    return diff !== 0 ? diff : a.sort_order - b.sort_order;
+  });
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const todaysMenus: MenuDailyMenu[] = (dailyMenus ?? []).map((m: any) => {
@@ -236,6 +250,7 @@ export const getMenu = cache(
     categories: cats,
     hours: (hours ?? []) as BusinessHour[],
     todaysMenus,
-    beverageSuperCategoryId: superCategories?.id ?? null,
+    beverageSuperCategoryId:
+      (superCategories ?? []).find((s) => s.slug === "bebidas")?.id ?? null,
   };
 });
