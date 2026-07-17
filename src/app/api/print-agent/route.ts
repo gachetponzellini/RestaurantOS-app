@@ -38,6 +38,8 @@ export async function GET(req: Request) {
       batch,
       status,
       emitted_at,
+      cancelled_at,
+      cancelled_reason,
       stations!inner(name, printer_ip, printer_port, printer_enabled),
       orders!inner(
         id,
@@ -101,6 +103,10 @@ export async function GET(req: Request) {
       printer_enabled: station?.printer_enabled ?? true,
       batch: c.batch,
       emitted_at: c.emitted_at,
+      // Spec 049: comanda anulada → el agente imprime un ticket «ANULADA».
+      // Campos aditivos: un agente viejo los ignora y reimprime el ticket normal.
+      cancelled: Boolean(c.cancelled_at),
+      cancelled_reason: (c.cancelled_reason as string | null) ?? null,
       table_label: order?.tables?.label ?? "—",
       items: ((c.comanda_items ?? []) as unknown[]).map((ci) => {
         const item = ci as {

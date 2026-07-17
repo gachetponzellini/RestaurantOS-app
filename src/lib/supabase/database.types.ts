@@ -52,6 +52,24 @@ export type Database = {
           },
         ]
       }
+      app_config: {
+        Row: {
+          key: string
+          updated_at: string
+          value: string | null
+        }
+        Insert: {
+          key: string
+          updated_at?: string
+          value?: string | null
+        }
+        Update: {
+          key?: string
+          updated_at?: string
+          value?: string | null
+        }
+        Relationships: []
+      }
       business_hours: {
         Row: {
           business_id: string
@@ -933,6 +951,9 @@ export type Database = {
       comandas: {
         Row: {
           batch: number
+          cancelled_at: string | null
+          cancelled_by: string | null
+          cancelled_reason: string | null
           delivered_at: string | null
           emitted_at: string
           id: string
@@ -944,6 +965,9 @@ export type Database = {
         }
         Insert: {
           batch: number
+          cancelled_at?: string | null
+          cancelled_by?: string | null
+          cancelled_reason?: string | null
           delivered_at?: string | null
           emitted_at?: string
           id?: string
@@ -955,6 +979,9 @@ export type Database = {
         }
         Update: {
           batch?: number
+          cancelled_at?: string | null
+          cancelled_by?: string | null
+          cancelled_reason?: string | null
           delivered_at?: string | null
           emitted_at?: string
           id?: string
@@ -965,6 +992,13 @@ export type Database = {
           status?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "comandas_cancelled_by_fkey"
+            columns: ["cancelled_by"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "comandas_order_id_fkey"
             columns: ["order_id"]
@@ -3427,36 +3461,77 @@ export type Database = {
       whatsapp_credentials: {
         Row: {
           api_key: string | null
+          app_name: string | null
           business_id: string
           channel_id: string | null
           created_at: string
           from_phone: string | null
           provider: string
           updated_at: string
+          webhook_token: string | null
         }
         Insert: {
           api_key?: string | null
+          app_name?: string | null
           business_id: string
           channel_id?: string | null
           created_at?: string
           from_phone?: string | null
           provider?: string
           updated_at?: string
+          webhook_token?: string | null
         }
         Update: {
           api_key?: string | null
+          app_name?: string | null
           business_id?: string
           channel_id?: string | null
           created_at?: string
           from_phone?: string | null
           provider?: string
           updated_at?: string
+          webhook_token?: string | null
         }
         Relationships: [
           {
             foreignKeyName: "whatsapp_credentials_business_id_fkey"
             columns: ["business_id"]
             isOneToOne: true
+            referencedRelation: "businesses"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      whatsapp_inbound_events: {
+        Row: {
+          business_id: string
+          id: string
+          provider: string
+          provider_event_id: string
+          received_at: string
+          type: string
+        }
+        Insert: {
+          business_id: string
+          id?: string
+          provider: string
+          provider_event_id: string
+          received_at?: string
+          type: string
+        }
+        Update: {
+          business_id?: string
+          id?: string
+          provider?: string
+          provider_event_id?: string
+          received_at?: string
+          type?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "whatsapp_inbound_events_business_id_fkey"
+            columns: ["business_id"]
+            isOneToOne: false
             referencedRelation: "businesses"
             referencedColumns: ["id"]
           },
@@ -3512,11 +3587,50 @@ export type Database = {
           },
         ]
       }
+      whatsapp_template_map: {
+        Row: {
+          business_id: string
+          created_at: string
+          lang: string
+          provider: string
+          provider_template_id: string
+          template_name: string
+        }
+        Insert: {
+          business_id: string
+          created_at?: string
+          lang?: string
+          provider: string
+          provider_template_id: string
+          template_name: string
+        }
+        Update: {
+          business_id?: string
+          created_at?: string
+          lang?: string
+          provider?: string
+          provider_template_id?: string
+          template_name?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "whatsapp_template_map_business_id_fkey"
+            columns: ["business_id"]
+            isOneToOne: false
+            referencedRelation: "businesses"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
+      adjust_stock_item: {
+        Args: { p_delta: number; p_stock_item_id: string }
+        Returns: number
+      }
       fn_explode_ingredient: {
         Args: { p_ingredient_id: string; p_quantity: number }
         Returns: {
@@ -3533,12 +3647,50 @@ export type Database = {
         Args: { p_business_id: string; p_promo_id: string }
         Returns: boolean
       }
+      is_business_admin: { Args: { bid: string }; Returns: boolean }
       is_business_member: { Args: { bid: string }; Returns: boolean }
       is_business_staff: { Args: { bid: string }; Returns: boolean }
       is_platform_admin: { Args: never; Returns: boolean }
       march_due_scheduled_orders: { Args: never; Returns: undefined }
       mark_overdue_reservations_no_show: { Args: never; Returns: number }
+      registrar_pago_tx: {
+        Args: {
+          p_adjustment_cents: number
+          p_adjustment_percent: number
+          p_amount_cents: number
+          p_attributed_mozo_id: string
+          p_business_id: string
+          p_caja_id: string
+          p_card_brand: string
+          p_last_four: string
+          p_method: string
+          p_notes: string
+          p_operated_by: string
+          p_order_id: string
+          p_request_id: string
+          p_split_id: string
+          p_tip_cents: number
+        }
+        Returns: {
+          fully_paid: boolean
+          idempotent: boolean
+          payment: Json
+          split_done: boolean
+        }[]
+      }
+      send_due_reservation_reminders: { Args: never; Returns: undefined }
       send_due_shift_summaries: { Args: never; Returns: undefined }
+      trasladar_mesa_tx: {
+        Args: {
+          p_actor_user_id: string
+          p_business_id: string
+          p_expected_order_id: string
+          p_from_table_id: string
+          p_reason: string
+          p_to_table_id: string
+        }
+        Returns: string
+      }
     }
     Enums: {
       [_ in never]: never

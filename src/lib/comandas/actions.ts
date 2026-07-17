@@ -7,7 +7,11 @@ import { actionError, actionOk, type ActionResult } from "@/lib/actions";
 import { requireMozoActionContext } from "@/lib/mozo/auth";
 import { createNotification } from "@/lib/notifications/create";
 import { notifyItemCancelled } from "@/lib/notifications/events";
-import { canCancelItem, canReimprimirComanda } from "@/lib/permissions/can";
+import {
+  canCancelItem,
+  canModifyPostEnvio,
+  canReimprimirComanda,
+} from "@/lib/permissions/can";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 import { getBusiness } from "@/lib/tenant";
@@ -1035,4 +1039,350 @@ export async function solicitarReimpresion(
 
   revalidatePath(`/${slug}/admin/operacion`);
   return actionOk(undefined);
+}
+
+/**
+ * Recalcula `orders.subtotal_cents` (suma de ítems vivos) y `total_cents`
+ * (subtotal + tip + fee − discount, sin bajar de 0). Mismo criterio que
+ * `cancelarItem` — extraído para reusar en las acciones del spec 049.
+ */
+async function recomputeOrderTotals(
+  service: GenericClient,
+  orderId: string,
+): Promise<void> {
+  const { data: items } = await service
+    .from("order_items")
+    .select("subtotal_cents, cancelled_at")
+    .eq("order_id", orderId);
+  const subtotal = (
+    (items ?? []) as { subtotal_cents: number; cancelled_at: string | null }[]
+  )
+    .filter((it) => !it.cancelled_at)
+    .reduce((a, it) => a + Number(it.subtotal_cents), 0);
+
+  const { data: orderRow } = await service
+    .from("orders")
+    .select("tip_cents, discount_cents, delivery_fee_cents")
+    .eq("id", orderId)
+    .single();
+  const tip = Number((orderRow as { tip_cents: number } | null)?.tip_cents ?? 0);
+  const discount = Number(
+    (orderRow as { discount_cents: number } | null)?.discount_cents ?? 0,
+  );
+  const fee = Number(
+    (orderRow as { delivery_fee_cents: number } | null)?.delivery_fee_cents ?? 0,
+  );
+  const total = Math.max(0, subtotal + tip + fee - discount);
+
+  await service
+    .from("orders")
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    .update({ subtotal_cents: subtotal, total_cents: total } as any)
+    .eq("id", orderId);
+}
+
+/**
+ * Anula una comanda entera (spec 049). Cancela todos sus ítems vivos, marca la
+ * comanda como anulada, recalcula el total de la orden y encola la reimpresión
+ * de un ticket «ANULADA» en la comandera del sector (reusa el canal del spec
+ * 35: `reprint_requested_at`). Avisa al mozo de la mesa.
+ *
+ * Gate encargado/admin (reusa `canCancelItem`). No toca la máquina de estados
+ * (anulación = flag lateral). La card sale sola del kanban: al quedar todos sus
+ * ítems cancelados, la comanda es "fantasma" y ya se oculta. Cubre el "que no
+ * molesten" sin borrar nada (auditoría intacta).
+ */
+export async function cancelarComanda(
+  slug: string,
+  comandaId: string,
+  motivo: string,
+): Promise<ActionResult<void>> {
+  const business = await getBusiness(slug);
+  if (!business) return actionError("Negocio no encontrado.");
+  const trimmed = motivo.trim();
+  if (!trimmed) return actionError("Indicá un motivo.");
+
+  const ctxResult = await requireMozoActionContext(business.id);
+  if (!ctxResult.ok) return ctxResult;
+  if (!canCancelItem(ctxResult.data.role)) {
+    return actionError("Solo encargado o admin pueden anular una comanda.");
+  }
+
+  const service = createSupabaseServiceClient() as unknown as GenericClient;
+
+  const { data: row } = await service
+    .from("comandas")
+    .select("id, status, cancelled_at, order_id, orders!inner(business_id)")
+    .eq("id", comandaId)
+    .maybeSingle();
+  const ownerBusinessId = (row as { orders?: { business_id: string } } | null)
+    ?.orders?.business_id;
+  if (!row || ownerBusinessId !== business.id) {
+    return actionError("Comanda no encontrada.");
+  }
+  if ((row as { cancelled_at: string | null }).cancelled_at) {
+    return actionError("La comanda ya estaba anulada.");
+  }
+  if ((row as { status: ComandaStatus }).status === "entregado") {
+    return actionError("No se puede anular una comanda ya entregada.");
+  }
+
+  const orderId = (row as { order_id: string }).order_id;
+  const nowIso = new Date().toISOString();
+
+  // Ítems vivos de la comanda → cancelarlos con el mismo motivo.
+  const { data: links } = await service
+    .from("comanda_items")
+    .select("order_item_id")
+    .eq("comanda_id", comandaId);
+  const itemIds = ((links ?? []) as { order_item_id: string }[]).map(
+    (l) => l.order_item_id,
+  );
+  if (itemIds.length > 0) {
+    await service
+      .from("order_items")
+      .update({
+        cancelled_at: nowIso,
+        cancelled_reason: trimmed,
+        cancelled_by: ctxResult.data.userId,
+      })
+      .in("id", itemIds)
+      .is("cancelled_at", null);
+  }
+
+  // Marca la comanda anulada + encola la reimpresión del ticket ANULADA (spec
+  // 35). Limpiar `print_failed_at` resetea el dedup del aviso de fallo.
+  const { error } = await service
+    .from("comandas")
+    .update({
+      cancelled_at: nowIso,
+      cancelled_reason: trimmed,
+      cancelled_by: ctxResult.data.userId,
+      reprint_requested_at: nowIso,
+      print_failed_at: null,
+    })
+    .eq("id", comandaId);
+  if (error) {
+    console.error("cancelarComanda", error);
+    return actionError("No pudimos anular la comanda.");
+  }
+
+  await recomputeOrderTotals(service, orderId);
+
+  // Avisar al mozo de la mesa (reusa el helper del spec 27; no autoavisa al
+  // actor). Best-effort — no bloquea la anulación.
+  await notifyItemCancelled({
+    businessId: business.id,
+    orderId,
+    reason: `Comanda anulada: ${trimmed}`,
+    actorUserId: ctxResult.data.userId,
+    actorRole: ctxResult.data.role,
+  });
+
+  revalidatePath(`/${slug}/cocina`);
+  revalidatePath(`/${slug}/mozo`);
+  revalidatePath(`/${slug}/admin/operacion`);
+  return actionOk(undefined);
+}
+
+export type EditarItemComandaPatch = {
+  quantity?: number;
+  notes?: string | null;
+  /** Cambiar el producto del ítem (spec 049). Re-snapshotea nombre/precio. */
+  productId?: string;
+};
+
+/**
+ * Edita un ítem de una comanda ya impresa (spec 049): cambia cantidad, nota o el
+ * producto. Re-snapshotea nombre + precio del producto nuevo, conserva el sector
+ * (el ticket físico ya está en esa comandera) y limpia los modificadores del
+ * producto viejo. Recalcula subtotal del ítem + total de la orden.
+ *
+ * Gate encargado/admin (reusa `canModifyPostEnvio`). Rechaza ítems cancelados o
+ * de combo/menú del día (su precio vive en el padre — fase 2). La reimpresión
+ * del ticket corregido la compone la UI (llama `solicitarReimpresion` después).
+ * Quitar un ítem = `cancelarItem` (no se duplica).
+ */
+export async function editarItemComanda(
+  slug: string,
+  orderItemId: string,
+  patch: EditarItemComandaPatch,
+): Promise<ActionResult<void>> {
+  const business = await getBusiness(slug);
+  if (!business) return actionError("Negocio no encontrado.");
+
+  const ctxResult = await requireMozoActionContext(business.id);
+  if (!ctxResult.ok) return ctxResult;
+  if (!canModifyPostEnvio(ctxResult.data.role)) {
+    return actionError("Solo encargado o admin pueden modificar una comanda.");
+  }
+
+  const service = createSupabaseServiceClient() as unknown as GenericClient;
+
+  const { data: item } = await service
+    .from("order_items")
+    .select(
+      "id, order_id, product_id, product_name, unit_price_cents, quantity, notes, station_id, cancelled_at, is_combo_component, parent_order_item_id, daily_menu_id, orders!inner(business_id)",
+    )
+    .eq("id", orderItemId)
+    .maybeSingle();
+  const itemBusinessId = (item as { orders?: { business_id: string } } | null)
+    ?.orders?.business_id;
+  if (!item || itemBusinessId !== business.id) {
+    return actionError("Item no encontrado.");
+  }
+  const it = item as unknown as {
+    order_id: string;
+    product_id: string | null;
+    product_name: string;
+    unit_price_cents: number;
+    quantity: number;
+    notes: string | null;
+    station_id: string | null;
+    cancelled_at: string | null;
+    is_combo_component: boolean | null;
+    parent_order_item_id: string | null;
+    daily_menu_id: string | null;
+  };
+  if (it.cancelled_at) return actionError("El ítem está cancelado.");
+  if (it.is_combo_component || it.parent_order_item_id || it.daily_menu_id) {
+    return actionError("No se puede editar un ítem de combo o menú del día.");
+  }
+
+  // Cantidad (opcional): entero ≥ 1.
+  let quantity = it.quantity;
+  if (patch.quantity !== undefined) {
+    if (!Number.isInteger(patch.quantity) || patch.quantity < 1) {
+      return actionError("La cantidad debe ser un entero de al menos 1.");
+    }
+    quantity = patch.quantity;
+  }
+
+  // Cambio de producto (opcional): re-snapshot nombre/precio, conserva sector,
+  // limpia modifiers del viejo.
+  let unitPrice = Number(it.unit_price_cents);
+  let productId = it.product_id;
+  let productName = it.product_name;
+  let clearedModifiers = false;
+  if (patch.productId && patch.productId !== it.product_id) {
+    const { data: prod } = await service
+      .from("products")
+      .select("id, name, price_cents, business_id, is_active, is_available")
+      .eq("id", patch.productId)
+      .maybeSingle();
+    const p = prod as {
+      id: string;
+      name: string;
+      price_cents: number;
+      business_id: string;
+      is_active: boolean;
+      is_available: boolean;
+    } | null;
+    if (!p || p.business_id !== business.id) {
+      return actionError("Producto inválido.");
+    }
+    if (!p.is_active || !p.is_available) {
+      return actionError(`"${p.name}" no está disponible.`);
+    }
+    productId = p.id;
+    productName = p.name;
+    unitPrice = Number(p.price_cents);
+    await service
+      .from("order_item_modifiers")
+      .delete()
+      .eq("order_item_id", orderItemId);
+    clearedModifiers = true;
+  }
+
+  // Σ de modifiers vigentes (0 si se limpiaron por cambio de producto).
+  let modsTotal = 0;
+  if (!clearedModifiers) {
+    const { data: mods } = await service
+      .from("order_item_modifiers")
+      .select("price_delta_cents")
+      .eq("order_item_id", orderItemId);
+    modsTotal = ((mods ?? []) as { price_delta_cents: number }[]).reduce(
+      (a, m) => a + Number(m.price_delta_cents),
+      0,
+    );
+  }
+
+  const subtotal = (unitPrice + modsTotal) * quantity;
+
+  const patchRow: Record<string, unknown> = {
+    quantity,
+    unit_price_cents: unitPrice,
+    subtotal_cents: subtotal,
+    product_id: productId,
+    product_name: productName,
+  };
+  if (patch.notes !== undefined) patchRow.notes = patch.notes;
+
+  const { error } = await service
+    .from("order_items")
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    .update(patchRow as any)
+    .eq("id", orderItemId);
+  if (error) {
+    console.error("editarItemComanda", error);
+    return actionError("No pudimos guardar los cambios.");
+  }
+
+  await recomputeOrderTotals(service, it.order_id);
+
+  revalidatePath(`/${slug}/cocina`);
+  revalidatePath(`/${slug}/mozo`);
+  revalidatePath(`/${slug}/admin/operacion`);
+  return actionOk(undefined);
+}
+
+export type SwappableProduct = { id: string; name: string; price_cents: number };
+
+/**
+ * Productos que rutean a un sector dado (spec 049), para el picker de "cambiar
+ * producto" en la edición de comanda. Precedencia igual a `resolveStation`:
+ * `products.station_id` (override) > `categories.station_id` (default). Solo se
+ * ofrecen productos del mismo sector para no romper el mapeo comandera↔ticket.
+ * Gate encargado/admin.
+ */
+export async function getSwappableProducts(
+  slug: string,
+  stationId: string,
+): Promise<ActionResult<SwappableProduct[]>> {
+  const business = await getBusiness(slug);
+  if (!business) return actionError("Negocio no encontrado.");
+
+  const ctxResult = await requireMozoActionContext(business.id);
+  if (!ctxResult.ok) return ctxResult;
+  if (!canModifyPostEnvio(ctxResult.data.role)) {
+    return actionError("Sin permiso.");
+  }
+
+  const service = createSupabaseServiceClient() as unknown as GenericClient;
+  const { data: rows } = await service
+    .from("products")
+    .select("id, name, price_cents, station_id, category:categories(station_id)")
+    .eq("business_id", business.id)
+    .eq("is_active", true)
+    .eq("is_available", true)
+    .order("name", { ascending: true });
+
+  type Row = {
+    id: string;
+    name: string;
+    price_cents: number;
+    station_id: string | null;
+    category: { station_id: string | null } | null;
+  };
+  const out = ((rows ?? []) as unknown as Row[])
+    .filter(
+      (p) =>
+        resolveStation(
+          { station_id: p.station_id, category: p.category },
+          null,
+        ) === stationId,
+    )
+    .map((p) => ({ id: p.id, name: p.name, price_cents: Number(p.price_cents) }));
+
+  return actionOk(out);
 }

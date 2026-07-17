@@ -10,6 +10,8 @@ type GenericClient = SupabaseClient;
 
 export type LocalComandaItem = {
   order_item_id: string;
+  /** Producto actual del ítem (spec 049: prefill del picker "cambiar producto"). */
+  product_id: string | null;
   product_name: string;
   quantity: number;
   notes: string | null;
@@ -17,6 +19,8 @@ export type LocalComandaItem = {
   cancelled_reason: string | null;
   modifiers: string[];
   kitchen_status: KitchenItemStatus;
+  /** Ítem de combo / menú del día: no editable en fase 1 (spec 049). */
+  is_combo: boolean;
 };
 
 export type LocalComanda = {
@@ -38,6 +42,10 @@ export type LocalComanda = {
   /** Spec 35: reimpresión pedida (aún no confirmada por el agente). Sostiene
    *  el estado optimista del botón Reimprimir/Reintentar. */
   reprint_requested_at: string | null;
+  /** Spec 49: comanda anulada entera. Cuando está seteado, sus ítems ya están
+   *  cancelados y la card se oculta (fantasma); el flag corta los botones en la
+   *  ventana previa al refresh de realtime. */
+  cancelled_at: string | null;
   /** Tipo de la order — "dine_in" / "delivery" / "take_away".
    *  El dine-in se rotula como Mesa N en la card. */
   delivery_type: string;
@@ -81,7 +89,7 @@ export async function getActiveComandas(
   // PostgREST con timestamp ISO embebido era frágil.
   const select = `
     id, order_id, station_id, batch, status, emitted_at, delivered_at,
-    print_failed_at, reprint_requested_at,
+    print_failed_at, reprint_requested_at, cancelled_at,
     stations!inner ( name ),
     orders!inner (
       id, business_id, order_number, delivery_type, customer_name, mozo_id,
@@ -89,8 +97,8 @@ export async function getActiveComandas(
     ),
     comanda_items (
       order_items (
-        id, product_name, quantity, notes, cancelled_at, cancelled_reason,
-        kitchen_status,
+        id, product_id, product_name, quantity, notes, cancelled_at, cancelled_reason,
+        kitchen_status, is_combo_component, parent_order_item_id, daily_menu_id,
         order_item_modifiers ( modifier_name )
       )
     )
@@ -133,6 +141,7 @@ export async function getActiveComandas(
     delivered_at: string | null;
     print_failed_at: string | null;
     reprint_requested_at: string | null;
+    cancelled_at: string | null;
     stations: { name: string };
     orders: {
       id: string;
@@ -145,12 +154,16 @@ export async function getActiveComandas(
     comanda_items: {
       order_items: {
         id: string;
+        product_id: string | null;
         product_name: string;
         quantity: number;
         notes: string | null;
         cancelled_at: string | null;
         cancelled_reason: string | null;
         kitchen_status: KitchenItemStatus;
+        is_combo_component: boolean | null;
+        parent_order_item_id: string | null;
+        daily_menu_id: string | null;
         order_item_modifiers: { modifier_name: string }[] | null;
       } | null;
     }[] | null;
@@ -169,6 +182,7 @@ export async function getActiveComandas(
     delivered_at: c.delivered_at,
     print_failed_at: c.print_failed_at,
     reprint_requested_at: c.reprint_requested_at,
+    cancelled_at: c.cancelled_at,
     delivery_type: c.orders.delivery_type,
     table_label: c.orders.tables?.label ?? null,
     customer_name: c.orders.customer_name,
@@ -178,6 +192,7 @@ export async function getActiveComandas(
       .filter((it): it is NonNullable<typeof it> => Boolean(it))
       .map((it) => ({
         order_item_id: it.id,
+        product_id: it.product_id,
         product_name: it.product_name,
         quantity: it.quantity,
         notes: it.notes,
@@ -185,6 +200,10 @@ export async function getActiveComandas(
         cancelled_reason: it.cancelled_reason,
         modifiers: (it.order_item_modifiers ?? []).map((m) => m.modifier_name),
         kitchen_status: it.kitchen_status,
+        is_combo:
+          Boolean(it.is_combo_component) ||
+          Boolean(it.parent_order_item_id) ||
+          Boolean(it.daily_menu_id),
       })),
   }));
 }

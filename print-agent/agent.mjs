@@ -54,6 +54,13 @@ function ticketText(c) {
   const thin = "--------------------------------";
   const L = [];
   L.push(wide);
+  // Spec 049: comanda anulada → ticket ANULADA destacado para que cocina
+  // descarte lo que ya tenía impreso. Campo aditivo: un agente viejo no recibe
+  // `c.cancelled` y reimprime el ticket normal (degradación aceptable).
+  if (c.cancelled) {
+    L.push("  *** COMANDA ANULADA ***");
+    L.push(thin);
+  }
   L.push(`  ${String(c.station_name).toUpperCase()}`);
   L.push(`  ${c.table_label}    Tanda ${c.batch}`);
   L.push(`  Comanda #${String(c.comanda_id).slice(0, 8)}`);
@@ -62,14 +69,22 @@ function ticketText(c) {
   } catch {
     /* fecha opcional */
   }
+  if (c.cancelled && c.cancelled_reason) {
+    L.push(`  Motivo: ${c.cancelled_reason}`);
+  }
   L.push(thin);
   for (const it of c.items ?? []) {
-    L.push(`${it.quantity}x  ${it.product_name}`);
+    const prefix = c.cancelled ? "ANULADO " : "";
+    L.push(`${prefix}${it.quantity}x  ${it.product_name}`);
     if (it.modifiers && it.modifiers.length)
       L.push(`      + ${it.modifiers.join(", ")}`);
     if (it.notes) L.push(`      obs: ${it.notes}`);
   }
   if (!c.items || c.items.length === 0) L.push("(sin items)");
+  if (c.cancelled) {
+    L.push(thin);
+    L.push("  *** NO PREPARAR ***");
+  }
   L.push(wide);
   L.push("");
   L.push("");

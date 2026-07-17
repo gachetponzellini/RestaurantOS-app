@@ -46,13 +46,20 @@ vi.mock("@/lib/supabase/service", () => ({
 
 const { GET, POST } = await import("./route");
 
-function makeRow(name: string, printerIp: string | null): Row {
+function makeRow(
+  name: string,
+  printerIp: string | null,
+  extra: Partial<Row> = {},
+): Row {
   return {
     id: `c-${name}`,
     station_id: `st-${name}`,
     batch: 1,
     status: "pendiente",
     emitted_at: "2026-01-01T00:00:00Z",
+    cancelled_at: null,
+    cancelled_reason: null,
+    ...extra,
     stations: {
       name,
       printer_ip: printerIp,
@@ -121,6 +128,29 @@ describe("GET /api/print-agent — printer_ip por comanda (spec 28)", () => {
     expect(captured.orFilters).toHaveLength(1);
     expect(captured.orFilters[0]).toContain("status.eq.pendiente");
     expect(captured.orFilters[0]).toContain("reprint_requested_at.not.is.null");
+  });
+
+  it("comanda anulada → payload con cancelled:true + motivo (spec 049)", async () => {
+    rows = [
+      makeRow("Cocina", "192.168.10.50", {
+        cancelled_at: "2026-07-17T00:00:00Z",
+        cancelled_reason: "Mesa se levantó",
+      }),
+      makeRow("Bar", null),
+    ];
+    const res = await GET(getReq());
+    const body = (await res.json()) as {
+      comandas: {
+        station_name: string;
+        cancelled: boolean;
+        cancelled_reason: string | null;
+      }[];
+    };
+    const cocina = body.comandas.find((c) => c.station_name === "Cocina");
+    expect(cocina?.cancelled).toBe(true);
+    expect(cocina?.cancelled_reason).toBe("Mesa se levantó");
+    const bar = body.comandas.find((c) => c.station_name === "Bar");
+    expect(bar?.cancelled).toBe(false);
   });
 
   it("sin Bearer válido → 401", async () => {

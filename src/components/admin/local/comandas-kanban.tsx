@@ -1,15 +1,22 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import { toast } from "sonner";
 import {
+  Ban,
   ChefHat,
   Check,
+  Minus,
   Package,
+  Pencil,
   Play,
+  Plus,
   Printer,
   RotateCcw,
+  Trash2,
   Truck,
+  Undo2,
   UtensilsCrossed,
   Wifi,
   WifiOff,
@@ -17,11 +24,26 @@ import {
 
 import {
   advanceComandaStatus,
+  cancelarComanda,
+  cancelarItem,
+  editarItemComanda,
+  getSwappableProducts,
   marcarComandaEntregada,
   solicitarReimpresion,
 } from "@/lib/comandas/actions";
+import type {
+  EditarItemComandaPatch,
+  SwappableProduct,
+} from "@/lib/comandas/actions";
 import type { LocalComanda, LocalStation } from "@/lib/admin/local-query";
 import type { ComandaStatus } from "@/lib/comandas/types";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 /**
  * Umbral (ms) para considerar "caído" al print agent: sin heartbeat hace más
@@ -191,6 +213,11 @@ export function ComandasKanban({
   // 35) para ir directo a las comandas con `print_failed_at`.
   const [showOnlyFailed, setShowOnlyFailed] = useState(false);
 
+  // Modales de gestión de comanda (spec 049): anular la comanda entera / editar
+  // sus ítems. Guardan la comanda objetivo; null = cerrado.
+  const [anularTarget, setAnularTarget] = useState<LocalComanda | null>(null);
+  const [editarTarget, setEditarTarget] = useState<LocalComanda | null>(null);
+
   // Optimistic con rollback en error vía helper compartido (spec 21). El `base`
   // es `initialComandas` (props del server): realtime dispara router.refresh()
   // y el overlay optimista persiste hasta que termina SU transición, sin pisar
@@ -275,6 +302,20 @@ export function ComandasKanban({
             // Comandas no tiene business_id directo; el filter por business
             // viaja via JOIN en el server. router.refresh() re-fetchea con
             // permisos correctos. Debounced para no spamear en ráfagas.
+            scheduleRefresh();
+          },
+        )
+        .on(
+          "postgres_changes",
+          {
+            event: "UPDATE",
+            schema: "public",
+            table: "orders",
+          },
+          () => {
+            // La etiqueta de mesa de cada comanda sale del JOIN order→table.
+            // Un traslado (spec 048) sólo toca orders.table_id, NO comandas, así
+            // que sin esto el KDS seguiría mostrando la mesa vieja. Debounced.
             scheduleRefresh();
           },
         )
@@ -434,6 +475,8 @@ export function ComandasKanban({
                     onEmpezar={onEmpezar}
                     onEntregar={onEntregar}
                     onReimprimir={onReimprimir}
+                    onEditar={() => setEditarTarget(c)}
+                    onAnular={() => setAnularTarget(c)}
                     isPending={isPending}
                   />
                 ))}
@@ -447,6 +490,30 @@ export function ComandasKanban({
           );
         })}
       </div>
+
+      {/* ── Modales de gestión de comanda (spec 049) ── */}
+      {anularTarget && (
+        <AnularComandaModal
+          slug={slug}
+          comanda={anularTarget}
+          onClose={() => setAnularTarget(null)}
+          onDone={() => {
+            setAnularTarget(null);
+            router.refresh();
+          }}
+        />
+      )}
+      {editarTarget && (
+        <EditarComandaModal
+          slug={slug}
+          comanda={editarTarget}
+          onClose={() => setEditarTarget(null)}
+          onDone={() => {
+            setEditarTarget(null);
+            router.refresh();
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -516,6 +583,8 @@ function ComandaCard({
   onEmpezar,
   onEntregar,
   onReimprimir,
+  onEditar,
+  onAnular,
   isPending,
 }: {
   comanda: LocalComanda;
@@ -526,6 +595,8 @@ function ComandaCard({
   onEmpezar: (id: string) => void;
   onEntregar: (id: string) => void;
   onReimprimir: (id: string) => void;
+  onEditar: () => void;
+  onAnular: () => void;
   isPending: boolean;
 }) {
   const elapsed = useElapsedMinutes(comanda.emitted_at);
@@ -737,6 +808,32 @@ function ComandaCard({
           </>
         )}
       </button>
+
+      {/* Gestión de la comanda (spec 049): editar ítems / anular entera. Solo en
+          comandas activas y no anuladas. El loading es explícito (frontera de
+          plata): cada modal maneja su propio pending. */}
+      {!isTerminal && !comanda.cancelled_at && (
+        <div className="grid grid-cols-2 gap-2">
+          <button
+            type="button"
+            onClick={onEditar}
+            disabled={isPending}
+            className="text-muted-foreground ring-border/70 hover:bg-muted/60 inline-flex h-8 items-center justify-center gap-1.5 rounded-lg px-2 text-xs font-semibold ring-1 transition active:translate-y-px disabled:opacity-50"
+          >
+            <Pencil className="size-3.5" strokeWidth={2.5} />
+            Editar
+          </button>
+          <button
+            type="button"
+            onClick={onAnular}
+            disabled={isPending}
+            className="inline-flex h-8 items-center justify-center gap-1.5 rounded-lg px-2 text-xs font-semibold text-rose-700 ring-1 ring-rose-200 transition hover:bg-rose-50 active:translate-y-px disabled:opacity-50"
+          >
+            <Ban className="size-3.5" strokeWidth={2.5} />
+            Anular
+          </button>
+        </div>
+      )}
     </article>
   );
 }
@@ -778,5 +875,376 @@ function AgentHealthPill({ lastSeenAt }: { lastSeenAt: string | null }) {
       <WifiOff className="size-3.5" strokeWidth={2.5} />
       Agente de impresión sin conexión ({agoLabel})
     </span>
+  );
+}
+
+// ─── Anular comanda entera (spec 049) ───────────────────────────────────────
+
+function formatPrice(cents: number): string {
+  return `$${(cents / 100).toLocaleString("es-AR")}`;
+}
+
+function AnularComandaModal({
+  slug,
+  comanda,
+  onClose,
+  onDone,
+}: {
+  slug: string;
+  comanda: LocalComanda;
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const [motivo, setMotivo] = useState("");
+  const [pending, startTransition] = useTransition();
+
+  const submit = () => {
+    const m = motivo.trim();
+    if (!m) {
+      toast.error("Indicá un motivo.");
+      return;
+    }
+    startTransition(async () => {
+      const res = await cancelarComanda(slug, comanda.id, m);
+      if (res.ok) {
+        toast.success("Comanda anulada · se reimprime ANULADA en cocina.");
+        onDone();
+      } else {
+        toast.error(res.error ?? "No pudimos anular la comanda.");
+      }
+    });
+  };
+
+  const origen =
+    comanda.delivery_type === "dine_in"
+      ? `Mesa ${comanda.table_label ?? "?"}`
+      : comanda.customer_name || "Pedido online";
+
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Anular comanda</DialogTitle>
+        </DialogHeader>
+        <p className="text-muted-foreground text-sm">
+          Se cancelan todos los ítems de{" "}
+          <span className="text-foreground font-semibold">
+            {comanda.station_name} · tanda {comanda.batch}
+          </span>{" "}
+          ({origen}). Sale un ticket{" "}
+          <span className="font-semibold">ANULADA</span> en la comandera del
+          sector y se avisa al mozo.
+        </p>
+        <textarea
+          value={motivo}
+          onChange={(e) => setMotivo(e.target.value)}
+          rows={3}
+          autoFocus
+          placeholder="Motivo (ej: mesa se levantó, error de carga)"
+          className="border-input bg-background focus-visible:ring-ring w-full rounded-lg border px-3 py-2 text-sm outline-none focus-visible:ring-2"
+        />
+        <DialogFooter>
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={pending}
+            className="text-muted-foreground ring-border/70 hover:bg-muted/60 inline-flex h-9 items-center justify-center rounded-lg px-4 text-sm font-semibold ring-1 transition disabled:opacity-50"
+          >
+            Volver
+          </button>
+          <button
+            type="button"
+            onClick={submit}
+            disabled={pending}
+            className="inline-flex h-9 items-center justify-center gap-1.5 rounded-lg bg-rose-600 px-4 text-sm font-semibold text-white transition hover:bg-rose-700 disabled:opacity-50"
+          >
+            <Ban className="size-4" strokeWidth={2.5} />
+            {pending ? "Anulando…" : "Anular comanda"}
+          </button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ─── Editar comanda ya impresa (spec 049) ───────────────────────────────────
+
+/** Fila de trabajo del modal: copia editable de un ítem vivo + su original. */
+type EditRow = {
+  itemId: string;
+  productId: string | null;
+  productName: string;
+  quantity: number;
+  notes: string;
+  removed: boolean;
+  isCombo: boolean;
+  origProductId: string | null;
+  origQuantity: number;
+  origNotes: string;
+};
+
+function EditarComandaModal({
+  slug,
+  comanda,
+  onClose,
+  onDone,
+}: {
+  slug: string;
+  comanda: LocalComanda;
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const [rows, setRows] = useState<EditRow[]>(() =>
+    comanda.items
+      .filter((it) => !it.cancelled_at)
+      .map((it) => ({
+        itemId: it.order_item_id,
+        productId: it.product_id,
+        productName: it.product_name,
+        quantity: it.quantity,
+        notes: it.notes ?? "",
+        removed: false,
+        isCombo: it.is_combo,
+        origProductId: it.product_id,
+        origQuantity: it.quantity,
+        origNotes: it.notes ?? "",
+      })),
+  );
+  const [pending, startTransition] = useTransition();
+  const [products, setProducts] = useState<SwappableProduct[] | null>(null);
+  const [loadingProducts, setLoadingProducts] = useState(false);
+  const [pickerFor, setPickerFor] = useState<string | null>(null);
+
+  // Carga perezosa de los productos del sector (solo al primer "Cambiar producto").
+  const ensureProducts = () => {
+    if (products || loadingProducts) return;
+    setLoadingProducts(true);
+    void getSwappableProducts(slug, comanda.station_id).then((r) => {
+      if (r.ok) setProducts(r.data);
+      else toast.error(r.error ?? "No pudimos cargar los productos del sector.");
+      setLoadingProducts(false);
+    });
+  };
+
+  const patchRow = (itemId: string, patch: Partial<EditRow>) =>
+    setRows((rs) => rs.map((r) => (r.itemId === itemId ? { ...r, ...patch } : r)));
+
+  const rowChanged = (r: EditRow) =>
+    r.removed ||
+    r.quantity !== r.origQuantity ||
+    r.notes.trim() !== r.origNotes.trim() ||
+    r.productId !== r.origProductId;
+
+  const dirty = rows.some(rowChanged);
+
+  // Guardar: aplica quitar / editar por ítem y reimprime el ticket corregido.
+  // Loading explícito (no optimista): frontera de plata (spec 21).
+  const submit = () => {
+    startTransition(async () => {
+      for (const r of rows) {
+        if (r.removed) {
+          const res = await cancelarItem(r.itemId, "Quitado por el encargado", slug);
+          if (!res.ok) {
+            toast.error(res.error ?? "No pudimos quitar un ítem.");
+            return;
+          }
+          continue;
+        }
+        const patch: EditarItemComandaPatch = {};
+        if (r.quantity !== r.origQuantity) patch.quantity = r.quantity;
+        if (r.notes.trim() !== r.origNotes.trim())
+          patch.notes = r.notes.trim() ? r.notes.trim() : null;
+        if (r.productId && r.productId !== r.origProductId)
+          patch.productId = r.productId;
+        if (Object.keys(patch).length === 0) continue;
+        const res = await editarItemComanda(slug, r.itemId, patch);
+        if (!res.ok) {
+          toast.error(res.error ?? "No pudimos guardar un cambio.");
+          return;
+        }
+      }
+      const rp = await solicitarReimpresion(slug, comanda.id);
+      if (!rp.ok) {
+        toast.error("Cambios guardados, pero no se pudo reimprimir.");
+      } else {
+        toast.success("Comanda actualizada · se reimprime el ticket corregido.");
+      }
+      onDone();
+    });
+  };
+
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle>
+            Editar comanda · {comanda.station_name} · tanda {comanda.batch}
+          </DialogTitle>
+        </DialogHeader>
+
+        <div className="flex max-h-[55vh] flex-col gap-2 overflow-y-auto pr-1">
+          {rows.map((r) => (
+            <div
+              key={r.itemId}
+              className={[
+                "ring-border/60 flex flex-col gap-2 rounded-xl p-3 ring-1",
+                r.removed ? "opacity-50" : "",
+              ].join(" ")}
+            >
+              <div className="flex items-center justify-between gap-2">
+                <span
+                  className={[
+                    "text-foreground min-w-0 flex-1 truncate text-sm font-semibold",
+                    r.removed ? "line-through" : "",
+                  ].join(" ")}
+                >
+                  {r.productName}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => patchRow(r.itemId, { removed: !r.removed })}
+                  disabled={pending}
+                  className={[
+                    "inline-flex h-7 items-center gap-1 rounded-lg px-2 text-[11px] font-semibold transition disabled:opacity-50",
+                    r.removed
+                      ? "text-muted-foreground ring-border/70 hover:bg-muted/60 ring-1"
+                      : "text-rose-700 ring-1 ring-rose-200 hover:bg-rose-50",
+                  ].join(" ")}
+                >
+                  {r.removed ? (
+                    <>
+                      <Undo2 className="size-3" strokeWidth={2.5} /> Deshacer
+                    </>
+                  ) : (
+                    <>
+                      <Trash2 className="size-3" strokeWidth={2.5} /> Quitar
+                    </>
+                  )}
+                </button>
+              </div>
+
+              {!r.removed && (
+                <>
+                  <div className="flex items-center gap-3">
+                    <div className="ring-border/70 inline-flex items-center rounded-lg ring-1">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          patchRow(r.itemId, {
+                            quantity: Math.max(1, r.quantity - 1),
+                          })
+                        }
+                        disabled={pending || r.quantity <= 1}
+                        className="hover:bg-muted/60 inline-flex size-8 items-center justify-center rounded-l-lg disabled:opacity-40"
+                      >
+                        <Minus className="size-3.5" strokeWidth={2.5} />
+                      </button>
+                      <span className="w-8 text-center text-sm font-bold tabular-nums">
+                        {r.quantity}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          patchRow(r.itemId, { quantity: r.quantity + 1 })
+                        }
+                        disabled={pending}
+                        className="hover:bg-muted/60 inline-flex size-8 items-center justify-center rounded-r-lg disabled:opacity-40"
+                      >
+                        <Plus className="size-3.5" strokeWidth={2.5} />
+                      </button>
+                    </div>
+
+                    {!r.isCombo && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          ensureProducts();
+                          setPickerFor(pickerFor === r.itemId ? null : r.itemId);
+                        }}
+                        disabled={pending}
+                        className="text-muted-foreground hover:text-foreground text-xs font-semibold underline underline-offset-2 disabled:opacity-50"
+                      >
+                        Cambiar producto
+                      </button>
+                    )}
+                  </div>
+
+                  {pickerFor === r.itemId && (
+                    <div className="ring-border/60 max-h-40 overflow-y-auto rounded-lg ring-1">
+                      {loadingProducts && (
+                        <p className="text-muted-foreground p-2 text-xs">
+                          Cargando productos…
+                        </p>
+                      )}
+                      {!loadingProducts && products?.length === 0 && (
+                        <p className="text-muted-foreground p-2 text-xs">
+                          No hay otros productos en este sector.
+                        </p>
+                      )}
+                      {products?.map((p) => (
+                        <button
+                          key={p.id}
+                          type="button"
+                          onClick={() => {
+                            patchRow(r.itemId, {
+                              productId: p.id,
+                              productName: p.name,
+                            });
+                            setPickerFor(null);
+                          }}
+                          className={[
+                            "hover:bg-muted/60 flex w-full items-center justify-between gap-2 px-3 py-1.5 text-left text-xs",
+                            p.id === r.productId ? "bg-muted/40 font-semibold" : "",
+                          ].join(" ")}
+                        >
+                          <span className="truncate">{p.name}</span>
+                          <span className="text-muted-foreground tabular-nums">
+                            {formatPrice(p.price_cents)}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
+                  <input
+                    type="text"
+                    value={r.notes}
+                    onChange={(e) => patchRow(r.itemId, { notes: e.target.value })}
+                    disabled={pending}
+                    placeholder="Aclaración (ej: sin sal, bien cocido)"
+                    className="border-input bg-background focus-visible:ring-ring w-full rounded-lg border px-3 py-1.5 text-xs outline-none focus-visible:ring-2 disabled:opacity-50"
+                  />
+                </>
+              )}
+            </div>
+          ))}
+          {rows.length === 0 && (
+            <p className="text-muted-foreground py-6 text-center text-sm">
+              La comanda no tiene ítems editables.
+            </p>
+          )}
+        </div>
+
+        <DialogFooter>
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={pending}
+            className="text-muted-foreground ring-border/70 hover:bg-muted/60 inline-flex h-9 items-center justify-center rounded-lg px-4 text-sm font-semibold ring-1 transition disabled:opacity-50"
+          >
+            Volver
+          </button>
+          <button
+            type="button"
+            onClick={submit}
+            disabled={pending || !dirty}
+            className="inline-flex h-9 items-center justify-center gap-1.5 rounded-lg bg-sky-600 px-4 text-sm font-semibold text-white transition hover:bg-sky-700 disabled:opacity-50"
+          >
+            <Printer className="size-4" strokeWidth={2.5} />
+            {pending ? "Guardando…" : "Guardar y reimprimir"}
+          </button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
