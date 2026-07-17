@@ -48,47 +48,104 @@ const authHeaders = { authorization: `Bearer ${cfg.printAgentKey}` };
 const FAIL_THRESHOLD = 5;
 const failCounts = new Map(); // comanda_id → fallos consecutivos
 
-/** Arma el texto del ticket (monoespaciado, ~32 col). */
-function ticketText(c) {
-  const wide = "================================";
-  const thin = "--------------------------------";
+// ── Formato del ticket ────────────────────────────────────────────────────
+// El ticket se arma como una lista de líneas con atributos de tamaño/énfasis y
+// se renderiza según el transporte:
+//   • red (térmica ESC/POS) → renderEscPos: letra grande, ancha y espaciada.
+//   • windows / dry-run     → renderPlain: texto monoespaciado plano.
+const ESC = "\x1b";
+const GS = "\x1d";
+
+// Tamaño de carácter (GS ! n): nibble alto = multiplicador de ancho, nibble
+// bajo = multiplicador de alto. 0x11 = ancho×2 + alto×2 (el más grande que
+// usamos); 0x01 = solo alto×2.
+const CHAR_SIZE = { sm: "\x00", tall: "\x01", big: "\x11" };
+
+// Interlineado (ESC 3 n, en puntos). Más alto = comanda más espaciada y evita
+// que las líneas de doble alto se pisen. Ajustar acá si queda muy junto/suelto.
+const LINE_SPACING = 64;
+
+const RULE = "--------------------------------"; // 32 col
+
+/** Arma el ticket como líneas con formato (tamaño/negrita/alineación). */
+function ticketLines(c) {
   const L = [];
-  L.push(wide);
+  const push = (text, opts = {}) => L.push({ text, ...opts });
+
   // Spec 049: comanda anulada → ticket ANULADA destacado para que cocina
   // descarte lo que ya tenía impreso. Campo aditivo: un agente viejo no recibe
   // `c.cancelled` y reimprime el ticket normal (degradación aceptable).
   if (c.cancelled) {
-    L.push("  *** COMANDA ANULADA ***");
-    L.push(thin);
+    push("*** ANULADA ***", { size: "big", bold: true, align: "center" });
+    push(RULE);
   }
-  L.push(`  ${String(c.station_name).toUpperCase()}`);
-  L.push(`  ${c.table_label}    Tanda ${c.batch}`);
-  L.push(`  Comanda #${String(c.comanda_id).slice(0, 8)}`);
+
+  // Sector / estación + mesa: lo primero que lee la cocina, bien grande.
+  push(String(c.station_name).toUpperCase(), { size: "big", bold: true, align: "center" });
+  push(`MESA ${c.table_label}`, { size: "big", bold: true, align: "center" });
+  push(`Tanda ${c.batch}`, { size: "tall", bold: true, align: "center" });
+
+  // Metadata chica (referencia, no operativa).
+  push(`Comanda #${String(c.comanda_id).slice(0, 8)}`);
   try {
-    L.push(`  ${new Date(c.emitted_at).toLocaleString("es-AR")}`);
+    push(new Date(c.emitted_at).toLocaleString("es-AR"));
   } catch {
     /* fecha opcional */
   }
-  if (c.cancelled && c.cancelled_reason) {
-    L.push(`  Motivo: ${c.cancelled_reason}`);
-  }
-  L.push(thin);
+  if (c.cancelled && c.cancelled_reason) push(`Motivo: ${c.cancelled_reason}`, { bold: true });
+
+  push(RULE);
+
+  // Ítems: el corazón de la comanda, en el tamaño más grande.
   for (const it of c.items ?? []) {
     const prefix = c.cancelled ? "ANULADO " : "";
-    L.push(`${prefix}${it.quantity}x  ${it.product_name}`);
-    if (it.modifiers && it.modifiers.length)
-      L.push(`      + ${it.modifiers.join(", ")}`);
-    if (it.notes) L.push(`      obs: ${it.notes}`);
+    push(`${prefix}${it.quantity}x ${it.product_name}`, { size: "big", bold: true });
+    if (it.modifiers && it.modifiers.length) push(`+ ${it.modifiers.join(", ")}`, { size: "tall" });
+    if (it.notes) push(`obs: ${it.notes}`, { size: "tall", bold: true });
   }
-  if (!c.items || c.items.length === 0) L.push("(sin items)");
+  if (!c.items || c.items.length === 0) push("(sin items)");
+
   if (c.cancelled) {
-    L.push(thin);
-    L.push("  *** NO PREPARAR ***");
+    push(RULE);
+    push("*** NO PREPARAR ***", { size: "big", bold: true, align: "center" });
   }
-  L.push(wide);
-  L.push("");
-  L.push("");
-  return L.join("\r\n");
+  return L;
+}
+
+/** Renderiza las líneas como ESC/POS para térmica de red (producción). */
+function renderEscPos(lines) {
+  let out = ESC + "@"; // init (resetea tamaño, énfasis e interlineado)
+  out += ESC + "3" + String.fromCharCode(LINE_SPACING); // interlineado espaciado
+  let align = null;
+  let size = null;
+  let bold = null;
+  for (const ln of lines) {
+    const a = ln.align ?? "left";
+    const s = ln.size ?? "sm";
+    const b = ln.bold ?? false;
+    if (a !== align) {
+      out += ESC + "a" + (a === "center" ? "\x01" : a === "right" ? "\x02" : "\x00");
+      align = a;
+    }
+    if (s !== size) {
+      out += GS + "!" + CHAR_SIZE[s];
+      size = s;
+    }
+    if (b !== bold) {
+      out += ESC + "E" + (b ? "\x01" : "\x00");
+      bold = b;
+    }
+    out += (ln.text ?? "") + "\n";
+  }
+  // Reset de estilo + avance + corte parcial.
+  out += GS + "!" + "\x00" + ESC + "E" + "\x00" + ESC + "a" + "\x00";
+  out += "\n\n\n" + GS + "V" + "\x00";
+  return out;
+}
+
+/** Renderiza las líneas como texto plano (windows / dry-run). */
+function renderPlain(lines) {
+  return lines.map((ln) => ln.text ?? "").join("\r\n") + "\r\n\r\n";
 }
 
 /** Imprime por el driver de Windows (GDI) a una impresora instalada. */
@@ -122,12 +179,9 @@ function printWindows(text, printerName) {
   });
 }
 
-/** Imprime en una térmica de red por socket TCP con ESC/POS (producción). */
-function printNetwork(text, ip, port) {
+/** Envía un payload ESC/POS ya armado a una térmica de red por socket TCP. */
+function printNetwork(payload, ip, port) {
   return new Promise((resolve, reject) => {
-    const ESC = "\x1b";
-    const GS = "\x1d";
-    const payload = ESC + "@" + text + "\n\n\n" + GS + "V" + "\x00"; // init + texto + corte
     const socket = net.createConnection({ host: ip, port: port || 9100 }, () => {
       socket.write(Buffer.from(payload, "latin1"), () => socket.end());
     });
@@ -187,9 +241,9 @@ async function report(comandaId, result, error) {
 }
 
 async function printOne(c) {
-  const text = ticketText(c);
+  const lines = ticketLines(c);
   if (DRY) {
-    console.log("\n" + text);
+    console.log("\n" + renderPlain(lines));
     return;
   }
   if (c.printer_enabled === false) {
@@ -205,9 +259,9 @@ async function printOne(c) {
         console.log(`  ⏭  ${c.station_name}: sin printer_ip, se saltea`);
         return;
       }
-      await printNetwork(text, c.printer_ip, c.printer_port);
+      await printNetwork(renderEscPos(lines), c.printer_ip, c.printer_port);
     } else {
-      await printWindows(text, cfg.printerName);
+      await printWindows(renderPlain(lines), cfg.printerName);
     }
   } catch (e) {
     const n = (failCounts.get(c.comanda_id) ?? 0) + 1;
