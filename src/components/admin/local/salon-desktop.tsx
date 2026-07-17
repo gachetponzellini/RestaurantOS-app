@@ -8,6 +8,7 @@ import {
   Ban,
   ClipboardList,
   Clock,
+  MoveRight,
   Pencil,
   Receipt,
   UserCheck,
@@ -24,6 +25,7 @@ import { AsignarMozosPanel } from "@/components/mozo/asignar-mozos-panel";
 import { FloorPlanViewer, type TableExtra } from "@/components/mozo/floor-plan-viewer";
 import { OrderSummaryCard } from "@/components/mozo/order-summary-card";
 import { TransferTableModal } from "@/components/mozo/transfer-table-modal";
+import { TrasladarMesaModal } from "@/components/mozo/trasladar-mesa-modal";
 import { WalkInModal } from "@/components/mozo/walk-in-modal";
 import { Button } from "@/components/ui/button";
 import {
@@ -62,7 +64,11 @@ import { initialsFromName, mozoColor, mozoPalette } from "@/lib/mozo/colors";
 import type { MozoMember } from "@/lib/mozo/queries";
 import { type OperationalStatus } from "@/lib/mozo/state-machine";
 import { useTablesRealtime } from "@/lib/mozo/use-tables-realtime";
-import { canAssignMozo, canTransitionMesa } from "@/lib/permissions/can";
+import {
+  canAssignMozo,
+  canMoveTable,
+  canTransitionMesa,
+} from "@/lib/permissions/can";
 import type { FloorTable } from "@/lib/reservations/types";
 import { cn } from "@/lib/utils";
 
@@ -203,6 +209,7 @@ export function SalonDesktop({
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [walkInTableId, setWalkInTableId] = useState<string | null>(null);
   const [transferTableId, setTransferTableId] = useState<string | null>(null);
+  const [trasladarTableId, setTrasladarTableId] = useState<string | null>(null);
   const [anularPrompt, setAnularPrompt] = useState<{
     tableId: string;
     label: string;
@@ -886,7 +893,7 @@ export function SalonDesktop({
         )}
       >
         {/* Columna del plano: viewer arriba + stats al pie */}
-        <div className="flex min-h-0 flex-col gap-3">
+        <div className="flex min-h-0 flex-col gap-2">
           <div className="bg-card ring-border/60 min-h-0 flex-1 overflow-hidden rounded-2xl ring-1">
             {plan ? (
               <FloorPlanViewer
@@ -1047,6 +1054,7 @@ export function SalonDesktop({
                 if (res) handleSentarReserva(res.id, selected.id);
               }}
               onTransfer={() => setTransferTableId(selected.id)}
+              onTrasladar={() => setTrasladarTableId(selected.id)}
               onAnular={() =>
                 setAnularPrompt({ tableId: selected.id, label: selected.label })
               }
@@ -1133,6 +1141,33 @@ export function SalonDesktop({
           }}
         />
       )}
+      {trasladarTableId && (
+        <TrasladarMesaModal
+          fromTableId={trasladarTableId}
+          fromLabel={
+            tables.find((t) => t.id === trasladarTableId)?.label ?? "?"
+          }
+          tables={tables
+            .filter(
+              (t) =>
+                t.id !== trasladarTableId &&
+                ((withOverlay(t).operational_status ?? "libre") === "libre"),
+            )
+            .map((t) => ({
+              id: t.id,
+              label: t.label,
+              seats: t.seats,
+              is_bar: t.is_bar,
+            }))}
+          businessSlug={slug}
+          onClose={() => setTrasladarTableId(null)}
+          onSuccess={() => {
+            setTrasladarTableId(null);
+            setSelectedId(null);
+            router.refresh();
+          }}
+        />
+      )}
 
       {showNewReservation && (
         <NewReservationModal
@@ -1207,6 +1242,10 @@ export function SalonDesktop({
 
 // ─── Stats ──────────────────────────────────────────────────────────────────
 
+// Tira compacta de estado (una sola línea) — antes era un card con header +
+// grid que comía ~70px de alto del plano. Ahora resume lo mismo (total +
+// libre/ocupada/pidió cuenta) en un renglón fino, para dejarle el máximo de
+// espacio vertical al plano en cualquier monitor.
 function SalonStats({
   stats,
   total,
@@ -1215,38 +1254,23 @@ function SalonStats({
   total: number;
 }) {
   return (
-    <div className="bg-card ring-border/60 rounded-2xl p-3 ring-1">
-      <div className="text-muted-foreground mb-2 flex items-center gap-2">
-        <Users className="size-4" />
-        <h3 className="text-xs font-bold uppercase tracking-wider">
-          Estado del salón · {total} mesa{total === 1 ? "" : "s"} activas
-        </h3>
-      </div>
-      <div className="grid grid-cols-3 gap-2">
-        {STATS_ORDER.map((s) => {
-          const c = STATUS_COLORS[s];
-          const count = stats[s] ?? 0;
-          return (
-            <div
-              key={s}
-              className={cn(
-                "flex items-center justify-between rounded-xl px-3 py-2",
-                c.bg,
-              )}
-            >
-              <div className="flex items-center gap-2 min-w-0">
-                <span className={cn("h-2 w-2 shrink-0 rounded-full", c.dot)} />
-                <span className={cn("truncate text-xs font-semibold", c.text)}>
-                  {STATUS_LABEL[s]}
-                </span>
-              </div>
-              <span className={cn("text-base font-bold tabular-nums", c.text)}>
-                {count}
-              </span>
-            </div>
-          );
-        })}
-      </div>
+    <div className="text-muted-foreground flex flex-wrap items-center gap-x-3 gap-y-1 px-1 text-xs">
+      <span className="inline-flex items-center gap-1.5 font-semibold">
+        <Users className="size-3.5" />
+        <span className="tabular-nums">{total}</span> mesa
+        {total === 1 ? "" : "s"}
+      </span>
+      {STATS_ORDER.map((s) => {
+        const c = STATUS_COLORS[s];
+        const count = stats[s] ?? 0;
+        return (
+          <span key={s} className="inline-flex items-center gap-1.5">
+            <span className={cn("h-2 w-2 shrink-0 rounded-full", c.dot)} />
+            <span className={cn("font-medium", c.text)}>{STATUS_LABEL[s]}</span>
+            <span className={cn("font-bold tabular-nums", c.text)}>{count}</span>
+          </span>
+        );
+      })}
     </div>
   );
 }
@@ -1737,6 +1761,7 @@ function TableDetail({
   onWalkIn,
   onSentarReserva,
   onTransfer,
+  onTrasladar,
   onAnular,
 }: {
   table: FloorTable;
@@ -1756,6 +1781,7 @@ function TableDetail({
   onWalkIn: () => void;
   onSentarReserva: () => void;
   onTransfer: () => void;
+  onTrasladar: () => void;
   onAnular: () => void;
 }) {
   const status = (table.operational_status ?? "libre") as OperationalStatus;
@@ -1768,6 +1794,12 @@ function TableDetail({
     (role !== "mozo" || table.mozo_id === currentUserId);
   const canAnular =
     status === "ocupada" && canTransitionMesa(role, status, "libre");
+  // Trasladar la mesa entera a otra libre (spec 048): mesa con order abierta,
+  // solo encargado/admin.
+  const canTrasladar =
+    canMoveTable(role) &&
+    !!order &&
+    (status === "ocupada" || status === "pidio_cuenta");
   const canPedir = status === "ocupada" || status === "pidio_cuenta";
   // "Pedir cuenta" / "Cobrar mesa" requiere order activa: sin items
   // cargados no hay nada que cobrar.
@@ -2059,6 +2091,20 @@ function TableDetail({
               >
                 <ArrowLeftRight className="h-3.5 w-3.5" />
                 Transferir
+              </button>,
+            );
+          }
+          if (canTrasladar) {
+            buttons.push(
+              <button
+                key="trasladar"
+                type="button"
+                onClick={onTrasladar}
+                disabled={pending}
+                className="flex h-10 w-full items-center justify-center gap-1.5 rounded-xl bg-violet-50 px-3 text-sm font-semibold text-violet-800 ring-1 ring-violet-200 transition hover:bg-violet-100 active:scale-[0.97] disabled:opacity-60"
+              >
+                <MoveRight className="h-3.5 w-3.5" />
+                Trasladar
               </button>,
             );
           }

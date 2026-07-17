@@ -60,11 +60,17 @@ export function FloorPlanViewer({ plan, tables, extras = {}, onTableClick, paint
   const active = tables.filter((t) => t.status === "active");
 
   return (
-    <div className="overflow-auto rounded-xl border bg-muted/30 shadow-inner">
+    // El plano se AJUSTA a la caja que le da el contenedor (ancho y alto), lo
+    // más grande posible y centrado, en vez de dimensionarse solo por el ancho.
+    // `preserveAspectRatio="xMidYMid meet"` = contain sin deformar → se adapta a
+    // cualquier resolución de monitor sin números mágicos (antes: maxHeight 68vh
+    // + aspect-ratio, que ignoraba la altura disponible y dejaba el plano chico
+    // con márgenes en pantallas anchas).
+    <div className="flex h-full w-full items-center justify-center overflow-hidden bg-background">
       <svg
         viewBox={`0 0 ${plan.width} ${plan.height}`}
-        className="block w-full rounded-lg bg-background"
-        style={{ aspectRatio: `${plan.width}/${plan.height}`, maxHeight: "68vh" }}
+        preserveAspectRatio="xMidYMid meet"
+        className="block h-full w-full"
       >
         {plan.background_image_url && (
           <image
