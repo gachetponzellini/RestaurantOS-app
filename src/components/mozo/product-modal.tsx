@@ -1,10 +1,11 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Check, Minus, Plus, X } from "lucide-react";
+import { Check, Minus, Plus, UtensilsCrossed, X } from "lucide-react";
 import { toast } from "sonner";
 
 import { formatCurrency } from "@/lib/currency";
+import { composeItemNotes } from "@/lib/mozo/item-notes";
 import type {
   CatalogProduct,
   CatalogModifier,
@@ -73,12 +74,14 @@ export function ProductModal({
   const [selection, setSelection] = useState<Selection>({});
   const [quantity, setQuantity] = useState(1);
   const [notes, setNotes] = useState("");
+  const [asEntrada, setAsEntrada] = useState(false);
 
   useEffect(() => {
     if (product) {
       setSelection(initialSelection(product));
       setQuantity(1);
       setNotes("");
+      setAsEntrada(false);
     }
   }, [product?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -130,7 +133,7 @@ export function ProductModal({
       product_name: product.name,
       unit_price_cents: product.price_cents,
       quantity,
-      notes: notes.trim().slice(0, 200),
+      notes: composeItemNotes({ asEntrada, freeText: notes }),
       modifiers: flatMods,
       line_subtotal_cents: lineTotal,
     });
@@ -242,6 +245,28 @@ export function ProductModal({
           <label className="block text-xs font-bold uppercase tracking-wide text-zinc-700">
             Observaciones
           </label>
+          <button
+            type="button"
+            onClick={() => setAsEntrada((v) => !v)}
+            aria-pressed={asEntrada}
+            className={`mb-2 flex w-full items-center gap-2.5 rounded-2xl px-3 py-3 text-left text-sm font-semibold transition active:scale-[0.99] ${
+              asEntrada
+                ? "bg-emerald-50 text-emerald-900 ring-1 ring-emerald-300"
+                : "bg-zinc-50 text-zinc-700 ring-1 ring-zinc-100 active:bg-zinc-100"
+            }`}
+          >
+            <span
+              className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-md ${
+                asEntrada
+                  ? "bg-emerald-600 text-white"
+                  : "bg-white ring-1 ring-zinc-300"
+              }`}
+            >
+              {asEntrada && <Check className="h-3 w-3" strokeWidth={3} />}
+            </span>
+            <UtensilsCrossed className="h-4 w-4 shrink-0" />
+            <span>Como entrada</span>
+          </button>
           <textarea
             value={notes}
             onChange={(e) => setNotes(e.target.value.slice(0, 200))}
