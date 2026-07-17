@@ -24,6 +24,7 @@ import type { BusinessRole } from "@/lib/admin/context";
 import { MobileTabBar, type MozoTab } from "@/components/mozo/mobile-tab-bar";
 import { OrderSummaryCard } from "@/components/mozo/order-summary-card";
 import { TableDrawer } from "@/components/mozo/table-drawer";
+import { MesaActionRow, MesaActionTile } from "@/components/mozo/mesa-actions";
 import { TransferTableModal } from "@/components/mozo/transfer-table-modal";
 import { TrasladarMesaModal } from "@/components/mozo/trasladar-mesa-modal";
 import { WalkInModal } from "@/components/mozo/walk-in-modal";
@@ -602,7 +603,7 @@ export function MozoClient({
                   className="flex h-14 w-full items-center justify-center gap-2 rounded-2xl bg-emerald-600 text-base font-semibold text-white shadow-sm transition active:scale-[0.98] disabled:opacity-60"
                 >
                   <Receipt className="h-5 w-5" />
-                  Cobrar mesa
+                  Cobrar
                 </button>
               )}
               {selectedStatus === "ocupada" &&
@@ -618,7 +619,7 @@ export function MozoClient({
                     className="flex h-14 w-full items-center justify-center gap-2 rounded-2xl bg-emerald-600 text-base font-semibold text-white shadow-sm transition active:scale-[0.98] disabled:opacity-60"
                   >
                     <Receipt className="h-5 w-5" />
-                    Pedir cuenta
+                    Cobrar
                   </button>
                 )}
               {selectedStatus === "ocupada" &&
@@ -637,8 +638,8 @@ export function MozoClient({
                     Cargar pedido
                   </button>
                 )}
-              {/* Acciones secundarias. Si solo hay 1, ocupa full width
-                  (no queda colgado a media columna). Si hay 2+, grid 2-cols. */}
+              {/* Acciones secundarias: tiles compactos en una fila adaptativa
+                  (nunca huérfano a media columna). */}
               {(() => {
                 const showVolverAPedir =
                   selectedStatus === "pidio_cuenta" && canShowPedirButton;
@@ -650,11 +651,14 @@ export function MozoClient({
                   selectedStatus === "ocupada" &&
                   !selectedHasItems &&
                   canShowCuentaButton;
-                const buttons: React.ReactNode[] = [];
+                const items: React.ReactNode[] = [];
                 if (showVolverAPedir) {
-                  buttons.push(
-                    <button
+                  items.push(
+                    <MesaActionTile
                       key="volver"
+                      icon={ClipboardList}
+                      label="Volver a pedir"
+                      tone="zinc"
                       disabled={loading}
                       onClick={async () => {
                         const r = await volverAPedir(
@@ -669,51 +673,48 @@ export function MozoClient({
                           `/${businessSlug}/mozo/mesa/${selectedSync.id}/pedir`,
                         );
                       }}
-                      className="flex h-10 w-full items-center justify-center gap-1.5 rounded-xl bg-zinc-100 px-3 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-200 active:scale-[0.97] disabled:opacity-60"
-                    >
-                      <ClipboardList className="h-3.5 w-3.5" />
-                      Volver a pedir
-                    </button>,
+                    />,
                   );
                 }
                 if (showCargarMas) {
-                  buttons.push(
-                    <button
+                  items.push(
+                    <MesaActionTile
                       key="cargar-mas"
+                      icon={ClipboardList}
+                      label="Cargar más"
+                      tone="emerald"
                       disabled={loading}
                       onClick={() =>
                         router.push(
                           `/${businessSlug}/mozo/mesa/${selectedSync.id}/pedir`,
                         )
                       }
-                      className="flex h-10 w-full items-center justify-center gap-1.5 rounded-xl bg-emerald-50 px-3 text-sm font-semibold text-emerald-800 ring-1 ring-emerald-200 transition hover:bg-emerald-100 active:scale-[0.97] disabled:opacity-60"
-                    >
-                      <ClipboardList className="h-3.5 w-3.5" />
-                      Cargar más
-                    </button>,
+                    />,
                   );
                 }
                 if (showPedirCuentaSec) {
-                  buttons.push(
-                    <button
-                      key="pedir-cuenta"
+                  items.push(
+                    <MesaActionTile
+                      key="cobrar"
+                      icon={Receipt}
+                      label="Cobrar"
+                      tone="amber"
                       disabled={loading}
                       onClick={() =>
                         router.push(
                           `/${businessSlug}/mozo/mesa/${selectedSync.id}/cuenta`,
                         )
                       }
-                      className="flex h-10 w-full items-center justify-center gap-1.5 rounded-xl bg-amber-50 px-3 text-sm font-semibold text-amber-800 ring-1 ring-amber-200 transition hover:bg-amber-100 active:scale-[0.97] disabled:opacity-60"
-                    >
-                      <Receipt className="h-3.5 w-3.5" />
-                      Pedir cuenta
-                    </button>,
+                    />,
                   );
                 }
                 if (canShowTransferButton) {
-                  buttons.push(
-                    <button
+                  items.push(
+                    <MesaActionTile
                       key="transferir"
+                      icon={ArrowLeftRight}
+                      label={isOtherMozosTable ? "Tomar mesa" : "Transferir"}
+                      tone="sky"
                       disabled={loading}
                       onClick={() => {
                         if (isOtherMozosTable) {
@@ -729,33 +730,22 @@ export function MozoClient({
                           setTransferTableId(selectedSync.id);
                         }
                       }}
-                      className="flex h-10 w-full items-center justify-center gap-1.5 rounded-xl bg-sky-50 px-3 text-sm font-semibold text-sky-800 ring-1 ring-sky-200 transition hover:bg-sky-100 active:scale-[0.97] disabled:opacity-60"
-                    >
-                      <ArrowLeftRight className="h-3.5 w-3.5" />
-                      {isOtherMozosTable ? "Tomar mesa" : "Transferir"}
-                    </button>,
+                    />,
                   );
                 }
                 if (canShowTrasladarButton) {
-                  buttons.push(
-                    <button
+                  items.push(
+                    <MesaActionTile
                       key="trasladar"
+                      icon={MoveRight}
+                      label="Trasladar"
+                      tone="violet"
                       disabled={loading}
                       onClick={() => setTrasladarTableId(selectedSync.id)}
-                      className="flex h-10 w-full items-center justify-center gap-1.5 rounded-xl bg-violet-50 px-3 text-sm font-semibold text-violet-800 ring-1 ring-violet-200 transition hover:bg-violet-100 active:scale-[0.97] disabled:opacity-60"
-                    >
-                      <MoveRight className="h-3.5 w-3.5" />
-                      Trasladar
-                    </button>,
+                    />,
                   );
                 }
-                if (buttons.length === 0) return null;
-                if (buttons.length === 1) {
-                  return <div>{buttons[0]}</div>;
-                }
-                return (
-                  <div className="grid grid-cols-2 gap-2">{buttons}</div>
-                );
+                return <MesaActionRow items={items} />;
               })()}
               {/* Destructiva: full-width separada del grid operativo */}
               {canShowAnularButton && (

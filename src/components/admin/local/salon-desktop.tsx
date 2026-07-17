@@ -24,6 +24,7 @@ import { SegmentedSelector } from "@/components/admin/local/segmented-selector";
 import { AsignarMozosPanel } from "@/components/mozo/asignar-mozos-panel";
 import { FloorPlanViewer, type TableExtra } from "@/components/mozo/floor-plan-viewer";
 import { OrderSummaryCard } from "@/components/mozo/order-summary-card";
+import { MesaActionRow, MesaActionTile } from "@/components/mozo/mesa-actions";
 import { TransferTableModal } from "@/components/mozo/transfer-table-modal";
 import { TrasladarMesaModal } from "@/components/mozo/trasladar-mesa-modal";
 import { WalkInModal } from "@/components/mozo/walk-in-modal";
@@ -2004,7 +2005,7 @@ function TableDetail({
                 onClick={onPedirCuenta}
               >
                 <Receipt className="h-5 w-5" />
-                Pedir cuenta
+                Cobrar
               </button>
             );
           }
@@ -2033,91 +2034,68 @@ function TableDetail({
           const showWalkInSec = canWalkIn && !!reservation;
           const showVolverAPedir = status === "pidio_cuenta" && canPedir;
           const showCargarMas = status === "ocupada" && hasItems && canPedir;
-          const buttons: React.ReactNode[] = [];
+          const items: React.ReactNode[] = [];
           if (showWalkInSec) {
-            buttons.push(
-              <button
+            items.push(
+              <MesaActionTile
                 key="walkin"
-                type="button"
+                icon={UserPlus}
+                label="Walk-in"
+                tone="zinc"
                 onClick={onWalkIn}
                 disabled={pending}
-                className="flex h-10 w-full items-center justify-center gap-1.5 rounded-xl bg-zinc-100 px-3 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-200 active:scale-[0.97] disabled:opacity-60"
-              >
-                <UserPlus className="h-3.5 w-3.5" />
-                Sentar walk-in
-              </button>,
+              />,
             );
           }
           if (showVolverAPedir) {
-            buttons.push(
-              <button
+            items.push(
+              <MesaActionTile
                 key="volver"
-                type="button"
-                onClick={() =>
-                  onCargarPedido()
-                }
+                icon={ClipboardList}
+                label="Volver a pedir"
+                tone="zinc"
+                onClick={() => onCargarPedido()}
                 disabled={pending}
-                className="flex h-10 w-full items-center justify-center gap-1.5 rounded-xl bg-zinc-100 px-3 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-200 active:scale-[0.97] disabled:opacity-60"
-              >
-                <ClipboardList className="h-3.5 w-3.5" />
-                Volver a pedir
-              </button>,
+              />,
             );
           }
           if (showCargarMas) {
-            buttons.push(
-              <button
+            items.push(
+              <MesaActionTile
                 key="cargar-mas"
-                type="button"
-                onClick={() =>
-                  onCargarPedido()
-                }
+                icon={ClipboardList}
+                label="Cargar más"
+                tone="emerald"
+                onClick={() => onCargarPedido()}
                 disabled={pending}
-                className="flex h-10 w-full items-center justify-center gap-1.5 rounded-xl bg-emerald-50 px-3 text-sm font-semibold text-emerald-800 ring-1 ring-emerald-200 transition hover:bg-emerald-100 active:scale-[0.97] disabled:opacity-60"
-              >
-                <ClipboardList className="h-3.5 w-3.5" />
-                Cargar más
-              </button>,
+              />,
             );
           }
           if (canTransfer) {
-            buttons.push(
-              <button
+            items.push(
+              <MesaActionTile
                 key="transferir"
-                type="button"
+                icon={ArrowLeftRight}
+                label="Transferir"
+                tone="sky"
                 onClick={onTransfer}
                 disabled={pending}
-                className="flex h-10 w-full items-center justify-center gap-1.5 rounded-xl bg-sky-50 px-3 text-sm font-semibold text-sky-800 ring-1 ring-sky-200 transition hover:bg-sky-100 active:scale-[0.97] disabled:opacity-60"
-              >
-                <ArrowLeftRight className="h-3.5 w-3.5" />
-                Transferir
-              </button>,
+              />,
             );
           }
           if (canTrasladar) {
-            buttons.push(
-              <button
+            items.push(
+              <MesaActionTile
                 key="trasladar"
-                type="button"
+                icon={MoveRight}
+                label="Trasladar"
+                tone="violet"
                 onClick={onTrasladar}
                 disabled={pending}
-                className="flex h-10 w-full items-center justify-center gap-1.5 rounded-xl bg-violet-50 px-3 text-sm font-semibold text-violet-800 ring-1 ring-violet-200 transition hover:bg-violet-100 active:scale-[0.97] disabled:opacity-60"
-              >
-                <MoveRight className="h-3.5 w-3.5" />
-                Trasladar
-              </button>,
+              />,
             );
           }
-          if (buttons.length === 0) return null;
-          if (buttons.length === 1) {
-            // Solo un botón → full width, sin grid.
-            return <div>{buttons[0]}</div>;
-          }
-          return (
-            <div className="grid grid-cols-2 gap-2">
-              {buttons}
-            </div>
-          );
+          return <MesaActionRow items={items} />;
         })()}
 
         {/* Destructiva: full-width, separada del grid operativo */}
