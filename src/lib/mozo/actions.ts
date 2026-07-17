@@ -696,8 +696,9 @@ function mapTrasladarMesaError(message: string): string {
  * transaccional `trasladar_mesa_tx` (migración 0015): repunteo de
  * `orders.table_id` + swap de las dos mesas + reserva seated + audit, bajo lock
  * FOR UPDATE de la orden. El contenido y la plata viajan solos (cuelgan de
- * `order_id`). Si el destino está ocupado → `DESTINATION_OCCUPIED` (Fase 2 es la
- * fusión). Solo encargado/admin.
+ * `order_id`). Si el destino está ocupado → `DESTINATION_OCCUPIED`: la fusión de
+ * dos cuentas NO se soporta (descartada) — hay que cobrar/cerrar una primero.
+ * Solo encargado/admin.
  */
 export async function trasladarMesa(
   fromTableId: string,

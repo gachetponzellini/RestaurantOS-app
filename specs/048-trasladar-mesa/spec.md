@@ -6,7 +6,7 @@
 
 **Status**: Especificado (2026-07-17). Pendiente: `plan.md` aprobado → TDD. Issue [#72](https://github.com/gachetponzellini/RestaurantOS-app/issues/72). Milestone: Post-demo · Growth & hardening.
 
-**Input**: Pedido de Juan 2026-07-17 — "hay que implementar la función de trasladar una mesa entera a otra mesa, con todo". Decisiones tomadas en la conversación: **Fase 1 = solo destino libre**; permiso **solo encargado/admin**; comandas **solo mover en el sistema** (sin reimpresión).
+**Input**: Pedido de Juan 2026-07-17 — "hay que implementar la función de trasladar una mesa entera a otra mesa, con todo". Decisiones tomadas en la conversación: **solo destino libre** (la fusión con mesa ocupada **no se implementa**, descartada 2026-07-17); permiso **solo encargado/admin**; comandas **solo mover en el sistema** (sin reimpresión).
 
 ## Contexto y problema
 
@@ -28,7 +28,7 @@ El vínculo mesa↔orden es bidireccional y mantenido por la app (sin triggers):
 El índice parcial `orders_one_open_per_table` ON `orders(table_id) WHERE lifecycle_status='open' AND table_id IS NOT NULL` (`supabase/migrations/0001_baseline.sql:2803`) hace **imposible** tener dos órdenes abiertas en la misma mesa. Consecuencias:
 
 1. Trasladar a una mesa **libre** (sin orden open) = un `UPDATE` que la DB acepta.
-2. Trasladar a una mesa **ocupada** (con orden open) = el `UPDATE` **falla con `23505`**. Esto convierte el caso "destino ocupada" en un problema de **fusión de dos cuentas**, que toca plata en serio → **queda fuera de Fase 1** (ver Fase 2 más abajo).
+2. Trasladar a una mesa **ocupada** (con orden open) = el `UPDATE` **falla con `23505`**. Esto convierte el caso "destino ocupada" en un problema de **fusión de dos cuentas**, que toca plata en serio → **no se soporta** (decisión 2026-07-17: la fusión de mesas no se va a implementar; ver "Fusión de mesas — descartada" más abajo).
 
 ## Alcance
 
@@ -41,9 +41,9 @@ El índice parcial `orders_one_open_per_table` ON `orders(table_id) WHERE lifecy
 - Destino **barra** (`is_bar=true`) permitido si está libre (mover un grupo a la barra mientras espera es real).
 - La **reserva `seated`** pegada a la mesa origen se mueve con el grupo a B.
 
-### Fase 1 — NO incluye (queda para Fase 2 / otro spec)
+### NO incluye (descartado)
 
-- **Destino OCUPADA → fusión/merge de dos órdenes** → **bloqueado** con error claro `DESTINATION_OCCUPIED` (mensaje: *"La mesa está ocupada. Cobrala o liberala antes de mover."*). El mensaje **no** debe leerse como "nunca se pueden unir mesas", sino "todavía no".
+- **Destino OCUPADA → fusión/merge de dos órdenes** → **no soportado** (decisión 2026-07-17: no se implementa). Se bloquea con error claro `DESTINATION_OCCUPIED` (mensaje: *"La mesa está ocupada. Cobrala o liberala antes de mover."*). Para juntar dos grupos en una mesa hay que **cerrar/cobrar una de las cuentas primero**.
 - **Reimpresión de comandas** con la etiqueta de la mesa nueva. Decisión explícita: **solo mover en el sistema**. El ticket de papel ya impreso queda con la mesa vieja; las pantallas digitales reflejan la mesa nueva. (Esto además evita el riesgo de doble-cocinado en cocina de papel.)
 - Traslado entre `business` distintos (cross-tenant) → rechazado siempre.
 
@@ -55,7 +55,7 @@ El índice parcial `orders_one_open_per_table` ON `orders(table_id) WHERE lifecy
 | **Comandas** | **Solo mover en el sistema**, sin reimpresión | El papel ya impreso queda con la mesa vieja; se acepta. Evita doble-cocinado en comanderas físicas. |
 | **`opened_at`** | Se **preserva** el de A (no `now()`) | No resetear el reloj "X min en mesa" ni falsear la duración en reports. |
 | **Mozo** | La mesa B adopta el `tables.mozo_id` de A | El mozo sigue a su mesa. La atribución de propina ya está congelada en `payments.attributed_mozo_id`, no se toca. |
-| **Destino ocupada** | Bloqueado (`DESTINATION_OCCUPIED`) | Fusión toca plata → Fase 2. |
+| **Destino ocupada** | Bloqueado (`DESTINATION_OCCUPIED`) | La fusión de dos cuentas no se implementa (descartada 2026-07-17). |
 | **Destino barra libre** | Permitido | Caso real. |
 
 ## User Scenarios & Testing *(mandatory)*
@@ -155,6 +155,8 @@ Como **encargado**, si intento trasladar a una mesa que ya está ocupada, el sis
 - **SC-003**: El traslado a mesa ocupada nunca corrompe estado: falla con mensaje claro y rollback total.
 - **SC-004**: Solo encargado/admin pueden trasladar; el RPC no es invocable por clientes autenticados.
 
-## Fase 2 (fuera de este spec, backlog)
+## Fusión de mesas — descartada (2026-07-17)
 
-Fusión de dos mesas ocupadas (merge): reparentar `order_items`/`comandas` (renumerando `batch`), consolidar `payments`/`splits`/totales y cerrar la orden absorbida. Solo habilitable con guards de plata (ambas órdenes limpias, sin `payments`/`splits`), por las implicancias fiscales (dos `order_number`) y de caja. Spec aparte.
+Juntar un grupo con otra mesa **ocupada** (fusionar dos cuentas en una) **no se va a implementar**. El traslado solo mueve a mesas libres; el destino ocupado se bloquea con `DESTINATION_OCCUPIED`. Para juntar dos grupos, el flujo es cerrar/cobrar una cuenta y seguir en la otra.
+
+Para referencia, lo que habría implicado (y por qué se descartó): reparentar `order_items`/`comandas` (renumerando `batch`), consolidar `payments`/`splits`/totales y cerrar la orden absorbida, con guards de plata (ambas órdenes limpias) por las implicancias fiscales (dos `order_number`) y de caja. Complejidad y riesgo altos para un caso que se resuelve cobrando primero.
