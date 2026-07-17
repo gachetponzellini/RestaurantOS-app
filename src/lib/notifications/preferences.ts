@@ -35,6 +35,7 @@ export type NotificationRecipient =
 export const NOTIFICATION_EVENTS = [
   { type: "order.pending", label: "Pedido nuevo entrante" },
   { type: "mesa.transferred", label: "Mesa transferida" },
+  { type: "mesa.moved", label: "Mesa trasladada" },
   { type: "mesa.cancelled", label: "Mesa anulada" },
   { type: "comanda.entregada", label: "Comanda entregada" },
   // spec 27 — ampliación de eventos (solo a encargado/mozo, no admin)

@@ -191,13 +191,28 @@ export async function closeOrderIfFullyPaid(
 
   // Post-cobro: mesa va directo a `libre`. Eliminamos la transición
   // intermedia `limpiar` con la simplificación de estados (migración 0038).
-  if (order.table_id) {
-    const { data: tableRow } = await service
-      .from("tables")
-      .select("id, operational_status")
-      .eq("id", order.table_id)
-      .single();
-    const fromStatus = tableRow?.operational_status as string;
+  //
+  // La mesa a liberar es la que ACTUALMENTE es dueña de la orden
+  // (tables.current_order_id = orderId), NO order.table_id: si un traslado
+  // concurrente (spec 048) movió la orden a otra mesa entre este loadOrder y
+  // acá, order.table_id quedó stale y liberaríamos la mesa equivocada, dejando
+  // la mesa destino "ocupada" apuntando a una orden ya cerrada (mesa fantasma).
+  // Keyear por current_order_id es idempotente y sigue a la orden. Fallback a
+  // order.table_id solo si nadie la referencia por current_order_id — eso
+  // implica que NO hubo traslado (un move siempre setea current_order_id en el
+  // destino), así que en ese caso order.table_id no está stale.
+  const { data: ownerRow } = await service
+    .from("tables")
+    .select("id, operational_status")
+    .eq("current_order_id", orderId)
+    .maybeSingle();
+  const ownerTableId =
+    (ownerRow as { id: string } | null)?.id ?? order.table_id;
+
+  if (ownerTableId) {
+    const fromStatus =
+      (ownerRow as { operational_status: string } | null)?.operational_status ??
+      null;
 
     // mozo_id se preserva: la asignación es fija hasta que el encargado la
     // cambie manualmente desde "Distribuir mozos". Cobrar una mesa no la
@@ -209,13 +224,13 @@ export async function closeOrderIfFullyPaid(
         opened_at: null,
         current_order_id: null,
       })
-      .eq("id", order.table_id);
+      .eq("id", ownerTableId);
 
     await service.from("tables_audit_log").insert({
-      table_id: order.table_id,
+      table_id: ownerTableId,
       business_id: business.id,
       kind: "status",
-      from_value: fromStatus ?? null,
+      from_value: fromStatus,
       to_value: "libre",
       by_user_id: null,
       reason: `cobro completo order ${order.order_number}`,
@@ -226,7 +241,7 @@ export async function closeOrderIfFullyPaid(
     const { error: resErr } = await service
       .from("reservations")
       .update({ status: "completed" })
-      .eq("table_id", order.table_id)
+      .eq("table_id", ownerTableId)
       .eq("business_id", business.id)
       .eq("status", "seated");
     if (resErr) console.error("cobro: completar reserva seated", resErr);

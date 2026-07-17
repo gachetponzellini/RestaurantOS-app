@@ -15,10 +15,19 @@ import {
   canManageCajas,
   canManageReservations,
   canMarkRotura,
+  canMoveTable,
   canModifyPostEnvio,
   canRendirMozo,
   canSeatReservation,
 } from "./can";
+
+describe("permissions / canMoveTable", () => {
+  it("solo admin y encargado pueden trasladar una mesa (spec 048)", () => {
+    expect(canMoveTable("admin")).toBe(true);
+    expect(canMoveTable("encargado")).toBe(true);
+    expect(canMoveTable("mozo")).toBe(false);
+  });
+});
 
 describe("permissions / canModifyPostEnvio", () => {
   it("admin y encargado pueden, mozo no", () => {

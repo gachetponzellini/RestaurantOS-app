@@ -10,6 +10,7 @@ import {
   CalendarPlus,
   CalendarX2,
   CheckCircle2,
+  MoveRight,
   PackageX,
   Printer,
   ReceiptText,
@@ -72,6 +73,17 @@ export function viewForNotification(n: Notification): NotiView {
       ]
         .filter(Boolean)
         .join(" "),
+    };
+  }
+  if (n.type === "mesa.moved") {
+    const fromLabel = (p.fromLabel as string | undefined) ?? "?";
+    const toLabel = (p.toLabel as string | undefined) ?? "?";
+    const movedByName = p.movedByName as string | null | undefined;
+    return {
+      tone: "info",
+      icon: MoveRight,
+      title: `Mesa ${fromLabel} → ${toLabel}`,
+      body: movedByName ? `Trasladada por ${movedByName}` : "Mesa trasladada",
     };
   }
   if (n.type === "mesa.cancelled") {

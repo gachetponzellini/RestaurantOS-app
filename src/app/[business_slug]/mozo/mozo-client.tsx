@@ -11,6 +11,7 @@ import {
   ClipboardList,
   Clock,
   LogOut,
+  MoveRight,
   Receipt,
   Settings,
   UserPlus,
@@ -24,6 +25,7 @@ import { MobileTabBar, type MozoTab } from "@/components/mozo/mobile-tab-bar";
 import { OrderSummaryCard } from "@/components/mozo/order-summary-card";
 import { TableDrawer } from "@/components/mozo/table-drawer";
 import { TransferTableModal } from "@/components/mozo/transfer-table-modal";
+import { TrasladarMesaModal } from "@/components/mozo/trasladar-mesa-modal";
 import { WalkInModal } from "@/components/mozo/walk-in-modal";
 import { signOut } from "@/lib/auth/sign-out";
 import { anularMesa, transferTable, volverAPedir } from "@/lib/mozo/actions";
@@ -40,7 +42,7 @@ import {
   formatNotificationTime,
   viewForNotification,
 } from "@/lib/notifications/view";
-import { canTransitionMesa } from "@/lib/permissions/can";
+import { canMoveTable, canTransitionMesa } from "@/lib/permissions/can";
 import type { FloorPlanWithTables } from "@/lib/admin/floor-plan/queries";
 import type { FloorTable } from "@/lib/reservations/types";
 
@@ -182,6 +184,7 @@ export function MozoClient({
   const [loading, setLoading] = useState(false);
   const [walkInTableId, setWalkInTableId] = useState<string | null>(null);
   const [transferTableId, setTransferTableId] = useState<string | null>(null);
+  const [trasladarTableId, setTrasladarTableId] = useState<string | null>(null);
   const [anularPrompt, setAnularPrompt] = useState<{
     tableId: string;
     label: string;
@@ -425,6 +428,13 @@ export function MozoClient({
     !!selectedSync &&
     !isOtherMozosTable &&
     (selectedStatus === "ocupada" || selectedStatus === "pidio_cuenta");
+  // Trasladar la mesa entera a otra libre (spec 048): mesa con orden abierta,
+  // solo encargado/admin.
+  const canShowTrasladarButton =
+    !!selectedSync &&
+    canMoveTable(role) &&
+    (selectedStatus === "ocupada" || selectedStatus === "pidio_cuenta") &&
+    !!orderByTable[selectedSync.id];
   // "Pedir cuenta" / "Cobrar mesa" requiere order activa. Si la mesa está
   // ocupada por walk-in pero todavía no se cargó pedido, no hay nada que
   // cobrar — el botón no debería aparecer. Estado canónico: order existe en
@@ -726,6 +736,19 @@ export function MozoClient({
                     </button>,
                   );
                 }
+                if (canShowTrasladarButton) {
+                  buttons.push(
+                    <button
+                      key="trasladar"
+                      disabled={loading}
+                      onClick={() => setTrasladarTableId(selectedSync.id)}
+                      className="flex h-10 w-full items-center justify-center gap-1.5 rounded-xl bg-violet-50 px-3 text-sm font-semibold text-violet-800 ring-1 ring-violet-200 transition hover:bg-violet-100 active:scale-[0.97] disabled:opacity-60"
+                    >
+                      <MoveRight className="h-3.5 w-3.5" />
+                      Trasladar
+                    </button>,
+                  );
+                }
                 if (buttons.length === 0) return null;
                 if (buttons.length === 1) {
                   return <div>{buttons[0]}</div>;
@@ -850,6 +873,35 @@ export function MozoClient({
           onClose={() => setTransferTableId(null)}
           onSuccess={() => {
             setTransferTableId(null);
+            router.refresh();
+          }}
+        />
+      )}
+
+      {/* Trasladar mesa a otra libre (spec 048) */}
+      {trasladarTableId && (
+        <TrasladarMesaModal
+          fromTableId={trasladarTableId}
+          fromLabel={
+            localTables.find((t) => t.id === trasladarTableId)?.label ?? ""
+          }
+          tables={localTables
+            .filter(
+              (t) =>
+                t.id !== trasladarTableId &&
+                (t.operational_status ?? "libre") === "libre",
+            )
+            .map((t) => ({
+              id: t.id,
+              label: t.label,
+              seats: t.seats,
+              is_bar: t.is_bar,
+            }))}
+          businessSlug={businessSlug}
+          onClose={() => setTrasladarTableId(null)}
+          onSuccess={() => {
+            setTrasladarTableId(null);
+            setSelected(null);
             router.refresh();
           }}
         />

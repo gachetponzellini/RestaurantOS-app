@@ -164,6 +164,16 @@ export function canAssignMozo(role: BusinessRole): boolean {
   return role === "admin" || role === "encargado";
 }
 
+/**
+ * Trasladar una mesa completa (la orden abierta con su cuenta) a otra mesa
+ * física libre (spec 048). Es una operación de mostrador que mueve estado y es
+ * plata-adyacente: solo encargado/admin, igual criterio que la anulación de
+ * mesa en `canTransitionMesa`. El mozo no traslada.
+ */
+export function canMoveTable(role: BusinessRole): boolean {
+  return role === "admin" || role === "encargado";
+}
+
 // ── Proveedores ────────────────────────────────────────────────
 
 export function canManageProveedores(role: BusinessRole): boolean {

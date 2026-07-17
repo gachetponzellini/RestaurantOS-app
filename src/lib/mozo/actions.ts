@@ -12,6 +12,7 @@ import {
 } from "@/lib/mozo/state-machine";
 import {
   canAssignMozo,
+  canMoveTable,
   canTransferTable,
   canTransitionMesa,
 } from "@/lib/permissions/can";
@@ -661,6 +662,138 @@ export async function transferTable(
       userId: fromMozoId,
       type: "mesa.transferred",
       payload: transferPayload,
+      actorUserId: ctx.userId,
+    });
+  }
+
+  revalidatePath(`/${businessSlug}/mozo`);
+  revalidatePath(`/${businessSlug}/admin/operacion`);
+  return actionOk(undefined);
+}
+
+// ── Trasladar mesa completa a otra mesa física (spec 048) ────────
+
+/**
+ * Mapea los errores que levanta la RPC `trasladar_mesa_tx` (raise exception en
+ * plpgsql → texto crudo en error.message) a mensajes de usuario.
+ */
+function mapTrasladarMesaError(message: string): string {
+  if (message.includes("DESTINATION_OCCUPIED"))
+    return "La mesa está ocupada. Cobrala o liberala antes de mover.";
+  if (message.includes("NO_OPEN_ORDER"))
+    return "La mesa no tiene una cuenta abierta para trasladar.";
+  if (message.includes("SAME_TABLE"))
+    return "Elegí una mesa distinta a la de origen.";
+  if (message.includes("STALE_STATE"))
+    return "La mesa cambió mientras la movías. Refrescá e intentá de nuevo.";
+  if (message.includes("CROSS_TENANT")) return "Mesa no encontrada.";
+  return `No pudimos trasladar la mesa: ${message}`;
+}
+
+/**
+ * Traslada la orden abierta (con su cuenta, comandas y cobros parciales) de la
+ * mesa origen a una mesa destino **libre**. Toda la operación va en la RPC
+ * transaccional `trasladar_mesa_tx` (migración 0015): repunteo de
+ * `orders.table_id` + swap de las dos mesas + reserva seated + audit, bajo lock
+ * FOR UPDATE de la orden. El contenido y la plata viajan solos (cuelgan de
+ * `order_id`). Si el destino está ocupado → `DESTINATION_OCCUPIED` (Fase 2 es la
+ * fusión). Solo encargado/admin.
+ */
+export async function trasladarMesa(
+  fromTableId: string,
+  toTableId: string,
+  businessSlug: string,
+  reason?: string,
+): Promise<ActionResult<void>> {
+  const business = await getBusiness(businessSlug);
+  if (!business) return actionError("Negocio no encontrado.");
+
+  const ctxResult = await requireMozoActionContext(business.id);
+  if (!ctxResult.ok) return ctxResult;
+  const ctx = ctxResult.data;
+
+  if (!canMoveTable(ctx.role)) {
+    return actionError("Solo encargado o admin pueden trasladar una mesa.");
+  }
+
+  if (fromTableId === toTableId) {
+    return actionError("Elegí una mesa distinta a la de origen.");
+  }
+
+  const service = createSupabaseServiceClient() as unknown as GenericClient;
+
+  // Cross-tenant defense: ambas mesas deben pertenecer al negocio.
+  const fromTable = await loadTableForBusiness(service, fromTableId, business.id);
+  if (!fromTable) return actionError("Mesa de origen no encontrada.");
+  const toTable = await loadTableForBusiness(service, toTableId, business.id);
+  if (!toTable) return actionError("Mesa de destino no encontrada.");
+
+  // Resolver la orden abierta de la mesa origen: la pasamos como
+  // `p_expected_order_id` para que la RPC rechace (STALE_STATE) si la mesa
+  // cambió entre que la UI la mostró y el submit (doble-tap / cover nuevo).
+  const { data: openOrder } = await service
+    .from("orders")
+    .select("id")
+    .eq("table_id", fromTableId)
+    .eq("business_id", business.id)
+    .eq("lifecycle_status", "open")
+    .maybeSingle();
+  const expectedOrderId = (openOrder as { id: string } | null)?.id ?? null;
+  if (!expectedOrderId) {
+    return actionError("La mesa no tiene una cuenta abierta para trasladar.");
+  }
+
+  const { error } = await service.rpc("trasladar_mesa_tx", {
+    p_business_id: business.id,
+    p_from_table_id: fromTableId,
+    p_to_table_id: toTableId,
+    p_expected_order_id: expectedOrderId,
+    p_actor_user_id: ctx.userId,
+    p_reason: reason?.trim() || null,
+  });
+  if (error) return actionError(mapTrasladarMesaError(error.message));
+
+  // Notif mesa.moved: broadcast al encargado + puntual al mozo de la mesa (el
+  // que viajó con ella). actorUserId omite la notif si el actor es el destino.
+  const movedMozoId = fromTable.mozo_id;
+  const namesToFetch = [ctx.userId, movedMozoId].filter(
+    (x): x is string => !!x,
+  );
+  const { data: members } = await service
+    .from("business_users")
+    .select("user_id, full_name")
+    .eq("business_id", business.id)
+    .in("user_id", namesToFetch);
+  const nameById = new Map<string, string>();
+  for (const m of (members ?? []) as Array<{
+    user_id: string;
+    full_name: string | null;
+  }>) {
+    if (m.full_name) nameById.set(m.user_id, m.full_name);
+  }
+
+  const movedPayload = {
+    fromTableId,
+    toTableId,
+    fromLabel: fromTable.label,
+    toLabel: toTable.label,
+    movedBy: ctx.userId,
+    movedByName: nameById.get(ctx.userId) ?? null,
+  };
+
+  await createNotification({
+    businessId: business.id,
+    targetRole: "encargado",
+    type: "mesa.moved",
+    payload: movedPayload,
+    actorUserId: ctx.userId,
+  });
+  if (movedMozoId) {
+    await createNotification({
+      businessId: business.id,
+      userId: movedMozoId,
+      type: "mesa.moved",
+      payload: movedPayload,
       actorUserId: ctx.userId,
     });
   }
