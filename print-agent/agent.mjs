@@ -30,7 +30,11 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const cfg = JSON.parse(fs.readFileSync(path.join(__dirname, "config.json"), "utf8"));
+// Con Node: config.json está al lado de este archivo. Empaquetado con pkg (.exe),
+// __dirname apunta al snapshot virtual, así que el config.json por-negocio (que
+// vive AL LADO del .exe, spec 046) se lee desde la carpeta del ejecutable.
+const cfgDir = process.pkg ? path.dirname(process.execPath) : __dirname;
+const cfg = JSON.parse(fs.readFileSync(path.join(cfgDir, "config.json"), "utf8"));
 
 const args = process.argv.slice(2);
 const ONCE = args.includes("--once");
@@ -56,16 +60,21 @@ const failCounts = new Map(); // comanda_id → fallos consecutivos
 const ESC = "\x1b";
 const GS = "\x1d";
 
-// Tamaño de carácter (GS ! n): nibble alto = multiplicador de ancho, nibble
-// bajo = multiplicador de alto. 0x11 = ancho×2 + alto×2 (el más grande que
-// usamos); 0x01 = solo alto×2.
-const CHAR_SIZE = { sm: "\x00", tall: "\x01", big: "\x11" };
+// Tamaño de carácter (GS ! n): nibble alto = ancho, nibble bajo = alto. Solo
+// usamos doble ALTO (0x01) para agrandar; el ancho NO se duplica (GS ! es
+// entero, no hay ×1.3). El plus de ancho se logra con el espaciado lateral.
+const CHAR_SIZE = { sm: "\x00", tall: "\x01" };
+
+// Espaciado lateral por carácter (ESC SP n, en puntos). Ensancha el texto sin
+// duplicarlo: celda Font A ≈ 12pt, así que 4 ≈ +33% de ancho. Subir/bajar acá.
+// Ojo: agranda el ancho de línea → RULE se acortó a 24 col para no desbordar.
+const CHAR_RIGHT_SPACING = 4;
 
 // Interlineado (ESC 3 n, en puntos). Más alto = comanda más espaciada y evita
 // que las líneas de doble alto se pisen. Ajustar acá si queda muy junto/suelto.
 const LINE_SPACING = 64;
 
-const RULE = "--------------------------------"; // 32 col
+const RULE = "------------------------"; // 24 col (≈ ancho útil 58mm con el espaciado)
 
 /** Arma el ticket como líneas con formato (tamaño/negrita/alineación). */
 function ticketLines(c) {
@@ -76,14 +85,21 @@ function ticketLines(c) {
   // descarte lo que ya tenía impreso. Campo aditivo: un agente viejo no recibe
   // `c.cancelled` y reimprime el ticket normal (degradación aceptable).
   if (c.cancelled) {
-    push("*** ANULADA ***", { size: "big", bold: true, align: "center" });
+    push("*** ANULADA ***", { size: "tall", bold: true, align: "center" });
+    push(RULE);
+  } else if (c.reprint) {
+    // Spec 35: reimpresión (por editar o por reimprimir manual). Aviso a cocina
+    // de que este ticket reemplaza a uno que ya tenía impreso, para que no
+    // prepare dos veces. En la anulada no va: su propio ticket ya lo comunica.
+    push("*** REIMPRESION ***", { size: "tall", bold: true, align: "center" });
+    push("reemplaza al anterior", { size: "sm", bold: true, align: "center" });
     push(RULE);
   }
 
   // Sector / estación + mesa: lo primero que lee la cocina, bien grande.
-  push(String(c.station_name).toUpperCase(), { size: "big", bold: true, align: "center" });
-  push(`MESA ${c.table_label}`, { size: "big", bold: true, align: "center" });
-  push(`Tanda ${c.batch}`, { size: "tall", bold: true, align: "center" });
+  push(String(c.station_name).toUpperCase(), { size: "tall", bold: true, align: "center" });
+  push(`MESA ${c.table_label}`, { size: "tall", bold: true, align: "center" });
+  push(`Tanda ${c.batch}`, { size: "sm", bold: true, align: "center" });
 
   // Metadata chica (referencia, no operativa).
   push(`Comanda #${String(c.comanda_id).slice(0, 8)}`);
@@ -99,23 +115,24 @@ function ticketLines(c) {
   // Ítems: el corazón de la comanda, en el tamaño más grande.
   for (const it of c.items ?? []) {
     const prefix = c.cancelled ? "ANULADO " : "";
-    push(`${prefix}${it.quantity}x ${it.product_name}`, { size: "big", bold: true });
-    if (it.modifiers && it.modifiers.length) push(`+ ${it.modifiers.join(", ")}`, { size: "tall" });
-    if (it.notes) push(`obs: ${it.notes}`, { size: "tall", bold: true });
+    push(`${prefix}${it.quantity}x ${it.product_name}`, { size: "tall", bold: true });
+    if (it.modifiers && it.modifiers.length) push(`+ ${it.modifiers.join(", ")}`, { size: "sm" });
+    if (it.notes) push(`obs: ${it.notes}`, { size: "sm", bold: true });
   }
   if (!c.items || c.items.length === 0) push("(sin items)");
 
   if (c.cancelled) {
     push(RULE);
-    push("*** NO PREPARAR ***", { size: "big", bold: true, align: "center" });
+    push("*** NO PREPARAR ***", { size: "tall", bold: true, align: "center" });
   }
   return L;
 }
 
 /** Renderiza las líneas como ESC/POS para térmica de red (producción). */
 function renderEscPos(lines) {
-  let out = ESC + "@"; // init (resetea tamaño, énfasis e interlineado)
+  let out = ESC + "@"; // init (resetea tamaño, énfasis, interlineado y espaciado)
   out += ESC + "3" + String.fromCharCode(LINE_SPACING); // interlineado espaciado
+  out += ESC + " " + String.fromCharCode(CHAR_RIGHT_SPACING); // ancho extra (ESC SP)
   let align = null;
   let size = null;
   let bold = null;

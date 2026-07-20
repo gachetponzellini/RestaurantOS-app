@@ -40,6 +40,7 @@ export async function GET(req: Request) {
       emitted_at,
       cancelled_at,
       cancelled_reason,
+      reprint_requested_at,
       stations!inner(name, printer_ip, printer_port, printer_enabled),
       orders!inner(
         id,
@@ -107,6 +108,10 @@ export async function GET(req: Request) {
       // Campos aditivos: un agente viejo los ignora y reimprime el ticket normal.
       cancelled: Boolean(c.cancelled_at),
       cancelled_reason: (c.cancelled_reason as string | null) ?? null,
+      // Reimpresión pedida (spec 35): editar/reimprimir vuelve a mandar la
+      // comanda. El agente imprime un ticket «REIMPRESIÓN» para que cocina sepa
+      // que reemplaza a uno anterior. Campo aditivo (un agente viejo lo ignora).
+      reprint: Boolean(c.reprint_requested_at),
       table_label: order?.tables?.label ?? "—",
       items: ((c.comanda_items ?? []) as unknown[]).map((ci) => {
         const item = ci as {

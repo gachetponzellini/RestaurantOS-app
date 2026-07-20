@@ -153,6 +153,24 @@ describe("GET /api/print-agent — printer_ip por comanda (spec 28)", () => {
     expect(bar?.cancelled).toBe(false);
   });
 
+  it("comanda con reimpresión pedida → payload con reprint:true (spec 35)", async () => {
+    rows = [
+      makeRow("Cocina", "192.168.10.50", {
+        status: "en_preparacion",
+        reprint_requested_at: "2026-07-20T00:00:00Z",
+      }),
+      makeRow("Bar", null),
+    ];
+    const res = await GET(getReq());
+    const body = (await res.json()) as {
+      comandas: { station_name: string; reprint: boolean }[];
+    };
+    const cocina = body.comandas.find((c) => c.station_name === "Cocina");
+    expect(cocina?.reprint).toBe(true);
+    const bar = body.comandas.find((c) => c.station_name === "Bar");
+    expect(bar?.reprint).toBe(false);
+  });
+
   it("sin Bearer válido → 401", async () => {
     const res = await GET(getReq(""));
     expect(res.status).toBe(401);
