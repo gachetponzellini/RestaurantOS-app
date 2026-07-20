@@ -1,0 +1,21 @@
+-- 0018 — Cerrar fuga de secretos de Mercado Pago en `businesses` (security review #1)
+--
+-- mp_access_token / mp_webhook_secret son columnas de `businesses`, y la policy
+-- `businesses_select` (is_business_member OR is_platform_admin) las exponía a
+-- CUALQUIER miembro: is_business_member es agnóstica al rol, así que un mozo o
+-- personal podía leer el access token de la cuenta MP del negocio vía el REST API
+-- con su JWT + la publishable key (credencial de pago = reembolsos, datos de
+-- pagos, etc.).
+--
+-- TODA lectura de `businesses` en la app usa el service client (service_role, que
+-- conserva sus privilegios). Ningún path authenticated/anon lee la tabla —
+-- verificado sobre todo el código: getBusiness y el resto de los reads directos,
+-- el embebido de business_users y las suscripciones realtime (que son sobre
+-- `orders`/`tables`) usan service. Por eso revocamos el SELECT de anon/
+-- authenticated por completo: cierra la fuga sin tocar código, sin enumerar
+-- columnas y sin romperse cuando se agreguen columnas nuevas.
+--
+-- Si en el futuro hiciera falta un read authenticated de `businesses`, hacerlo
+-- por el service client, o grantear SELECT solo de columnas NO secretas.
+
+revoke select on public.businesses from anon, authenticated;
