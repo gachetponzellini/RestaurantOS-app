@@ -34,10 +34,21 @@ export type StationInput = z.infer<typeof StationInput>;
 export function isValidPrinterHost(host: string): boolean {
   if (/^[\d.]+$/.test(host)) {
     const parts = host.split(".");
-    return (
-      parts.length === 4 &&
-      parts.every((p) => /^\d{1,3}$/.test(p) && Number(p) <= 255)
-    );
+    if (
+      parts.length !== 4 ||
+      !parts.every((p) => /^\d{1,3}$/.test(p) && Number(p) <= 255)
+    ) {
+      return false;
+    }
+    // La comandera vive en la LAN del local. Rechazamos rangos que NO son una
+    // impresora de LAN y que abrirían un SSRF cloud→red desde el print agent (que
+    // conecta a la IP que le indica el cloud): loopback (127/8), link-local incl.
+    // metadata cloud 169.254.169.254 (169.254/16), unspecified (0/8) y
+    // multicast/reservado (>=224). Los rangos privados de LAN siguen permitidos.
+    const [a, b] = parts.map(Number);
+    if (a === 0 || a === 127 || a >= 224) return false;
+    if (a === 169 && b === 254) return false;
+    return true;
   }
   return /^(?=.{1,253}$)[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/.test(
     host,
