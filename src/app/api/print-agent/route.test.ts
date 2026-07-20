@@ -83,12 +83,19 @@ function getReq(auth = "Bearer test-key") {
 }
 
 function postReq(body: unknown, auth = "Bearer test-key") {
+  // `business_id` es obligatorio en el POST; los tests operan sobre biz1, así que
+  // lo inyectamos por defecto cuando el body no lo trae. Un test que necesite
+  // probar mismatch/ausencia pasa el `business_id` explícito (o arma su Request).
+  const merged =
+    body && typeof body === "object" && !Array.isArray(body) && !("business_id" in body)
+      ? { business_id: "biz1", ...(body as object) }
+      : body;
   return new Request("http://localhost/api/print-agent", {
     method: "POST",
     headers: auth
       ? { authorization: auth, "content-type": "application/json" }
       : { "content-type": "application/json" },
-    body: JSON.stringify(body),
+    body: JSON.stringify(merged),
   });
 }
 
@@ -259,5 +266,36 @@ describe("POST /api/print-agent — confirmación y reporte de fallo (spec 33)",
   it("sin Bearer válido → 401", async () => {
     const res = await POST(postReq({ comanda_id: "c1" }, ""));
     expect(res.status).toBe(401);
+  });
+
+  it("business_id de OTRO negocio → 404 (no transiciona comanda ajena, security review #4)", async () => {
+    postRow = {
+      id: "c1",
+      status: "pendiente",
+      print_failed_at: null,
+      reprint_requested_at: null,
+      orders: { business_id: "biz1" },
+    };
+    const res = await POST(postReq({ comanda_id: "c1", business_id: "biz2" }));
+    expect(res.status).toBe(404);
+    expect(captured.updates).toHaveLength(0);
+  });
+
+  it("sin business_id → 400 (obligatorio para el check de ownership)", async () => {
+    postRow = {
+      id: "c1",
+      status: "pendiente",
+      print_failed_at: null,
+      reprint_requested_at: null,
+      orders: { business_id: "biz1" },
+    };
+    const req = new Request("http://localhost/api/print-agent", {
+      method: "POST",
+      headers: { authorization: "Bearer test-key", "content-type": "application/json" },
+      body: JSON.stringify({ comanda_id: "c1" }),
+    });
+    const res = await POST(req);
+    expect(res.status).toBe(400);
+    expect(captured.updates).toHaveLength(0);
   });
 });

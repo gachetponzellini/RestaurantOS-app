@@ -169,6 +169,16 @@ export async function POST(req: Request) {
   // Auth con el business_id ya parseado (spec 046): acepta key global o del negocio.
   if (!(await verifyAgentKey(req, body.business_id))) return unauthorized();
 
+  // `business_id` obligatorio: es la base del check de ownership de abajo. Antes
+  // era opcional y el check se salteaba al omitirlo, dejando transicionar
+  // comandas de cualquier negocio con la key global (security review #4).
+  if (!body.business_id) {
+    return NextResponse.json(
+      { error: "missing business_id" },
+      { status: 400 },
+    );
+  }
+
   const comandaId = body.comanda_id;
   if (!comandaId) {
     return NextResponse.json(
@@ -202,7 +212,9 @@ export async function POST(req: Request) {
   // referencia lo envía siempre.
   const ownerBusinessId = (row.orders as unknown as { business_id: string })
     .business_id;
-  if (body.business_id && body.business_id !== ownerBusinessId) {
+  // Incondicional: `business_id` ya es obligatorio (arriba). La comanda debe
+  // pertenecer al negocio que el agente reporta.
+  if (body.business_id !== ownerBusinessId) {
     return NextResponse.json({ error: "comanda not found" }, { status: 404 });
   }
 
