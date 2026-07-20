@@ -6,6 +6,18 @@ import { createSupabaseServiceClient } from "@/lib/supabase/service";
 import { unauthorized, verifyAgentKey } from "./agent-auth";
 
 /**
+ * Sanea texto que va al stream ESC/POS de la comandera: quita bytes de control
+ * (ESC 0x1B, GS 0x1D, etc.) que un cliente podría inyectar vía `notes` de un
+ * pedido online para mandar comandos crudos a la impresora (corte de papel,
+ * apertura de cajón, etc.). Conserva tab y newline. Security review #8.
+ */
+function sanitizeTicketText(s: string | null | undefined): string | null {
+  if (s == null) return null;
+  // eslint-disable-next-line no-control-regex
+  return s.replace(/[\x00-\x08\x0B-\x1F\x7F]/g, "");
+}
+
+/**
  * GET /api/print-agent?business_id=X[&station_id=Y]
  *
  * Devuelve las comandas imprimibles: las `pendiente` (recién marchadas) y las
@@ -96,7 +108,7 @@ export async function GET(req: Request) {
     return {
       comanda_id: c.id,
       station_id: c.station_id,
-      station_name: station?.name ?? "—",
+      station_name: sanitizeTicketText(station?.name) ?? "—",
       // Destino de impresión del sector (spec 28). El agente imprime en esta IP
       // sin mapeo local; si es null, saltea la comanda y la deja `pendiente`.
       printer_ip: station?.printer_ip ?? null,
@@ -107,12 +119,12 @@ export async function GET(req: Request) {
       // Spec 049: comanda anulada → el agente imprime un ticket «ANULADA».
       // Campos aditivos: un agente viejo los ignora y reimprime el ticket normal.
       cancelled: Boolean(c.cancelled_at),
-      cancelled_reason: (c.cancelled_reason as string | null) ?? null,
+      cancelled_reason: sanitizeTicketText(c.cancelled_reason as string | null),
       // Reimpresión pedida (spec 35): editar/reimprimir vuelve a mandar la
       // comanda. El agente imprime un ticket «REIMPRESIÓN» para que cocina sepa
       // que reemplaza a uno anterior. Campo aditivo (un agente viejo lo ignora).
       reprint: Boolean(c.reprint_requested_at),
-      table_label: order?.tables?.label ?? "—",
+      table_label: sanitizeTicketText(order?.tables?.label) ?? "—",
       items: ((c.comanda_items ?? []) as unknown[]).map((ci) => {
         const item = ci as {
           order_item_id: string;
@@ -126,11 +138,11 @@ export async function GET(req: Request) {
           };
         };
         return {
-          product_name: item.order_items?.products?.name ?? "—",
+          product_name: sanitizeTicketText(item.order_items?.products?.name) ?? "—",
           quantity: item.order_items?.quantity ?? 1,
-          notes: item.order_items?.notes ?? null,
+          notes: sanitizeTicketText(item.order_items?.notes),
           modifiers: (item.order_items?.order_item_modifiers ?? [])
-            .map((m) => m.modifiers?.name)
+            .map((m) => sanitizeTicketText(m.modifiers?.name))
             .filter(Boolean),
         };
       }),

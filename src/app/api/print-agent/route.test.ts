@@ -160,6 +160,20 @@ describe("GET /api/print-agent — printer_ip por comanda (spec 28)", () => {
     expect(bar?.cancelled).toBe(false);
   });
 
+  it("sanea bytes de control ESC/POS del texto del ticket (security review #8)", async () => {
+    rows = [
+      makeRow("Cocina", "192.168.10.50", {
+        cancelled_at: "2026-07-17T00:00:00Z",
+        cancelled_reason: "corte\x1b\x1d\x00papel",
+      }),
+    ];
+    const res = await GET(getReq());
+    const body = (await res.json()) as {
+      comandas: { cancelled_reason: string | null }[];
+    };
+    expect(body.comandas[0]?.cancelled_reason).toBe("cortepapel");
+  });
+
   it("comanda con reimpresión pedida → payload con reprint:true (spec 35)", async () => {
     rows = [
       makeRow("Cocina", "192.168.10.50", {
