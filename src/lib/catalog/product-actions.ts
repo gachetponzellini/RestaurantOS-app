@@ -4,7 +4,6 @@ import { revalidatePath } from "next/cache";
 
 import { actionError, actionOk, type ActionResult } from "@/lib/actions";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import { createSupabaseServiceClient } from "@/lib/supabase/service";
 
 import {
   ProductInput,
@@ -12,15 +11,7 @@ import {
   warnGarnishModifierGroups,
 } from "./schemas";
 
-async function getBusinessIdBySlug(slug: string): Promise<string | null> {
-  const service = createSupabaseServiceClient();
-  const { data } = await service
-    .from("businesses")
-    .select("id")
-    .eq("slug", slug)
-    .maybeSingle();
-  return data?.id ?? null;
-}
+import { requireCatalogManager } from "./require-catalog-manager";
 
 async function syncModifierGroups(
   productId: string,
@@ -125,8 +116,9 @@ export async function createProduct(
   const parsed = ProductInput.safeParse(input);
   if (!parsed.success) return actionError("Datos inválidos.");
 
-  const businessId = await getBusinessIdBySlug(businessSlug);
-  if (!businessId) return actionError("Negocio no encontrado.");
+  const guard = await requireCatalogManager(businessSlug);
+  if (!guard.ok) return guard;
+  const businessId = guard.data.businessId;
 
   const supabase = await createSupabaseServerClient();
   const { modifier_groups, ...productData } = parsed.data;
@@ -160,15 +152,17 @@ export async function updateProduct(
   const parsed = ProductInput.safeParse(input);
   if (!parsed.success) return actionError("Datos inválidos.");
 
-  const businessId = await getBusinessIdBySlug(businessSlug);
-  if (!businessId) return actionError("Negocio no encontrado.");
+  const guard = await requireCatalogManager(businessSlug);
+  if (!guard.ok) return guard;
+  const businessId = guard.data.businessId;
 
   const supabase = await createSupabaseServerClient();
   const { modifier_groups, ...productData } = parsed.data;
   const { error } = await supabase
     .from("products")
     .update(productData)
-    .eq("id", id);
+    .eq("id", id)
+    .eq("business_id", businessId);
   if (error) {
     console.error("updateProduct", error);
     return actionError(
@@ -189,8 +183,16 @@ export async function deleteProduct(
   businessSlug: string,
   id: string,
 ): Promise<ActionResult<{ soft_deleted: boolean }>> {
+  const guard = await requireCatalogManager(businessSlug);
+  if (!guard.ok) return guard;
+  const businessId = guard.data.businessId;
+
   const supabase = await createSupabaseServerClient();
-  const { error } = await supabase.from("products").delete().eq("id", id);
+  const { error } = await supabase
+    .from("products")
+    .delete()
+    .eq("id", id)
+    .eq("business_id", businessId);
 
   if (!error) {
     revalidatePath(`/${businessSlug}/admin/catalogo`);
@@ -207,7 +209,8 @@ export async function deleteProduct(
     const { error: softErr } = await supabase
       .from("products")
       .update({ is_active: false, is_available: false })
-      .eq("id", id);
+      .eq("id", id)
+      .eq("business_id", businessId);
     if (softErr) {
       console.error("deleteProduct soft-delete", softErr);
       return actionError("No pudimos borrar el producto.");
@@ -226,11 +229,15 @@ export async function toggleProductAvailability(
   id: string,
   isAvailable: boolean,
 ): Promise<ActionResult<{ is_available: boolean }>> {
+  const guard = await requireCatalogManager(businessSlug);
+  if (!guard.ok) return guard;
+
   const supabase = await createSupabaseServerClient();
   const { error } = await supabase
     .from("products")
     .update({ is_available: isAvailable })
-    .eq("id", id);
+    .eq("id", id)
+    .eq("business_id", guard.data.businessId);
   if (error) {
     console.error("toggleProductAvailability", error);
     return actionError("No pudimos actualizar.");
@@ -245,11 +252,15 @@ export async function toggleProductActive(
   id: string,
   isActive: boolean,
 ): Promise<ActionResult<{ is_active: boolean }>> {
+  const guard = await requireCatalogManager(businessSlug);
+  if (!guard.ok) return guard;
+
   const supabase = await createSupabaseServerClient();
   const { error } = await supabase
     .from("products")
     .update({ is_active: isActive })
-    .eq("id", id);
+    .eq("id", id)
+    .eq("business_id", guard.data.businessId);
   if (error) {
     console.error("toggleProductActive", error);
     return actionError("No pudimos actualizar.");

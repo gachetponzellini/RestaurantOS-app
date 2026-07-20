@@ -10,15 +10,7 @@ import { getBusiness } from "@/lib/tenant";
 
 import { StationInput, StationPrinterInput } from "./schemas";
 
-async function getBusinessIdBySlug(slug: string): Promise<string | null> {
-  const service = createSupabaseServiceClient();
-  const { data } = await service
-    .from("businesses")
-    .select("id")
-    .eq("slug", slug)
-    .maybeSingle();
-  return data?.id ?? null;
-}
+import { requireCatalogManager } from "./require-catalog-manager";
 
 export async function createStation(
   businessSlug: string,
@@ -36,8 +28,9 @@ export async function createStation(
     );
   }
 
-  const businessId = await getBusinessIdBySlug(businessSlug);
-  if (!businessId) return actionError("Negocio no encontrado.");
+  const guard = await requireCatalogManager(businessSlug);
+  if (!guard.ok) return guard;
+  const businessId = guard.data.businessId;
 
   const supabase = await createSupabaseServerClient();
   const { data, error } = await supabase
@@ -76,11 +69,15 @@ export async function updateStation(
     );
   }
 
+  const guard = await requireCatalogManager(businessSlug);
+  if (!guard.ok) return guard;
+
   const supabase = await createSupabaseServerClient();
   const { error } = await supabase
     .from("stations")
     .update(parsed.data)
-    .eq("id", id);
+    .eq("id", id)
+    .eq("business_id", guard.data.businessId);
 
   if (error) {
     console.error("updateStation", error);
@@ -103,8 +100,15 @@ export async function deleteStation(
   // que se desreferencian limpio. PERO comandas.station_id es ON DELETE
   // RESTRICT — si el sector ya tiene comandas históricas, falla con 23503.
   // Capturamos ese caso y sugerimos usar `is_active=false` en su lugar.
+  const guard = await requireCatalogManager(businessSlug);
+  if (!guard.ok) return guard;
+
   const supabase = await createSupabaseServerClient();
-  const { error } = await supabase.from("stations").delete().eq("id", id);
+  const { error } = await supabase
+    .from("stations")
+    .delete()
+    .eq("id", id)
+    .eq("business_id", guard.data.businessId);
   if (error) {
     console.error("deleteStation", error);
     if (error.code === "23503") {
@@ -178,8 +182,9 @@ export async function reorderStations(
   businessSlug: string,
   idsInOrder: string[],
 ): Promise<ActionResult<null>> {
-  const businessId = await getBusinessIdBySlug(businessSlug);
-  if (!businessId) return actionError("Negocio no encontrado.");
+  const guard = await requireCatalogManager(businessSlug);
+  if (!guard.ok) return guard;
+  const businessId = guard.data.businessId;
 
   const supabase = await createSupabaseServerClient();
 
@@ -202,13 +207,15 @@ export async function reorderStations(
     await supabase
       .from("stations")
       .update({ sort_order: 100_000 + i })
-      .eq("id", idsInOrder[i]!);
+      .eq("id", idsInOrder[i]!)
+      .eq("business_id", businessId);
   }
   for (let i = 0; i < idsInOrder.length; i++) {
     await supabase
       .from("stations")
       .update({ sort_order: i })
-      .eq("id", idsInOrder[i]!);
+      .eq("id", idsInOrder[i]!)
+      .eq("business_id", businessId);
   }
 
   revalidatePath(`/${businessSlug}/admin/catalogo`);

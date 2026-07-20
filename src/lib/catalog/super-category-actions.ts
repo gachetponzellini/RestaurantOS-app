@@ -4,19 +4,10 @@ import { revalidatePath } from "next/cache";
 
 import { actionError, actionOk, type ActionResult } from "@/lib/actions";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import { createSupabaseServiceClient } from "@/lib/supabase/service";
 
 import { SuperCategoryInput } from "./schemas";
 
-async function getBusinessIdBySlug(slug: string): Promise<string | null> {
-  const service = createSupabaseServiceClient();
-  const { data } = await service
-    .from("businesses")
-    .select("id")
-    .eq("slug", slug)
-    .maybeSingle();
-  return data?.id ?? null;
-}
+import { requireCatalogManager } from "./require-catalog-manager";
 
 export async function createSuperCategory(
   businessSlug: string,
@@ -34,8 +25,9 @@ export async function createSuperCategory(
     );
   }
 
-  const businessId = await getBusinessIdBySlug(businessSlug);
-  if (!businessId) return actionError("Negocio no encontrado.");
+  const guard = await requireCatalogManager(businessSlug);
+  if (!guard.ok) return guard;
+  const businessId = guard.data.businessId;
 
   const supabase = await createSupabaseServerClient();
   const { data, error } = await supabase
@@ -74,11 +66,15 @@ export async function updateSuperCategory(
     );
   }
 
+  const guard = await requireCatalogManager(businessSlug);
+  if (!guard.ok) return guard;
+
   const supabase = await createSupabaseServerClient();
   const { error } = await supabase
     .from("super_categories")
     .update(parsed.data)
-    .eq("id", id);
+    .eq("id", id)
+    .eq("business_id", guard.data.businessId);
 
   if (error) {
     console.error("updateSuperCategory", error);
@@ -99,8 +95,15 @@ export async function deleteSuperCategory(
 ): Promise<ActionResult<null>> {
   // El `on delete set null` en categories.super_category_id se encarga de
   // dejar las categorías huérfanas (caen al bucket "Otros" en la UI mozo).
+  const guard = await requireCatalogManager(businessSlug);
+  if (!guard.ok) return guard;
+
   const supabase = await createSupabaseServerClient();
-  const { error } = await supabase.from("super_categories").delete().eq("id", id);
+  const { error } = await supabase
+    .from("super_categories")
+    .delete()
+    .eq("id", id)
+    .eq("business_id", guard.data.businessId);
   if (error) {
     console.error("deleteSuperCategory", error);
     return actionError("No pudimos borrar la supercategoría.");
@@ -122,8 +125,9 @@ export async function reorderSuperCategories(
   businessSlug: string,
   idsInOrder: string[],
 ): Promise<ActionResult<null>> {
-  const businessId = await getBusinessIdBySlug(businessSlug);
-  if (!businessId) return actionError("Negocio no encontrado.");
+  const guard = await requireCatalogManager(businessSlug);
+  if (!guard.ok) return guard;
+  const businessId = guard.data.businessId;
 
   const supabase = await createSupabaseServerClient();
 
@@ -150,13 +154,15 @@ export async function reorderSuperCategories(
     await supabase
       .from("super_categories")
       .update({ sort_order: 100_000 + i })
-      .eq("id", idsInOrder[i]!);
+      .eq("id", idsInOrder[i]!)
+      .eq("business_id", businessId);
   }
   for (let i = 0; i < idsInOrder.length; i++) {
     await supabase
       .from("super_categories")
       .update({ sort_order: i })
-      .eq("id", idsInOrder[i]!);
+      .eq("id", idsInOrder[i]!)
+      .eq("business_id", businessId);
   }
 
   revalidatePath(`/${businessSlug}/admin/catalogo`);
@@ -173,8 +179,9 @@ export async function moveSuperCategory(
   id: string,
   direction: "up" | "down",
 ): Promise<ActionResult<null>> {
-  const businessId = await getBusinessIdBySlug(businessSlug);
-  if (!businessId) return actionError("Negocio no encontrado.");
+  const guard = await requireCatalogManager(businessSlug);
+  if (!guard.ok) return guard;
+  const businessId = guard.data.businessId;
 
   const supabase = await createSupabaseServerClient();
 
@@ -199,15 +206,21 @@ export async function moveSuperCategory(
 
   // Intermediate sort_order para evitar colisión con el unique (no hay unique
   // pero igual evitamos race con cualquier check) — usamos -1 temporal.
-  await supabase.from("super_categories").update({ sort_order: -1 }).eq("id", a.id);
+  await supabase
+    .from("super_categories")
+    .update({ sort_order: -1 })
+    .eq("id", a.id)
+    .eq("business_id", businessId);
   await supabase
     .from("super_categories")
     .update({ sort_order: a.sort_order })
-    .eq("id", b.id);
+    .eq("id", b.id)
+    .eq("business_id", businessId);
   await supabase
     .from("super_categories")
     .update({ sort_order: b.sort_order })
-    .eq("id", a.id);
+    .eq("id", a.id)
+    .eq("business_id", businessId);
 
   revalidatePath(`/${businessSlug}/admin/catalogo`);
   return actionOk(null);

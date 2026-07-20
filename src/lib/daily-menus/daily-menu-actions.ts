@@ -4,19 +4,9 @@ import { revalidatePath } from "next/cache";
 
 import { actionError, actionOk, type ActionResult } from "@/lib/actions";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import { createSupabaseServiceClient } from "@/lib/supabase/service";
 
+import { requireCatalogManager } from "@/lib/catalog/require-catalog-manager";
 import { DailyMenuInput, type DailyMenuComponentInput } from "./schemas";
-
-async function getBusinessIdBySlug(slug: string): Promise<string | null> {
-  const service = createSupabaseServiceClient();
-  const { data } = await service
-    .from("businesses")
-    .select("id")
-    .eq("slug", slug)
-    .maybeSingle();
-  return data?.id ?? null;
-}
 
 /**
  * Sincroniza los componentes de un menú comparando los incoming contra los
@@ -86,8 +76,9 @@ export async function createDailyMenu(
   const parsed = DailyMenuInput.safeParse(input);
   if (!parsed.success) return actionError("Datos inválidos.");
 
-  const businessId = await getBusinessIdBySlug(businessSlug);
-  if (!businessId) return actionError("Negocio no encontrado.");
+  const guard = await requireCatalogManager(businessSlug);
+  if (!guard.ok) return guard;
+  const businessId = guard.data.businessId;
 
   const supabase = await createSupabaseServerClient();
   const { components, ...menuData } = parsed.data;
@@ -119,15 +110,17 @@ export async function updateDailyMenu(
   const parsed = DailyMenuInput.safeParse(input);
   if (!parsed.success) return actionError("Datos inválidos.");
 
-  const businessId = await getBusinessIdBySlug(businessSlug);
-  if (!businessId) return actionError("Negocio no encontrado.");
+  const guard = await requireCatalogManager(businessSlug);
+  if (!guard.ok) return guard;
+  const businessId = guard.data.businessId;
 
   const supabase = await createSupabaseServerClient();
   const { components, ...menuData } = parsed.data;
   const { error } = await supabase
     .from("daily_menus")
     .update(menuData)
-    .eq("id", id);
+    .eq("id", id)
+    .eq("business_id", businessId);
   if (error) {
     console.error("updateDailyMenu", error);
     return actionError(
@@ -147,8 +140,15 @@ export async function deleteDailyMenu(
   businessSlug: string,
   id: string,
 ): Promise<ActionResult<null>> {
+  const guard = await requireCatalogManager(businessSlug);
+  if (!guard.ok) return guard;
+
   const supabase = await createSupabaseServerClient();
-  const { error } = await supabase.from("daily_menus").delete().eq("id", id);
+  const { error } = await supabase
+    .from("daily_menus")
+    .delete()
+    .eq("id", id)
+    .eq("business_id", guard.data.businessId);
   if (error) {
     console.error("deleteDailyMenu", error);
     return actionError("No pudimos borrar el menú.");
@@ -163,11 +163,15 @@ export async function toggleDailyMenuActive(
   id: string,
   isActive: boolean,
 ): Promise<ActionResult<{ is_active: boolean }>> {
+  const guard = await requireCatalogManager(businessSlug);
+  if (!guard.ok) return guard;
+
   const supabase = await createSupabaseServerClient();
   const { error } = await supabase
     .from("daily_menus")
     .update({ is_active: isActive })
-    .eq("id", id);
+    .eq("id", id)
+    .eq("business_id", guard.data.businessId);
   if (error) {
     console.error("toggleDailyMenuActive", error);
     return actionError("No pudimos actualizar.");
@@ -182,11 +186,15 @@ export async function toggleDailyMenuAvailability(
   id: string,
   isAvailable: boolean,
 ): Promise<ActionResult<{ is_available: boolean }>> {
+  const guard = await requireCatalogManager(businessSlug);
+  if (!guard.ok) return guard;
+
   const supabase = await createSupabaseServerClient();
   const { error } = await supabase
     .from("daily_menus")
     .update({ is_available: isAvailable })
-    .eq("id", id);
+    .eq("id", id)
+    .eq("business_id", guard.data.businessId);
   if (error) {
     console.error("toggleDailyMenuAvailability", error);
     return actionError("No pudimos actualizar.");

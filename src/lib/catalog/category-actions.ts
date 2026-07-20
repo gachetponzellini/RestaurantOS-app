@@ -4,19 +4,10 @@ import { revalidatePath } from "next/cache";
 
 import { actionError, actionOk, type ActionResult } from "@/lib/actions";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import { createSupabaseServiceClient } from "@/lib/supabase/service";
 
 import { CategoryInput } from "./schemas";
 
-async function getBusinessIdBySlug(slug: string): Promise<string | null> {
-  const service = createSupabaseServiceClient();
-  const { data } = await service
-    .from("businesses")
-    .select("id")
-    .eq("slug", slug)
-    .maybeSingle();
-  return data?.id ?? null;
-}
+import { requireCatalogManager } from "./require-catalog-manager";
 
 export async function createCategory(
   businessSlug: string,
@@ -25,8 +16,9 @@ export async function createCategory(
   const parsed = CategoryInput.safeParse(input);
   if (!parsed.success) return actionError("Datos inválidos.");
 
-  const businessId = await getBusinessIdBySlug(businessSlug);
-  if (!businessId) return actionError("Negocio no encontrado.");
+  const guard = await requireCatalogManager(businessSlug);
+  if (!guard.ok) return guard;
+  const businessId = guard.data.businessId;
 
   const supabase = await createSupabaseServerClient();
   const { data, error } = await supabase
@@ -54,11 +46,15 @@ export async function updateCategory(
   const parsed = CategoryInput.safeParse(input);
   if (!parsed.success) return actionError("Datos inválidos.");
 
+  const guard = await requireCatalogManager(businessSlug);
+  if (!guard.ok) return guard;
+
   const supabase = await createSupabaseServerClient();
   const { error } = await supabase
     .from("categories")
     .update(parsed.data)
-    .eq("id", id);
+    .eq("id", id)
+    .eq("business_id", guard.data.businessId);
   if (error) {
     console.error("updateCategory", error);
     return actionError(
@@ -75,8 +71,15 @@ export async function deleteCategory(
   businessSlug: string,
   id: string,
 ): Promise<ActionResult<null>> {
+  const guard = await requireCatalogManager(businessSlug);
+  if (!guard.ok) return guard;
+
   const supabase = await createSupabaseServerClient();
-  const { error } = await supabase.from("categories").delete().eq("id", id);
+  const { error } = await supabase
+    .from("categories")
+    .delete()
+    .eq("id", id)
+    .eq("business_id", guard.data.businessId);
   if (error) {
     console.error("deleteCategory", error);
     return actionError("No pudimos borrar la categoría.");
@@ -95,11 +98,15 @@ export async function assignCategoryToSuper(
   categoryId: string,
   superCategoryId: string | null,
 ): Promise<ActionResult<null>> {
+  const guard = await requireCatalogManager(businessSlug);
+  if (!guard.ok) return guard;
+
   const supabase = await createSupabaseServerClient();
   const { error } = await supabase
     .from("categories")
     .update({ super_category_id: superCategoryId })
-    .eq("id", categoryId);
+    .eq("id", categoryId)
+    .eq("business_id", guard.data.businessId);
   if (error) {
     console.error("assignCategoryToSuper", error);
     return actionError("No pudimos cambiar la supercategoría.");
@@ -121,8 +128,9 @@ export async function reorderCategories(
   superCategoryId: string | null,
   idsInOrder: string[],
 ): Promise<ActionResult<null>> {
-  const businessId = await getBusinessIdBySlug(businessSlug);
-  if (!businessId) return actionError("Negocio no encontrado.");
+  const guard = await requireCatalogManager(businessSlug);
+  if (!guard.ok) return guard;
+  const businessId = guard.data.businessId;
 
   const supabase = await createSupabaseServerClient();
 
@@ -148,13 +156,15 @@ export async function reorderCategories(
     await supabase
       .from("categories")
       .update({ sort_order: 100_000 + i })
-      .eq("id", idsInOrder[i]!);
+      .eq("id", idsInOrder[i]!)
+      .eq("business_id", businessId);
   }
   for (let i = 0; i < idsInOrder.length; i++) {
     await supabase
       .from("categories")
       .update({ sort_order: i })
-      .eq("id", idsInOrder[i]!);
+      .eq("id", idsInOrder[i]!)
+      .eq("business_id", businessId);
   }
 
   revalidatePath(`/${businessSlug}/admin/catalogo`);
@@ -170,8 +180,9 @@ export async function moveCategory(
   id: string,
   direction: "up" | "down",
 ): Promise<ActionResult<null>> {
-  const businessId = await getBusinessIdBySlug(businessSlug);
-  if (!businessId) return actionError("Negocio no encontrado.");
+  const guard = await requireCatalogManager(businessSlug);
+  if (!guard.ok) return guard;
+  const businessId = guard.data.businessId;
 
   const supabase = await createSupabaseServerClient();
 
@@ -204,15 +215,21 @@ export async function moveCategory(
   const a = list[idx]!;
   const b = list[swapIdx]!;
 
-  await supabase.from("categories").update({ sort_order: -1 }).eq("id", a.id);
+  await supabase
+    .from("categories")
+    .update({ sort_order: -1 })
+    .eq("id", a.id)
+    .eq("business_id", businessId);
   await supabase
     .from("categories")
     .update({ sort_order: a.sort_order })
-    .eq("id", b.id);
+    .eq("id", b.id)
+    .eq("business_id", businessId);
   await supabase
     .from("categories")
     .update({ sort_order: b.sort_order })
-    .eq("id", a.id);
+    .eq("id", a.id)
+    .eq("business_id", businessId);
 
   revalidatePath(`/${businessSlug}/admin/catalogo`);
   return actionOk(null);
