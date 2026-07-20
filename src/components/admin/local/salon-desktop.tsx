@@ -8,6 +8,7 @@ import {
   Ban,
   ClipboardList,
   Clock,
+  MoreVertical,
   MoveRight,
   Pencil,
   Receipt,
@@ -24,7 +25,6 @@ import { SegmentedSelector } from "@/components/admin/local/segmented-selector";
 import { AsignarMozosPanel } from "@/components/mozo/asignar-mozos-panel";
 import { FloorPlanViewer, type TableExtra } from "@/components/mozo/floor-plan-viewer";
 import { OrderSummaryCard } from "@/components/mozo/order-summary-card";
-import { MesaActionRow, MesaActionTile } from "@/components/mozo/mesa-actions";
 import { TransferTableModal } from "@/components/mozo/transfer-table-modal";
 import { TrasladarMesaModal } from "@/components/mozo/trasladar-mesa-modal";
 import { WalkInModal } from "@/components/mozo/walk-in-modal";
@@ -37,6 +37,13 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import type { BusinessRole } from "@/lib/admin/context";
 import type { FloorPlanWithTables } from "@/lib/admin/floor-plan/queries";
 import { MozoPedirClient } from "@/app/[business_slug]/mozo/mesa/[id]/pedir/pedir-client";
@@ -1746,6 +1753,66 @@ function CobroPanelEmptyState({
 
 // ─── Detalle de mesa seleccionada ───────────────────────────────────────────
 
+/** Ítem del menú de opciones (⋯) del detalle de mesa. */
+type MesaMenuItem = {
+  key: string;
+  icon: React.ComponentType<{ className?: string }>;
+  label: string;
+  onClick: () => void;
+};
+
+/**
+ * Menú de tres puntos del detalle de mesa (spec 049 · mismo patrón que las
+ * cards de comandas): agrupa las acciones secundarias (walk-in alternativo,
+ * volver a pedir, cargar más, transferir, trasladar) + Anular (destructiva),
+ * dejando el botón primario grande afuera, a la vista.
+ */
+function MesaOptionsMenu({
+  items,
+  onAnular,
+  disabled,
+}: {
+  items: MesaMenuItem[];
+  onAnular: (() => void) | null;
+  disabled: boolean;
+}) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        aria-label="Más acciones de la mesa"
+        disabled={disabled}
+        className="text-muted-foreground ring-border/70 hover:bg-muted/60 data-[popup-open]:bg-muted/60 flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl ring-1 transition disabled:opacity-50"
+      >
+        <MoreVertical className="size-5" strokeWidth={2.5} />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-52">
+        {items.map((it) => {
+          const Icon = it.icon;
+          return (
+            <DropdownMenuItem key={it.key} onClick={it.onClick} disabled={disabled}>
+              <Icon />
+              {it.label}
+            </DropdownMenuItem>
+          );
+        })}
+        {onAnular && (
+          <>
+            {items.length > 0 && <DropdownMenuSeparator />}
+            <DropdownMenuItem
+              variant="destructive"
+              onClick={onAnular}
+              disabled={disabled}
+            >
+              <Ban />
+              Anular mesa
+            </DropdownMenuItem>
+          </>
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
 function TableDetail({
   table,
   order,
@@ -1953,163 +2020,85 @@ function TableDetail({
         )}
       </div>
 
-      {/* Footer: jerarquía clara — primario grande, secundarios en grid,
-          acción destructiva separada al final. */}
-      <div className="border-border/60 space-y-2 border-t p-3">
-        {/* Primario: depende del estado Y de si hay items cargados.
-            - libre → Sentar walk-in.
-            - pidio_cuenta → Cobrar mesa.
-            - ocupada CON items → Pedir cuenta (flujo natural).
-            - ocupada SIN items → Cargar pedido (acaba de sentarse). */}
+      {/* Footer: la acción PRIMARIA grande queda a la vista; el resto
+          (secundarias + Anular) va a un menú de tres puntos (⋯), mismo patrón
+          que las cards de comandas para que el panel ocupe poco. */}
+      <div className="border-border/60 border-t p-3">
         {(() => {
-          // Mismo estilo que el drawer del mozo: h-14 rounded-2xl
-          // emerald-600 con shadow. button HTML, no Button shadcn.
+          // Mismo estilo que el drawer del mozo: h-14 rounded-2xl con shadow.
           const primaryClass =
             "flex h-14 w-full items-center justify-center gap-2 rounded-2xl bg-emerald-600 text-base font-semibold text-white shadow-sm transition active:scale-[0.98] disabled:opacity-60";
           // Cobrar pasa por el flujo de cuenta (propina/descuento/dividir →
           // cobro), igual que el mozo. Un solo botón primario, naranja.
           const primaryAmberClass =
             "flex h-14 w-full items-center justify-center gap-2 rounded-2xl bg-amber-500 text-base font-semibold text-white shadow-sm transition active:scale-[0.98] disabled:opacity-60";
+
+          // ── Acción primaria: depende del estado Y de si hay items cargados.
+          //    libre → Sentar walk-in/reserva · pidio_cuenta u ocupada c/items
+          //    → Cobrar · ocupada s/items → Cargar pedido. Una sola, a la vista.
+          let primary: React.ReactNode = null;
           if (canWalkIn && reservation) {
-            return (
-              <button
-                type="button"
-                onClick={onSentarReserva}
-                disabled={pending}
-                className={primaryClass}
-              >
+            primary = (
+              <button type="button" onClick={onSentarReserva} disabled={pending} className={primaryClass}>
                 <UserCheck className="h-5 w-5" />
                 Sentar reserva
               </button>
             );
-          }
-          if (canWalkIn) {
-            return (
-              <button
-                type="button"
-                onClick={onWalkIn}
-                disabled={pending}
-                className={primaryClass}
-              >
+          } else if (canWalkIn) {
+            primary = (
+              <button type="button" onClick={onWalkIn} disabled={pending} className={primaryClass}>
                 <UserPlus className="h-5 w-5" />
                 Sentar walk-in
               </button>
             );
-          }
-          if (canShowCuenta && (status === "pidio_cuenta" || hasItems)) {
-            return (
-              <button
-                type="button"
-                disabled={pending}
-                className={primaryAmberClass}
-                onClick={onPedirCuenta}
-              >
+          } else if (canShowCuenta && (status === "pidio_cuenta" || hasItems)) {
+            primary = (
+              <button type="button" onClick={onPedirCuenta} disabled={pending} className={primaryAmberClass}>
                 <Receipt className="h-5 w-5" />
                 Cobrar
               </button>
             );
-          }
-          if (canPedir) {
-            return (
-              <button
-                type="button"
-                disabled={pending}
-                className={primaryClass}
-                onClick={() =>
-                  onCargarPedido()
-                }
-              >
+          } else if (canPedir) {
+            primary = (
+              <button type="button" onClick={() => onCargarPedido()} disabled={pending} className={primaryClass}>
                 <ClipboardList className="h-5 w-5" />
                 Cargar pedido
               </button>
             );
           }
-          return null;
-        })()}
 
-        {/* Secundarios. Si solo hay 1 secundario, ocupa full width (no
-            queda colgado a media columna). Si hay 2+, grid 2-cols. */}
-        {(() => {
-          // Cuando el primario es "Sentar reserva", ofrecer walk-in como alternativa.
+          // ── Secundarias → ítems del menú (⋯). Anular va aparte (destructiva).
           const showWalkInSec = canWalkIn && !!reservation;
           const showVolverAPedir = status === "pidio_cuenta" && canPedir;
           const showCargarMas = status === "ocupada" && hasItems && canPedir;
-          const items: React.ReactNode[] = [];
-          if (showWalkInSec) {
-            items.push(
-              <MesaActionTile
-                key="walkin"
-                icon={UserPlus}
-                label="Walk-in"
-                tone="zinc"
-                onClick={onWalkIn}
-                disabled={pending}
-              />,
-            );
-          }
-          if (showVolverAPedir) {
-            items.push(
-              <MesaActionTile
-                key="volver"
-                icon={ClipboardList}
-                label="Volver a pedir"
-                tone="zinc"
-                onClick={() => onCargarPedido()}
-                disabled={pending}
-              />,
-            );
-          }
-          if (showCargarMas) {
-            items.push(
-              <MesaActionTile
-                key="cargar-mas"
-                icon={ClipboardList}
-                label="Cargar más"
-                tone="emerald"
-                onClick={() => onCargarPedido()}
-                disabled={pending}
-              />,
-            );
-          }
-          if (canTransfer) {
-            items.push(
-              <MesaActionTile
-                key="transferir"
-                icon={ArrowLeftRight}
-                label="Transferir"
-                tone="sky"
-                onClick={onTransfer}
-                disabled={pending}
-              />,
-            );
-          }
-          if (canTrasladar) {
-            items.push(
-              <MesaActionTile
-                key="trasladar"
-                icon={MoveRight}
-                label="Trasladar"
-                tone="violet"
-                onClick={onTrasladar}
-                disabled={pending}
-              />,
-            );
-          }
-          return <MesaActionRow items={items} />;
-        })()}
+          const menuItems: MesaMenuItem[] = [];
+          if (showWalkInSec)
+            menuItems.push({ key: "walkin", icon: UserPlus, label: "Sentar walk-in", onClick: onWalkIn });
+          if (showVolverAPedir)
+            menuItems.push({ key: "volver", icon: ClipboardList, label: "Volver a pedir", onClick: onCargarPedido });
+          if (showCargarMas)
+            menuItems.push({ key: "cargar-mas", icon: ClipboardList, label: "Cargar más", onClick: onCargarPedido });
+          if (canTransfer)
+            menuItems.push({ key: "transferir", icon: ArrowLeftRight, label: "Transferir", onClick: onTransfer });
+          if (canTrasladar)
+            menuItems.push({ key: "trasladar", icon: MoveRight, label: "Trasladar", onClick: onTrasladar });
 
-        {/* Destructiva: full-width, separada del grid operativo */}
-        {canAnular && (
-          <button
-            type="button"
-            onClick={onAnular}
-            disabled={pending}
-            className="flex h-10 w-full items-center justify-center gap-1.5 rounded-xl bg-rose-50 px-3 text-sm font-semibold text-rose-700 ring-1 ring-rose-200 transition hover:bg-rose-100 active:scale-[0.97] disabled:opacity-60"
-          >
-            <Ban className="h-3.5 w-3.5" />
-            Anular
-          </button>
-        )}
+          const hasMenu = menuItems.length > 0 || canAnular;
+          if (!primary && !hasMenu) return null;
+
+          return (
+            <div className="flex items-stretch gap-2">
+              {primary && <div className="min-w-0 flex-1">{primary}</div>}
+              {hasMenu && (
+                <MesaOptionsMenu
+                  items={menuItems}
+                  onAnular={canAnular ? onAnular : null}
+                  disabled={pending}
+                />
+              )}
+            </div>
+          );
+        })()}
       </div>
     </>
   );
