@@ -177,20 +177,28 @@ describe("StationPrinterInput — config de comandera por sector (spec 28)", () 
     expect(r.success).toBe(false);
   });
 
-  it("rechaza rangos que no son impresora de LAN (SSRF cloud→red, security review #8)", () => {
-    // loopback, metadata cloud / link-local, unspecified y multicast.
-    for (const ip of [
+  it("rechaza todo lo que no sea IP privada de LAN (SSRF cloud→red, security review #8)", () => {
+    for (const host of [
+      // loopback, metadata cloud / link-local, unspecified y multicast
       "127.0.0.1",
       "169.254.169.254",
       "0.0.0.0",
       "224.0.0.1",
+      // IPs públicas (allowlist private-only)
+      "8.8.8.8",
+      "1.1.1.1",
+      "203.0.113.5",
+      // nombres de loopback y formas de IP "empaquetada" (hex/octal)
+      "localhost",
+      "0x7f.0.0.1",
+      "0177.0.0.1",
     ]) {
       const r = StationPrinterInput.safeParse({
-        printer_ip: ip,
+        printer_ip: host,
         printer_port: 9100,
         printer_enabled: true,
       });
-      expect(r.success, `${ip} debería rechazarse`).toBe(false);
+      expect(r.success, `${host} debería rechazarse`).toBe(false);
     }
   });
 

@@ -40,16 +40,36 @@ export function isValidPrinterHost(host: string): boolean {
     ) {
       return false;
     }
-    // La comandera vive en la LAN del local. Rechazamos rangos que NO son una
-    // impresora de LAN y que abrirían un SSRF cloud→red desde el print agent (que
-    // conecta a la IP que le indica el cloud): loopback (127/8), link-local incl.
-    // metadata cloud 169.254.169.254 (169.254/16), unspecified (0/8) y
-    // multicast/reservado (>=224). Los rangos privados de LAN siguen permitidos.
+    // Allowlist: la comandera vive en la LAN, así que SOLO aceptamos IPv4 de
+    // rangos privados RFC1918 (10/8, 172.16/12, 192.168/16). Esto cierra de una
+    // el SSRF cloud→red del print agent (que conecta a la IP que le dicta el
+    // cloud): quedan rechazados loopback (127/8), link-local + metadata cloud
+    // (169.254/16), unspecified (0/8), multicast (>=224) y TODA IP pública.
     const [a, b] = parts.map(Number);
-    if (a === 0 || a === 127 || a >= 224) return false;
-    if (a === 169 && b === 254) return false;
-    return true;
+    const isPrivate =
+      a === 10 ||
+      (a === 172 && b >= 16 && b <= 31) ||
+      (a === 192 && b === 168);
+    return isPrivate;
   }
+
+  // Rama hostname. La resolución ocurre en la LAN del agente, así que no podemos
+  // saber acá a qué IP apunta un nombre — esa validación (resolver y chequear que
+  // la IP resuelta sea privada) debe hacerla el print agent antes de conectar.
+  // Igual rechazamos acá lo evidente: nombres de loopback y formas de IP
+  // "empaquetada" (hex/octal) que inet_aton resolvería a loopback/metadata
+  // (ej. 0x7f.0.0.1 → 127.0.0.1, 0177.0.0.1 → 127.0.0.1).
+  const lower = host.toLowerCase();
+  if (
+    lower === "localhost" ||
+    lower === "ip6-localhost" ||
+    lower.endsWith(".localhost")
+  ) {
+    return false;
+  }
+  const labels = lower.split(".");
+  if (labels.every((l) => /^(0x[0-9a-f]+|\d+)$/.test(l))) return false;
+
   return /^(?=.{1,253}$)[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/.test(
     host,
   );
