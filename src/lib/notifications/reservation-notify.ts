@@ -8,6 +8,8 @@ import { dispatchCustomerMessage } from "./customer-dispatch";
 import {
   reservationConfirmedEmail,
   reservationReminderEmail,
+  resolveBusinessBrand,
+  type BusinessBrand,
 } from "./customer-email-templates";
 
 const DEFAULT_TZ = "America/Argentina/Buenos_Aires";
@@ -33,7 +35,7 @@ type ReservationRow = {
 
 async function loadReservationContext(reservationId: string): Promise<{
   reservation: ReservationRow;
-  businessName: string;
+  brand: BusinessBrand;
   slug: string;
   whenLabel: string;
 } | null> {
@@ -49,7 +51,7 @@ async function loadReservationContext(reservationId: string): Promise<{
 
   const { data: business } = await service
     .from("businesses")
-    .select("name, slug, timezone")
+    .select("name, slug, timezone, logo_url, address, phone, settings")
     .eq("id", reservation.business_id)
     .maybeSingle();
   if (!business) return null;
@@ -62,7 +64,7 @@ async function loadReservationContext(reservationId: string): Promise<{
 
   return {
     reservation: reservation as ReservationRow,
-    businessName: business.name,
+    brand: resolveBusinessBrand(business),
     slug: business.slug,
     whenLabel,
   };
@@ -82,7 +84,7 @@ export async function notifyReservationConfirmed(params: {
 
     const manageUrl = `${baseUrl()}/${ctx.slug}/perfil/reservas`;
     const email = reservationConfirmedEmail({
-      businessName: ctx.businessName,
+      brand: ctx.brand,
       customerName: ctx.reservation.customer_name,
       whenLabel: ctx.whenLabel,
       partySize: ctx.reservation.party_size,
@@ -103,7 +105,7 @@ export async function notifyReservationConfirmed(params: {
         subject: email.subject,
         html: email.html,
         text: email.text,
-        fromName: ctx.businessName,
+        fromName: ctx.brand.name,
       },
     });
   } catch (err) {
@@ -125,7 +127,7 @@ export async function notifyReservationReminder(params: {
 
     const confirmUrl = `${baseUrl()}/${ctx.slug}/reservar/confirmar/${ctx.reservation.confirm_token}`;
     const email = reservationReminderEmail({
-      businessName: ctx.businessName,
+      brand: ctx.brand,
       customerName: ctx.reservation.customer_name,
       whenLabel: ctx.whenLabel,
       partySize: ctx.reservation.party_size,
@@ -146,7 +148,7 @@ export async function notifyReservationReminder(params: {
         subject: email.subject,
         html: email.html,
         text: email.text,
-        fromName: ctx.businessName,
+        fromName: ctx.brand.name,
       },
     });
   } catch (err) {

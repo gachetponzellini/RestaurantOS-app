@@ -8,6 +8,7 @@ import { dispatchCustomerMessage } from "./customer-dispatch";
 import {
   orderScheduledEmail,
   orderStatusEmail,
+  resolveBusinessBrand,
 } from "./customer-email-templates";
 import { renderDeliveryBody } from "./delivery-templates";
 
@@ -42,10 +43,11 @@ export async function notifyDeliveryStatusChange(params: {
 
     const { data: business } = await service
       .from("businesses")
-      .select("name, timezone")
+      .select("name, timezone, logo_url, address, phone, settings")
       .eq("id", order.business_id)
       .maybeSingle();
     if (!business) return;
+    const brand = resolveBusinessBrand(business);
 
     // Plantilla editable del dueño para este estado (si la cargó). Sin fila →
     // la lógica pura cae a la plantilla default.
@@ -81,7 +83,7 @@ export async function notifyDeliveryStatusChange(params: {
       order.customer_phone && order.customer_phone.trim().length > 0,
     );
     const email = orderStatusEmail({
-      businessName: business.name,
+      brand,
       orderNumber: order.order_number,
       body,
     });
@@ -132,10 +134,11 @@ export async function notifyScheduledConfirmed(params: {
 
     const { data: business } = await service
       .from("businesses")
-      .select("name, timezone")
+      .select("name, timezone, logo_url, address, phone, settings")
       .eq("id", order.business_id)
       .maybeSingle();
     if (!business) return;
+    const brand = resolveBusinessBrand(business);
 
     const tz = business.timezone ?? DEFAULT_TZ;
     const whenLabel = formatInTimeZone(
@@ -151,7 +154,7 @@ export async function notifyScheduledConfirmed(params: {
       order.customer_phone && order.customer_phone.trim().length > 0,
     );
     const email = orderScheduledEmail({
-      businessName: business.name,
+      brand,
       customerName: order.customer_name,
       orderNumber: order.order_number,
       whenLabel,

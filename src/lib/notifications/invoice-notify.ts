@@ -3,7 +3,10 @@ import "server-only";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 
 import { dispatchCustomerMessage } from "./customer-dispatch";
-import { invoiceIssuedEmail } from "./customer-email-templates";
+import {
+  invoiceIssuedEmail,
+  resolveBusinessBrand,
+} from "./customer-email-templates";
 
 /**
  * Aviso del comprobante fiscal al cliente tras la autorización de ARCA/AFIP
@@ -33,10 +36,11 @@ export async function notifyInvoiceIssued(params: {
 
     const { data: business } = await service
       .from("businesses")
-      .select("name")
+      .select("name, logo_url, address, phone, settings")
       .eq("id", invoice.business_id)
       .maybeSingle();
     if (!business) return;
+    const brand = resolveBusinessBrand(business);
 
     const totalLabel = `$${(invoice.total_cents / 100).toLocaleString("es-AR")}`;
     const comprobanteLabel = invoice.numero
@@ -44,7 +48,7 @@ export async function notifyInvoiceIssued(params: {
       : undefined;
 
     const email = invoiceIssuedEmail({
-      businessName: business.name,
+      brand,
       customerName: order.customer_name,
       orderNumber: order.order_number,
       totalLabel,
