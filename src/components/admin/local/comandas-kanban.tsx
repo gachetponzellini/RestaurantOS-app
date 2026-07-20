@@ -8,6 +8,7 @@ import {
   ChefHat,
   Check,
   Minus,
+  MoreVertical,
   Package,
   Pencil,
   Play,
@@ -44,6 +45,13 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 /**
  * Umbral (ms) para considerar "caído" al print agent: sin heartbeat hace más
@@ -622,7 +630,7 @@ function ComandaCard({
   return (
     <article
       className={[
-        "bg-card group relative flex flex-col gap-2 rounded-xl p-3 text-left transition-all",
+        "bg-card group relative flex flex-col gap-1.5 rounded-xl p-2.5 text-left transition-all",
         "shadow-[0_1px_2px_rgba(19,27,46,0.04)]",
         // Fallo de impresión (spec 33/35): resalta la card con ring rojo para
         // que no se confunda con una recién marchada.
@@ -659,36 +667,34 @@ function ComandaCard({
         />
       </header>
 
-      {/* Mozo asignado — solo dine-in con mozo. Chip con su color del
-          palette (mismo que en el salón) para mapear comanda → mozo de un
-          vistazo, sin confundirse con los estados de mesa. */}
-      {mozoName && comanda.mozo_id && (() => {
-        const p = mozoPalette(comanda.mozo_id);
-        return (
-          <p
-            className={`inline-flex max-w-full items-center gap-1 truncate self-start rounded-full px-2 py-0.5 text-[10px] font-semibold ring-1 ${p.bg} ${p.text} ${p.ring}`}
-          >
-            <span aria-hidden className={`size-1.5 shrink-0 rounded-full ${p.dot}`} />
-            <span className="truncate">{mozoName}</span>
-          </p>
-        );
-      })()}
-
-      {/* Sector + tanda + nº pedido */}
-      <div className="flex items-center justify-between gap-2 text-[11px]">
+      {/* Sector + mozo en la misma fila (dos chips), con tanda · nº pedido a la
+          derecha. El sector no encoge (dato crítico, color del sector); el chip
+          del mozo — su color del palette del salón — trunca si falta lugar. */}
+      <div className="flex min-w-0 items-center gap-1.5 text-[11px]">
         <span
-          className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-bold uppercase tracking-wide ${stationStyle.bg} ${stationStyle.text}`}
+          className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 font-bold uppercase tracking-wide ${stationStyle.bg} ${stationStyle.text}`}
         >
           <span className={`h-1.5 w-1.5 rounded-full ${stationStyle.dot}`} />
           {comanda.station_name}
         </span>
-        <span className="text-muted-foreground/70 tabular-nums">
+        {mozoName && comanda.mozo_id && (() => {
+          const p = mozoPalette(comanda.mozo_id);
+          return (
+            <span
+              className={`inline-flex min-w-0 items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ring-1 ${p.bg} ${p.text} ${p.ring}`}
+            >
+              <span aria-hidden className={`size-1.5 shrink-0 rounded-full ${p.dot}`} />
+              <span className="truncate">{mozoName}</span>
+            </span>
+          );
+        })()}
+        <span className="text-muted-foreground/70 ml-auto shrink-0 tabular-nums">
           tanda {comanda.batch} · #{comanda.order_number}
         </span>
       </div>
 
       {/* Items */}
-      <ul className="flex flex-col gap-1 pt-0.5">
+      <ul className="flex flex-col gap-0.5">
         {liveItems.map((it) => (
           <li
             key={it.order_item_id}
@@ -736,17 +742,17 @@ function ComandaCard({
         ))}
       </ul>
 
-      {/* Footer: acción primaria. El tiempo va arriba (no se duplica abajo).
-          Las entregadas (terminal) no tienen botón. El color matchea el
-          estado actual de la card (no el próximo). */}
-      {!isTerminal && (
-        <div className="pt-1">
+      {/* Footer compacto: el botón PRINCIPAL (Empezar/Entregar) queda a la vista;
+          el resto (Reimprimir / Editar / Anular) va al menú de tres puntos (⋯)
+          para que la card ocupe poco con muchas comandas a la vez. */}
+      {!isTerminal ? (
+        <div className="flex items-center gap-1.5 pt-0.5">
           {comanda.status === "pendiente" && (
             <button
               type="button"
               onClick={() => onEmpezar(comanda.id)}
               disabled={isPending}
-              className={`inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-lg px-3 text-xs font-semibold transition active:translate-y-px disabled:opacity-50 ${buttonClass}`}
+              className={`inline-flex h-9 flex-1 items-center justify-center gap-1.5 rounded-lg px-3 text-xs font-semibold transition active:translate-y-px disabled:opacity-50 ${buttonClass}`}
             >
               <Play className="size-3.5" strokeWidth={2.5} />
               Empezar
@@ -757,84 +763,124 @@ function ComandaCard({
               type="button"
               onClick={() => onEntregar(comanda.id)}
               disabled={isPending}
-              className={`inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-lg px-3 text-xs font-semibold transition active:translate-y-px disabled:opacity-50 ${buttonClass}`}
+              className={`inline-flex h-9 flex-1 items-center justify-center gap-1.5 rounded-lg px-3 text-xs font-semibold transition active:translate-y-px disabled:opacity-50 ${buttonClass}`}
             >
               <Check className="size-3.5" strokeWidth={2.5} />
               Entregar
             </button>
           )}
+          <ComandaMenu
+            comanda={comanda}
+            isPending={isPending}
+            printFailed={printFailed}
+            reprintQueued={reprintQueued}
+            onReimprimir={onReimprimir}
+            onEditar={onEditar}
+            onAnular={onAnular}
+          />
         </div>
-      )}
-
-      {/* Entregadas: sin botón primario, pero mostramos el tiempo de preparación
-          (delivered − emitted) como KPI — verde rápido / rojo lento. */}
-      {isTerminal && prep != null && (
-        <div className="border-border/40 mt-0.5 flex items-center gap-1.5 border-t pt-2">
-          <Check className={`size-3.5 ${prepTone(prep)}`} strokeWidth={2.5} />
-          <span className={`text-[11px] font-semibold ${prepTone(prep)}`}>
-            Preparada en {formatRelativeTime(prep)}
-          </span>
-        </div>
-      )}
-
-      {/* Reimprimir / Reintentar (spec 35). Disponible en cualquier estado —
-          incluso entregadas — sin tocar la máquina de estados. El label cambia
-          según haya fallo pendiente ("Reintentar") o no ("Reimprimir"). */}
-      <button
-        type="button"
-        onClick={() => onReimprimir(comanda.id)}
-        disabled={isPending || reprintQueued}
-        className={[
-          "inline-flex h-8 w-full items-center justify-center gap-1.5 rounded-lg px-3 text-xs font-semibold transition active:translate-y-px disabled:opacity-50",
-          printFailed
-            ? "bg-rose-600 text-white hover:bg-rose-700"
-            : "text-muted-foreground ring-border/70 hover:bg-muted/60 ring-1",
-        ].join(" ")}
-      >
-        {reprintQueued ? (
-          <>
-            <Printer className="size-3.5" strokeWidth={2.5} />
-            En cola de impresión…
-          </>
-        ) : printFailed ? (
-          <>
-            <RotateCcw className="size-3.5" strokeWidth={2.5} />
-            Reintentar impresión
-          </>
-        ) : (
-          <>
-            <Printer className="size-3.5" strokeWidth={2.5} />
-            Reimprimir
-          </>
-        )}
-      </button>
-
-      {/* Gestión de la comanda (spec 049): editar ítems / anular entera. Solo en
-          comandas activas y no anuladas. El loading es explícito (frontera de
-          plata): cada modal maneja su propio pending. */}
-      {!isTerminal && !comanda.cancelled_at && (
-        <div className="grid grid-cols-2 gap-2">
-          <button
-            type="button"
-            onClick={onEditar}
-            disabled={isPending}
-            className="text-muted-foreground ring-border/70 hover:bg-muted/60 inline-flex h-8 items-center justify-center gap-1.5 rounded-lg px-2 text-xs font-semibold ring-1 transition active:translate-y-px disabled:opacity-50"
-          >
-            <Pencil className="size-3.5" strokeWidth={2.5} />
-            Editar
-          </button>
-          <button
-            type="button"
-            onClick={onAnular}
-            disabled={isPending}
-            className="inline-flex h-8 items-center justify-center gap-1.5 rounded-lg px-2 text-xs font-semibold text-rose-700 ring-1 ring-rose-200 transition hover:bg-rose-50 active:translate-y-px disabled:opacity-50"
-          >
-            <Ban className="size-3.5" strokeWidth={2.5} />
-            Anular
-          </button>
+      ) : (
+        /* Entregadas: KPI de preparación (delivered − emitted) + menú (solo
+           Reimprimir). Sin botón primario. */
+        <div className="border-border/40 mt-0.5 flex items-center justify-between gap-2 border-t pt-1.5">
+          {prep != null ? (
+            <span
+              className={`inline-flex items-center gap-1.5 text-[11px] font-semibold ${prepTone(prep)}`}
+            >
+              <Check className="size-3.5" strokeWidth={2.5} />
+              Preparada en {formatRelativeTime(prep)}
+            </span>
+          ) : (
+            <span className="text-muted-foreground/60 text-[11px]">Entregada</span>
+          )}
+          <ComandaMenu
+            comanda={comanda}
+            isPending={isPending}
+            printFailed={printFailed}
+            reprintQueued={reprintQueued}
+            onReimprimir={onReimprimir}
+            onEditar={onEditar}
+            onAnular={onAnular}
+          />
         </div>
       )}
     </article>
+  );
+}
+
+// ─── Menú de opciones de la comanda (⋯) ─────────────────────────────────────
+
+/**
+ * Acciones secundarias de la card en un menú de tres puntos: Reimprimir /
+ * Reintentar (cualquier estado) + Editar / Anular (solo activas y no anuladas).
+ * El botón principal (Empezar/Entregar) queda afuera, a la vista. Mantiene el
+ * loading explícito (frontera de plata, spec 21): los modales manejan su pending.
+ */
+function ComandaMenu({
+  comanda,
+  isPending,
+  printFailed,
+  reprintQueued,
+  onReimprimir,
+  onEditar,
+  onAnular,
+}: {
+  comanda: LocalComanda;
+  isPending: boolean;
+  printFailed: boolean;
+  reprintQueued: boolean;
+  onReimprimir: (id: string) => void;
+  onEditar: () => void;
+  onAnular: () => void;
+}) {
+  const canManage = comanda.status !== "entregado" && !comanda.cancelled_at;
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        aria-label="Opciones de la comanda"
+        disabled={isPending}
+        className="text-muted-foreground ring-border/70 hover:bg-muted/60 data-[popup-open]:bg-muted/60 inline-flex size-9 shrink-0 items-center justify-center rounded-lg ring-1 transition disabled:opacity-50"
+      >
+        <MoreVertical className="size-4" strokeWidth={2.5} />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-48">
+        <DropdownMenuItem
+          onClick={() => onReimprimir(comanda.id)}
+          disabled={reprintQueued}
+        >
+          {reprintQueued ? (
+            <>
+              <Printer />
+              En cola de impresión…
+            </>
+          ) : printFailed ? (
+            <>
+              <RotateCcw />
+              Reintentar impresión
+            </>
+          ) : (
+            <>
+              <Printer />
+              Reimprimir
+            </>
+          )}
+        </DropdownMenuItem>
+        {canManage && (
+          <>
+            <DropdownMenuItem onClick={onEditar}>
+              <Pencil />
+              Editar comanda
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem variant="destructive" onClick={onAnular}>
+              <Ban />
+              Anular comanda
+            </DropdownMenuItem>
+          </>
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
