@@ -1,7 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useTransition,
+} from "react";
 import { toast } from "sonner";
 import {
   Ban,
@@ -28,6 +34,7 @@ import {
   cancelarComanda,
   cancelarItem,
   editarItemComanda,
+  getComandasTabData,
   getSwappableProducts,
   marcarComandaEntregada,
   solicitarReimpresion,
@@ -204,9 +211,9 @@ export function ComandasKanban({
   slug,
   businessId,
   initialComandas,
-  stations,
-  mozos,
-  printAgentLastSeenAt,
+  stations: initialStations,
+  mozos: initialMozos,
+  printAgentLastSeenAt: initialPrintAgentLastSeenAt,
 }: {
   slug: string;
   businessId: string;
@@ -215,8 +222,6 @@ export function ComandasKanban({
   mozos: MozoMember[];
   printAgentLastSeenAt: string | null;
 }) {
-  const router = useRouter();
-
   // Filtro "solo fallidas": lo activa la alerta de fallos de impresión (spec
   // 35) para ir directo a las comandas con `print_failed_at`.
   const [showOnlyFailed, setShowOnlyFailed] = useState(false);
@@ -226,12 +231,55 @@ export function ComandasKanban({
   const [anularTarget, setAnularTarget] = useState<LocalComanda | null>(null);
   const [editarTarget, setEditarTarget] = useState<LocalComanda | null>(null);
 
+  // Snapshot del server de TODA la tab (comandas + stations + mozos + salud del
+  // print agent), seedeado una vez de los props y actualizado SOLO por el
+  // refetch de realtime. Antes cada evento hacía `router.refresh()`, que
+  // re-corría los 6 loaders de /admin/operacion + re-serializaba todo el árbol
+  // RSC; ahora `getComandasTabData` corre las 4 queries de esta tab y mergea
+  // acá — cero refresh de ruta. Un solo escritor (el refetch) → sin carrera
+  // contra un re-sync del prop (los props sólo seedean el estado inicial; en
+  // navegación / cambio de tab el componente se remonta y re-seedea).
+  const [serverData, setServerData] = useState({
+    comandas: initialComandas,
+    stations: initialStations,
+    mozos: initialMozos,
+    printAgentLastSeenAt: initialPrintAgentLastSeenAt,
+  });
+  const { stations, mozos, printAgentLastSeenAt } = serverData;
+
+  // Refetch de la tab. Guard de carrera por secuencia — ante ráfagas (o
+  // respuestas fuera de orden) sólo aplica el más nuevo. Nunca lanza (lo awaitea
+  // `onReimprimir` dentro de su transición): en error mantiene el estado actual
+  // (nunca vacía el KDS), es un refresh de fondo, no una acción del usuario.
+  const refetchSeq = useRef(0);
+  const refetchComandas = useCallback(async () => {
+    const seq = ++refetchSeq.current;
+    try {
+      const res = await getComandasTabData(slug);
+      if (seq !== refetchSeq.current) return;
+      if (res.ok) setServerData(res.data);
+    } catch {
+      // swallow: refresh de fondo, sin toast ni rollback.
+    }
+  }, [slug]);
+
+  // Refetch al montar. La tab conmuta con `{active === "comandas" && …}` (montaje
+  // condicional), así que al volver a Comandas el panel se REMONTA y re-seedea
+  // `serverData` de la promesa RSC de `initialComandas`, que quedó CONGELADA al
+  // page-load (ya no hay `router.refresh()` que la revalide). Sin esto, un
+  // regreso a la tab tras un rato mostraría el snapshot viejo (comandas ya
+  // entregadas reapareciendo) hasta el próximo evento de realtime. El refetch de
+  // mount trae el estado actual; el guard de secuencia lo coordina con realtime.
+  useEffect(() => {
+    void refetchComandas();
+  }, [refetchComandas]);
+
   // Optimistic con rollback en error vía helper compartido (spec 21). El `base`
-  // es `initialComandas` (props del server): realtime dispara router.refresh()
-  // y el overlay optimista persiste hasta que termina SU transición, sin pisar
-  // el cambio ni hacer flash. El rollback es automático si la action falla.
+  // es `serverData.comandas` (snapshot del server + merge de realtime): el
+  // overlay optimista persiste hasta que termina SU transición, sin pisar el
+  // cambio ni hacer flash. El rollback es automático si la action falla.
   const { state: comandas, run, pending: isPending } = useOptimisticAction(
-    initialComandas,
+    serverData.comandas,
     (cs: LocalComanda[], action: ComandaOptimistic): LocalComanda[] =>
       cs.map((c) => {
         if (c.id !== action.id) return c;
@@ -263,7 +311,16 @@ export function ComandasKanban({
   const onReimprimir = (id: string) => {
     run(
       { kind: "reimprimir", id, requestedAt: new Date().toISOString() },
-      () => solicitarReimpresion(slug, id),
+      // Reimpresión es infrecuente: esperamos el refetch DENTRO de la transición
+      // para que el overlay optimista caiga sobre base ya-persistida
+      // (`reprint_requested_at` del server), sin el flicker del botón que habría
+      // si el overlay se soltara antes de que el refetch de realtime aterrice.
+      // `refetchComandas` nunca lanza, así que no dispara rollback/toast.
+      async () => {
+        const r = await solicitarReimpresion(slug, id);
+        if (r.ok) await refetchComandas();
+        return r;
+      },
     );
   };
 
@@ -277,12 +334,12 @@ export function ComandasKanban({
 
     const scheduleRefresh = () => {
       // Debounce: una orden multi-sector dispara N INSERTs en `comandas`
-      // (uno por sector) → sin esto serían N router.refresh() seguidos.
-      // 200 ms los coalesce en un solo refresh, imperceptible. Mismo patrón
-      // que use-tables-realtime.ts.
+      // (uno por sector) → sin esto serían N refetch seguidos. 200 ms los
+      // coalesce en uno solo, imperceptible. Mismo patrón que
+      // use-tables-realtime.ts.
       if (pendingRefresh) clearTimeout(pendingRefresh);
       pendingRefresh = setTimeout(() => {
-        if (!cancelled) router.refresh();
+        if (!cancelled) void refetchComandas();
         pendingRefresh = null;
       }, 200);
     };
@@ -307,9 +364,11 @@ export function ComandasKanban({
             table: "comandas",
           },
           () => {
-            // Comandas no tiene business_id directo; el filter por business
-            // viaja via JOIN en el server. router.refresh() re-fetchea con
-            // permisos correctos. Debounced para no spamear en ráfagas.
+            // Comandas no tiene business_id directo, así que el canal escucha
+            // TODA la tabla; el filtro por negocio lo aplica el refetch server
+            // (`getComandasTabData` → business_id + RLS). Un evento de
+            // otro negocio dispara un refetch que igual devuelve sólo lo nuestro.
+            // Debounced para no spamear en ráfagas.
             scheduleRefresh();
           },
         )
@@ -335,7 +394,7 @@ export function ComandasKanban({
       if (pendingRefresh) clearTimeout(pendingRefresh);
       if (channel) supabase.removeChannel(channel);
     };
-  }, [router]);
+  }, [refetchComandas]);
 
   // Resolución de nombre del mozo → mismo patrón que SalonDesktop.
   const mozoNameById = useMemo(() => {
@@ -507,7 +566,7 @@ export function ComandasKanban({
           onClose={() => setAnularTarget(null)}
           onDone={() => {
             setAnularTarget(null);
-            router.refresh();
+            void refetchComandas();
           }}
         />
       )}
@@ -518,7 +577,7 @@ export function ComandasKanban({
           onClose={() => setEditarTarget(null)}
           onDone={() => {
             setEditarTarget(null);
-            router.refresh();
+            void refetchComandas();
           }}
         />
       )}

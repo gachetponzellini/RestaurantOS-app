@@ -4,7 +4,15 @@ import { revalidatePath } from "next/cache";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { actionError, actionOk, type ActionResult } from "@/lib/actions";
+import {
+  getActiveComandas,
+  getPrintAgentHealth,
+  getStationsForLocal,
+  type LocalComanda,
+  type LocalStation,
+} from "@/lib/admin/local-query";
 import { requireMozoActionContext } from "@/lib/mozo/auth";
+import { getMozosByBusiness, type MozoMember } from "@/lib/mozo/queries";
 import { createNotification } from "@/lib/notifications/create";
 import { notifyItemCancelled } from "@/lib/notifications/events";
 import {
@@ -76,6 +84,62 @@ const NEXT_ITEM_STATUS: Record<KitchenItemStatus, KitchenItemStatus> = {
   ready: "delivered",
   delivered: "delivered",
 };
+
+/** Datos server-side de la tab Comandas (KDS). Mismo set que `loadComandas`. */
+export type ComandasTabData = {
+  comandas: LocalComanda[];
+  stations: LocalStation[];
+  mozos: MozoMember[];
+  printAgentLastSeenAt: string | null;
+};
+
+/**
+ * Refetch acotado de la tab Comandas del KDS (kanban).
+ *
+ * Reemplaza al `router.refresh()` que el kanban disparaba en cada evento de
+ * realtime: aquel re-ejecutaba los **6** loaders de `/admin/operacion` (Salón +
+ * pedidos + caja + rendición + fichaje además de comandas) + re-render+re-serie
+ * de todo el árbol RSC. Acá corremos SOLO las **4 queries de la tab Comandas**
+ * (idénticas a `loadComandas`: comandas activas/entregadas + stations + mozos +
+ * heartbeat del print agent) y el cliente mergea en su estado local — mismo
+ * patrón "cero refresh de ruta" que `orders-realtime-board`.
+ *
+ * Trae las 4 (no sólo comandas) para no congelar el pill de salud del agente ni
+ * los nombres de mozo / sectores nuevos entre turnos: eran refrescados por el
+ * `router.refresh()` que se elimina.
+ *
+ * Multi-tenant: cada query filtra por `business_id` y corre con el server client
+ * (RLS `is_business_member`), así que un miembro de varios negocios (House/Golf
+ * comparten socios) sólo ve lo del negocio del `slug`.
+ */
+export async function getComandasTabData(
+  slug: string,
+): Promise<ActionResult<ComandasTabData>> {
+  const business = await getBusiness(slug);
+  if (!business) return actionError("Negocio no encontrado.");
+
+  // Gate de MEMBRESÍA (mismo que las demás actions del KDS, ej.
+  // `marcarComandaEntregada`). No basta con "hay sesión": `getMozosByBusiness`
+  // corre con service-role (RLS bypass) filtrando sólo por `business_id`, así
+  // que sin este gate un usuario autenticado ajeno al negocio podría leer la
+  // nómina del staff (nombres + emails) pasando un slug foráneo. Las otras 3
+  // queries ya están scopeadas por RLS, pero mozos no.
+  const ctxResult = await requireMozoActionContext(business.id);
+  if (!ctxResult.ok) return ctxResult;
+
+  const [comandas, stations, mozos, printAgentHealth] = await Promise.all([
+    getActiveComandas(business.id, business.timezone),
+    getStationsForLocal(business.id),
+    getMozosByBusiness(business.id),
+    getPrintAgentHealth(business.id),
+  ]);
+  return actionOk({
+    comandas,
+    stations,
+    mozos,
+    printAgentLastSeenAt: printAgentHealth.lastSeenAt,
+  });
+}
 
 /**
  * Crea (o reusa) la orden activa de una mesa, inserta order_items con
