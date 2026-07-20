@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-// verifyAgentKey (spec 046) acepta la key GLOBAL (retrocompat) o la key POR
-// NEGOCIO de print_agent_credentials. Mockeamos el lookup por-negocio.
+// verifyAgentKey (spec 046) autentica SOLO con la key POR NEGOCIO de
+// print_agent_credentials. La key global se retiró (security review #4).
+// Mockeamos el lookup por-negocio.
 
 let perBusinessKey: Record<string, string | null>;
 
@@ -24,8 +25,9 @@ beforeEach(() => {
 });
 
 describe("verifyAgentKey (spec 046)", () => {
-  it("acepta la key global (retrocompat)", async () => {
-    expect(await verifyAgentKey(req("Bearer global-key"), "bizA")).toBe(true);
+  it("la key global RETIRADA ya no autentica (security review #4)", async () => {
+    // Aunque PRINT_AGENT_KEY esté seteada en el env, se ignora: solo por-negocio.
+    expect(await verifyAgentKey(req("Bearer global-key"), "bizA")).toBe(false);
   });
 
   it("acepta la key por-negocio correcta", async () => {

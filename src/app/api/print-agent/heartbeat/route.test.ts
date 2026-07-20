@@ -16,6 +16,12 @@ vi.mock("@/lib/supabase/service", () => ({
   }),
 }));
 
+// Key por-negocio (la global se retiró, security review #4): biz1 usa "test-key".
+vi.mock("@/lib/print-agent/credentials", () => ({
+  getPrintAgentKey: async (businessId: string) =>
+    businessId === "biz1" ? "test-key" : null,
+}));
+
 const { POST } = await import("./route");
 
 function postReq(body: unknown, auth = "Bearer test-key") {
@@ -51,9 +57,9 @@ describe("POST /api/print-agent/heartbeat (spec 35)", () => {
     expect(upsertCalls).toHaveLength(0);
   });
 
-  it("sin business_id → 400", async () => {
+  it("sin business_id → 401 (sin negocio no se puede autenticar la key; security review #4)", async () => {
     const res = await POST(postReq({}));
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(401);
     expect(upsertCalls).toHaveLength(0);
   });
 });

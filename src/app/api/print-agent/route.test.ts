@@ -17,6 +17,14 @@ vi.mock("@/lib/notifications/events", () => ({
   },
 }));
 
+// Key por-negocio (la global se retiró, security review #4): biz1 usa "test-key".
+vi.mock("@/lib/print-agent/credentials", () => ({
+  getPrintAgentKey: async (businessId: string) =>
+    ((({ biz1: "test-key", biz2: "key-biz2" }) as Record<string, string>)[
+      businessId
+    ]) ?? null,
+}));
+
 vi.mock("@/lib/supabase/service", () => ({
   createSupabaseServiceClient: () => ({
     from: () => ({
@@ -282,7 +290,8 @@ describe("POST /api/print-agent — confirmación y reporte de fallo (spec 33)",
     expect(res.status).toBe(401);
   });
 
-  it("business_id de OTRO negocio → 404 (no transiciona comanda ajena, security review #4)", async () => {
+  it("comanda de OTRO negocio → 404 (con key válida de biz2, no toca comanda ajena; security review #4)", async () => {
+    // biz2 se autentica con SU key, pero la comanda es de biz1 → ownership 404.
     postRow = {
       id: "c1",
       status: "pendiente",
@@ -290,12 +299,14 @@ describe("POST /api/print-agent — confirmación y reporte de fallo (spec 33)",
       reprint_requested_at: null,
       orders: { business_id: "biz1" },
     };
-    const res = await POST(postReq({ comanda_id: "c1", business_id: "biz2" }));
+    const res = await POST(
+      postReq({ comanda_id: "c1", business_id: "biz2" }, "Bearer key-biz2"),
+    );
     expect(res.status).toBe(404);
     expect(captured.updates).toHaveLength(0);
   });
 
-  it("sin business_id → 400 (obligatorio para el check de ownership)", async () => {
+  it("sin business_id → 401 (sin negocio no se puede autenticar la key; security review #4)", async () => {
     postRow = {
       id: "c1",
       status: "pendiente",
@@ -309,7 +320,7 @@ describe("POST /api/print-agent — confirmación y reporte de fallo (spec 33)",
       body: JSON.stringify({ comanda_id: "c1" }),
     });
     const res = await POST(req);
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(401);
     expect(captured.updates).toHaveLength(0);
   });
 });
