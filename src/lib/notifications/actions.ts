@@ -341,7 +341,18 @@ const SetWhatsappCredsInput = z.object({
   // Gupshup: nombre de la App (src.name).
   appName: z.string().trim().max(120).optional(),
   // Gupshup: secreto del webhook entrante. Write-only, igual que apiKey.
-  webhookToken: z.string().trim().max(200).optional(),
+  // Piso de entropía: es el ÚNICO gate del webhook inbound (Gupshup no firma), así
+  // que un token corto/adivinable (ej. "golf") deja spoofear el sender.phone y
+  // manipular reservas ajenas. Vacío/ausente = conservar el actual (write-only).
+  webhookToken: z
+    .string()
+    .trim()
+    .max(200)
+    .optional()
+    .refine((v) => v === undefined || v === "" || v.length >= 24, {
+      message:
+        "El token del webhook debe tener al menos 24 caracteres (si es corto, es adivinable).",
+    }),
   channelId: z.string().trim().max(120).optional(),
 });
 
