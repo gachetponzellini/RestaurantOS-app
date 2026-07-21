@@ -1586,6 +1586,7 @@ export type Database = {
           cancelled_by: string | null
           cancelled_reason: string | null
           cancels_invoice_id: string | null
+          condicion_iva_receptor: number | null
           created_at: string
           cuit_receptor: string | null
           error_message: string | null
@@ -1615,6 +1616,7 @@ export type Database = {
           cancelled_by?: string | null
           cancelled_reason?: string | null
           cancels_invoice_id?: string | null
+          condicion_iva_receptor?: number | null
           created_at?: string
           cuit_receptor?: string | null
           error_message?: string | null
@@ -1644,6 +1646,7 @@ export type Database = {
           cancelled_by?: string | null
           cancelled_reason?: string | null
           cancels_invoice_id?: string | null
+          condicion_iva_receptor?: number | null
           created_at?: string
           cuit_receptor?: string | null
           error_message?: string | null

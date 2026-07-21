@@ -43,6 +43,49 @@ describe("buildGatewayInvoiceBody", () => {
     });
   });
 
+  it("Factura B con CUIT + condición Monotributo explícita → condición IVA 6 (spec 053 · R-C6)", () => {
+    const body = buildGatewayInvoiceBody(
+      {
+        ...base,
+        tipo: "factura_b",
+        cuitReceptor: "20-30712345-9",
+        condicionIvaReceptor: 6,
+      },
+      "2026-07-07",
+    );
+    expect(body.receptor).toMatchObject({
+      doc_tipo: 80,
+      doc_nro: "20307123459",
+      condicion_iva: 6, // NO 5: se declara la condición real del receptor identificado
+    });
+  });
+
+  it("condición explícita gana sobre el default por tipo (B + Exento → 4)", () => {
+    const body = buildGatewayInvoiceBody(
+      { ...base, tipo: "factura_b", cuitReceptor: "27111111117", condicionIvaReceptor: 4 },
+      "2026-07-07",
+    );
+    expect((body.receptor as { condicion_iva: number }).condicion_iva).toBe(4);
+  });
+
+  it("Factura A a un Monotributista → condición 6, no el hardcode RI (spec 053 · espejo)", () => {
+    const body = buildGatewayInvoiceBody(
+      { ...base, tipo: "factura_a", cuitReceptor: "20307123459", condicionIvaReceptor: 6 },
+      "2026-07-07",
+    );
+    expect((body.receptor as { condicion_iva: number }).condicion_iva).toBe(6);
+  });
+
+  it("sin condición explícita conserva el default histórico (A→1, B→5)", () => {
+    const bBody = buildGatewayInvoiceBody({ ...base, tipo: "factura_b" }, "2026-07-07");
+    expect((bBody.receptor as { condicion_iva: number }).condicion_iva).toBe(5);
+    const aBody = buildGatewayInvoiceBody(
+      { ...base, tipo: "factura_a", cuitReceptor: "20307123459" },
+      "2026-07-07",
+    );
+    expect((aBody.receptor as { condicion_iva: number }).condicion_iva).toBe(1);
+  });
+
   it("Nota de crédito B → incluye comprobantes_asociados mapeados a tipos ARCA", () => {
     const body = buildGatewayInvoiceBody(
       {

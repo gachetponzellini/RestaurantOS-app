@@ -31,15 +31,21 @@ function isTipoA(tipo: TipoComprobante): boolean {
 }
 
 /**
- * Condición IVA del receptor (RG 5616). El dominio no la modela explícitamente,
- * así que la derivamos del tipo de comprobante:
- * - Factura/NC **A** → receptor Responsable Inscripto (1).
+ * Condición IVA del receptor (RG 5616). Cuando el flujo la capturó
+ * explícitamente (receptor identificado por CUIT — Monotributo/Exento/RI/CF),
+ * esa condición **gana**. Si no vino (consumidor final sin identificar, o filas
+ * históricas previas a la spec 053), se cae al default por tipo:
+ * - Factura/NC **A** → Responsable Inscripto (1).
  * - Factura/NC **B** → Consumidor Final (5) — el caso típico del local.
  *
- * TODO(open): si el negocio factura B a monotributistas/exentos, habría que
- * capturar la condición real en la UI. Ver wiki/specs/13.
+ * Ver spec 053 (R-C6 del issue #51): antes esto era un hardcode por tipo que
+ * declaraba mal a un Monotributista (B con CUIT → CF, o A → RI).
  */
-function condicionIvaFor(tipo: TipoComprobante): CondicionIvaReceptor {
+function condicionIvaFor(
+  tipo: TipoComprobante,
+  explicit?: CondicionIvaReceptor | null,
+): CondicionIvaReceptor {
+  if (explicit) return explicit;
   return isTipoA(tipo) ? 1 : 5;
 }
 
@@ -79,7 +85,7 @@ export function buildGatewayInvoiceBody(
     receptor: {
       doc_tipo: doc.doc_tipo,
       doc_nro: doc.doc_nro,
-      condicion_iva: condicionIvaFor(req.tipo),
+      condicion_iva: condicionIvaFor(req.tipo, req.condicionIvaReceptor),
     },
     importe_total: toPesos(amounts.totalCents),
     importe_neto: toPesos(amounts.netoCents),

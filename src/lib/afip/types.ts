@@ -54,6 +54,12 @@ export type InvoiceRequest = {
   cuitEmisor: string;
   cuitReceptor?: string;
   razonSocialReceptor?: string;
+  /**
+   * Condición de IVA del receptor declarada explícitamente (RG 5616). Cuando
+   * está presente, gana sobre el default por tipo. Ausente → fallback histórico
+   * (A→RI, B→Consumidor Final). Ver spec 053.
+   */
+  condicionIvaReceptor?: CondicionIvaReceptor;
   totalCents: number;
   concepto: "productos" | "servicios" | "productos_y_servicios";
   /** NC/ND: comprobante(s) que ajusta. Requerido por el gateway para notas de crédito. */
@@ -103,6 +109,8 @@ export type Invoice = {
   cae_vencimiento: string | null;
   cuit_receptor: string | null;
   razon_social_receptor: string | null;
+  /** Condición IVA del receptor declarada (RG 5616); NULL = default por tipo. Spec 053. */
+  condicion_iva_receptor: CondicionIvaReceptor | null;
   total_cents: number;
   neto_cents: number;
   iva_cents: number;

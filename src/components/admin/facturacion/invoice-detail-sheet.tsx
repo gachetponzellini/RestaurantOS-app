@@ -112,9 +112,16 @@ export function InvoiceDetailSheet({
   const handleRefacturar = () => {
     if (!invoice.order_id) return;
     startRefacturar(async () => {
+      // Re-facturar sobre una anulada: preservar la identidad fiscal del
+      // comprobante original (tipo, CUIT, razón, condición IVA). Sin esto una
+      // Factura A / B-con-CUIT se degradaba a B consumidor final anónima (spec 053).
       const result = await emitInvoice({
         orderId: invoice.order_id!,
         slug,
+        tipoComprobante: invoice.tipo_comprobante,
+        cuitReceptor: invoice.cuit_receptor ?? undefined,
+        razonSocialReceptor: invoice.razon_social_receptor ?? undefined,
+        condicionIvaReceptor: invoice.condicion_iva_receptor ?? undefined,
       });
       if (!result.ok) {
         toast.error(result.error);

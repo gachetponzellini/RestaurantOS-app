@@ -20,9 +20,17 @@ import {
 import { toast } from "sonner";
 
 import type { BusinessRole } from "@/lib/admin/context";
+import {
+  CONDICION_IVA_LABEL,
+  condicionesValidasPara,
+} from "@/lib/afip/condicion-iva";
 import { emitInvoice, retryInvoice } from "@/lib/afip/emit-invoice";
 import { waitForInvoiceTerminal } from "@/lib/afip/poll";
-import type { Invoice, TipoComprobante } from "@/lib/afip/types";
+import type {
+  CondicionIvaReceptor,
+  Invoice,
+  TipoComprobante,
+} from "@/lib/afip/types";
 import {
   anularCobro,
   iniciarPagoMp,
@@ -937,14 +945,26 @@ function FacturacionSection({
   const [tipoA, setTipoA] = useState(false);
   const [cuit, setCuit] = useState("");
   const [razonSocial, setRazonSocial] = useState("");
+  // Condición de IVA del receptor (spec 053). Solo se envía cuando hay CUIT.
+  const [condicionIva, setCondicionIva] = useState<CondicionIvaReceptor>(6);
   const [emitting, setEmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const tipo: TipoComprobante = tipoA ? "factura_a" : "factura_b";
+  const cuitDigits = cuit.replace(/\D/g, "");
+  const hasCuit = cuitDigits.length >= 11;
+  // Los datos del receptor (CUIT, razón, condición) se piden en A siempre y en B
+  // solo si el operador carga un CUIT (Factura B a un identificado).
+  const showReceptor = tipoA || hasCuit;
 
   const handleEmit = () => {
-    if (tipoA && cuit.replace(/\-/g, "").length < 11) {
+    if (tipoA && !hasCuit) {
       toast.error("El CUIT debe tener 11 dígitos.");
+      return;
+    }
+    // B con CUIT a medio cargar: exigir 11 dígitos o vaciarlo.
+    if (!tipoA && cuitDigits.length > 0 && !hasCuit) {
+      toast.error("El CUIT debe tener 11 dígitos (o dejalo vacío para consumidor final).");
       return;
     }
     setEmitting(true);
@@ -953,8 +973,9 @@ function FacturacionSection({
       const r = await emitInvoice({
         orderId,
         tipoComprobante: tipo,
-        cuitReceptor: tipoA ? cuit.replace(/\-/g, "") : undefined,
-        razonSocialReceptor: tipoA && razonSocial ? razonSocial : undefined,
+        cuitReceptor: hasCuit ? cuitDigits : undefined,
+        razonSocialReceptor: showReceptor && razonSocial ? razonSocial : undefined,
+        condicionIvaReceptor: hasCuit ? condicionIva : undefined,
         slug,
       });
       if (!r.ok) {
@@ -1120,7 +1141,10 @@ function FacturacionSection({
       <div className="flex gap-2">
         <button
           type="button"
-          onClick={() => setTipoA(false)}
+          onClick={() => {
+            setTipoA(false);
+            setCondicionIva(6); // B con CUIT: Monotributo por defecto
+          }}
           className={cn(
             "flex-1 rounded-xl px-3 py-2.5 text-center text-xs font-semibold transition ring-1",
             !tipoA
@@ -1130,12 +1154,15 @@ function FacturacionSection({
         >
           Factura B
           <span className="block text-[0.6rem] font-normal opacity-70">
-            Consumidor final
+            Consumidor final / Monotributo
           </span>
         </button>
         <button
           type="button"
-          onClick={() => setTipoA(true)}
+          onClick={() => {
+            setTipoA(true);
+            setCondicionIva(1); // A: Responsable Inscripto por defecto
+          }}
           className={cn(
             "flex-1 rounded-xl px-3 py-2.5 text-center text-xs font-semibold transition ring-1",
             tipoA
@@ -1150,31 +1177,63 @@ function FacturacionSection({
         </button>
       </div>
 
-      {/* Campos Factura A */}
-      {tipoA && (
-        <div className="space-y-2.5">
-          <div className="grid gap-1">
-            <Label className="text-xs text-zinc-600">
-              CUIT del cliente <span className="text-rose-600">*</span>
-            </Label>
-            <Input
-              value={cuit}
-              onChange={(e) => setCuit(e.target.value.replace(/[^\d\-]/g, ""))}
-              placeholder="20-12345678-9"
-              maxLength={13}
-              inputMode="numeric"
-            />
-          </div>
-          <div className="grid gap-1">
-            <Label className="text-xs text-zinc-600">Razón social</Label>
-            <Input
-              value={razonSocial}
-              onChange={(e) => setRazonSocial(e.target.value)}
-              placeholder="Nombre de la empresa"
-            />
-          </div>
+      {/* Datos del receptor: CUIT (obligatorio en A, opcional en B) + razón +
+          condición de IVA (spec 053). El CUIT en B habilita facturar B a un
+          identificado (Monotributo/Exento) declarando su condición real. */}
+      <div className="space-y-2.5">
+        <div className="grid gap-1">
+          <Label className="text-xs text-zinc-600">
+            CUIT del cliente{" "}
+            {tipoA ? (
+              <span className="text-rose-600">*</span>
+            ) : (
+              <span className="text-zinc-400">(opcional)</span>
+            )}
+          </Label>
+          <Input
+            value={cuit}
+            onChange={(e) => setCuit(e.target.value.replace(/[^\d\-]/g, ""))}
+            placeholder="20-12345678-9"
+            maxLength={13}
+            inputMode="numeric"
+          />
         </div>
-      )}
+
+        {showReceptor && (
+          <>
+            <div className="grid gap-1">
+              <Label className="text-xs text-zinc-600">Razón social</Label>
+              <Input
+                value={razonSocial}
+                onChange={(e) => setRazonSocial(e.target.value)}
+                placeholder="Nombre de la empresa"
+              />
+            </div>
+            <div className="grid gap-1">
+              <Label className="text-xs text-zinc-600">
+                Condición de IVA <span className="text-rose-600">*</span>
+              </Label>
+              <div className="grid grid-cols-2 gap-2">
+                {condicionesValidasPara(tipo).map((value) => (
+                  <button
+                    key={value}
+                    type="button"
+                    onClick={() => setCondicionIva(value)}
+                    className={cn(
+                      "rounded-xl px-3 py-2 text-center text-xs font-semibold transition ring-1",
+                      condicionIva === value
+                        ? "bg-zinc-900 text-white ring-zinc-900"
+                        : "bg-white text-zinc-700 ring-zinc-200 hover:bg-zinc-50",
+                    )}
+                  >
+                    {CONDICION_IVA_LABEL[value]}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </>
+        )}
+      </div>
 
       {error && (
         <p className="text-xs text-rose-600">{error}</p>

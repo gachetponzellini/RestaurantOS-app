@@ -11,6 +11,7 @@ import { createSupabaseServiceClient } from "@/lib/supabase/service";
 import { getBusiness } from "@/lib/tenant";
 
 import { calculateAmounts } from "./calculate-amounts";
+import { esCondicionValidaPara } from "./condicion-iva";
 import { createGatewayClient } from "./gateway";
 import type { AFIPProviderClient } from "./provider";
 import {
@@ -20,6 +21,7 @@ import {
 import { createSandboxClient } from "./sandbox";
 import type {
   AFIPConfig,
+  CondicionIvaReceptor,
   Invoice,
   ProviderResult,
   TipoComprobante,
@@ -39,10 +41,20 @@ type EmitInput = {
   tipoComprobante?: TipoComprobante;
   cuitReceptor?: string;
   razonSocialReceptor?: string;
+  /**
+   * Condición IVA del receptor (RG 5616): 1=RI, 4=Exento, 5=Consumidor Final,
+   * 6=Monotributo. Obligatoria en Factura/NC B con CUIT (spec 053). Ausente →
+   * default histórico por tipo.
+   */
+  condicionIvaReceptor?: CondicionIvaReceptor;
   slug: string;
   /** Clave de idempotencia explícita (opcional); por defecto `${orderId}:${tipo}`. */
   idempotencyKey?: string;
 };
+
+/** Valores válidos de condición IVA del receptor (RG 5616). Defensa runtime: el
+ *  input viene del cliente, no confiamos solo en el tipo de TS. */
+const CONDICION_IVA_VALIDA: readonly CondicionIvaReceptor[] = [1, 4, 5, 6];
 
 type EmitResult = {
   invoice: Invoice;
@@ -174,19 +186,48 @@ export async function emitInvoice(
     return actionError("Para factura/NC tipo A se requiere CUIT del receptor.");
   }
 
-  // R-C6 (spec 36C · DIFERIDO): un comprobante B con CUIT de receptor exigiría
-  // declarar su condición de IVA real (Monotributo/Exento/RI), que hoy NO se
-  // captura — `condicionIvaFor` derivaría Consumidor Final (5), inconsistente
-  // con un receptor identificado por CUIT (doc_tipo 80) y una mala declaración
-  // ante ARCA. Ningún path de UI produce este combo hoy (el mozo solo captura
-  // CUIT en tipo A); lo rechazamos explícitamente para que nadie lo cablee sin
-  // capturar la condición y convierta el gap latente en un defecto fiscal en
-  // vivo. Al implementar R-C6 (captura de la condición del receptor), quitar
-  // esta guarda. Ver wiki/specs/36-.../tasks.md (R-C6) e issue #51.
-  if ((tipo === "factura_b" || tipo === "nota_credito_b") && input.cuitReceptor) {
+  // R-C6 (spec 053): defensa runtime de la condición IVA — el input viene del
+  // cliente, no confiamos solo en el tipo de TS.
+  if (
+    input.condicionIvaReceptor != null &&
+    !CONDICION_IVA_VALIDA.includes(input.condicionIvaReceptor)
+  ) {
+    return actionError("Condición de IVA del receptor inválida.");
+  }
+
+  // R-C6 (spec 053): un comprobante B/NC-B con CUIT identifica al receptor
+  // (doc_tipo 80), así que EXIGE declarar su condición de IVA real
+  // (Monotributo/Exento/CF). Sin ella, `condicionIvaFor` caería a Consumidor
+  // Final (5) → mala declaración ante ARCA. Antes esto se rechazaba de plano
+  // (blindaje interino del 36C); ahora se soporta pidiendo la condición.
+  if (
+    (tipo === "factura_b" || tipo === "nota_credito_b") &&
+    input.cuitReceptor &&
+    input.condicionIvaReceptor == null
+  ) {
     return actionError(
-      "Comprobante B con CUIT todavía no está soportado (falta capturar la condición de IVA del receptor).",
+      "Para una Factura B con CUIT elegí la condición de IVA del receptor (Monotributo, Exento o Consumidor Final).",
     );
+  }
+
+  // R-C6 (spec 053): coherencia (tipo, CUIT, condición) — RG 5616. Sin esto, la
+  // UI/otros callers podrían declarar combos inválidos (Factura A a Consumidor
+  // Final, condición ≠ CF sin CUIT, etc.) que antes el hardcode hacía imposibles.
+  if (input.condicionIvaReceptor != null) {
+    if (!input.cuitReceptor) {
+      // doc_tipo 99 = consumidor final sin identificar: la única condición coherente es CF.
+      if (input.condicionIvaReceptor !== 5) {
+        return actionError(
+          "Sin CUIT el receptor es consumidor final; no corresponde otra condición de IVA.",
+        );
+      }
+    } else if (!esCondicionValidaPara(tipo, input.condicionIvaReceptor)) {
+      return actionError(
+        tipo === "factura_a" || tipo === "nota_credito_a"
+          ? "Una Factura A se emite a Responsable Inscripto o Monotributo."
+          : "Una Factura B se emite a Monotributo, Exento o Consumidor Final (un Responsable Inscripto recibe Factura A).",
+      );
+    }
   }
 
   // Guard (spec 09): la orden ya tiene una factura autorizada VIGENTE de este
@@ -228,6 +269,7 @@ export async function emitInvoice(
       numero: null,
       cuit_receptor: input.cuitReceptor ?? null,
       razon_social_receptor: input.razonSocialReceptor ?? null,
+      condicion_iva_receptor: input.condicionIvaReceptor ?? null,
       total_cents: amounts.totalCents,
       neto_cents: amounts.netoCents,
       iva_cents: amounts.ivaCents,
@@ -273,6 +315,7 @@ export async function emitInvoice(
         cuitEmisor: afipConfig.cuit,
         cuitReceptor: input.cuitReceptor,
         razonSocialReceptor: input.razonSocialReceptor,
+        condicionIvaReceptor: input.condicionIvaReceptor,
         totalCents: facturableCents,
         concepto: "productos",
       },
@@ -491,6 +534,9 @@ export async function retryInvoice(
         cuitEmisor: afipConfig.cuit,
         cuitReceptor: inv.cuit_receptor ?? undefined,
         razonSocialReceptor: inv.razon_social_receptor ?? undefined,
+        // Condición IVA persistida (spec 053): re-derivarla del tipo re-introduciría
+        // el bug R-C6 justo en el reintento de un comprobante fiscal real.
+        condicionIvaReceptor: inv.condicion_iva_receptor ?? undefined,
         totalCents: inv.total_cents,
         concepto: "productos",
       },
@@ -641,6 +687,8 @@ export async function anularFactura(
         cuitEmisor: afipConfig.cuit,
         cuitReceptor: original.cuit_receptor ?? undefined,
         razonSocialReceptor: original.razon_social_receptor ?? undefined,
+        // La NC hereda la condición IVA declarada de la factura original (spec 053).
+        condicionIvaReceptor: original.condicion_iva_receptor ?? undefined,
         totalCents: original.total_cents,
         concepto: "productos",
         comprobantesAsociados: [
@@ -692,6 +740,7 @@ export async function anularFactura(
       qr_url: result.qrUrl ?? null,
       cuit_receptor: original.cuit_receptor,
       razon_social_receptor: original.razon_social_receptor,
+      condicion_iva_receptor: original.condicion_iva_receptor,
       total_cents: amounts.totalCents,
       neto_cents: amounts.netoCents,
       iva_cents: amounts.ivaCents,

@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 
+import { buildGatewayInvoiceBody } from "./gateway-payload";
 import type { AFIPProviderClient } from "./provider";
 import type { InvoiceRequest, ProviderResult } from "./types";
 
@@ -56,6 +57,10 @@ async function enqueue(
       sandbox: true,
       emittedAt: new Date().toISOString(),
       nota: "Comprobante de prueba — no válido fiscalmente.",
+      // Body que se habría enviado al gateway real. Se persiste en
+      // invoices.provider_response y deja auditar/testear el valor de wire
+      // (p.ej. receptor.condicion_iva) que en producción viaja a ARCA. Spec 053.
+      gatewayBody: buildGatewayInvoiceBody(req),
     },
   };
 }

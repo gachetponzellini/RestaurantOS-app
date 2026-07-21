@@ -34,7 +34,7 @@ vi.mock("next/cache", () => ({
   revalidateTag: vi.fn(),
 }));
 
-const { emitInvoice, anularFactura } = await import("./emit-invoice");
+const { emitInvoice, anularFactura, retryInvoice } = await import("./emit-invoice");
 
 describe.skipIf(!dbAvailable)("afip/emitInvoice idempotencia (integration)", () => {
   const supabase = createClient(supabaseUrl!, serviceKey!, {
@@ -250,5 +250,185 @@ describe.skipIf(!dbAvailable)("afip/emitInvoice idempotencia (integration)", () 
     if (!refacturada.ok) return;
     expect(refacturada.data.invoice.status).toBe("authorized");
     expect(refacturada.data.invoice.id).not.toBe(first.data.invoice.id);
+  });
+
+  // ── Condición IVA del receptor (spec 053 · R-C6 del #51) ──────────
+  it("Factura B con CUIT + condición Monotributo → authorized y persiste condicion_iva_receptor=6", { timeout: 30_000 }, async () => {
+    const orderId = await newOrder();
+    const r = await emitInvoice({
+      orderId,
+      slug: businessSlug,
+      tipoComprobante: "factura_b",
+      cuitReceptor: "20307123459",
+      condicionIvaReceptor: 6,
+    });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.data.invoice.status).toBe("authorized");
+
+    const { data: inv } = await supabase
+      .from("invoices")
+      .select("cuit_receptor, condicion_iva_receptor, provider_response")
+      .eq("id", r.data.invoice.id)
+      .single();
+    const row = inv as {
+      cuit_receptor: string;
+      condicion_iva_receptor: number;
+      provider_response: { gatewayBody?: { receptor?: { condicion_iva?: number; doc_tipo?: number } } };
+    };
+    expect(row.cuit_receptor).toBe("20307123459");
+    expect(row.condicion_iva_receptor).toBe(6);
+    // Valor de WIRE: lo que viajaría al gateway real (no solo la columna).
+    expect(row.provider_response.gatewayBody?.receptor?.condicion_iva).toBe(6);
+    expect(row.provider_response.gatewayBody?.receptor?.doc_tipo).toBe(80);
+  });
+
+  it("A + Consumidor Final / A + Exento → rechazo por coherencia (RG 5616)", { timeout: 30_000 }, async () => {
+    for (const cond of [5, 4] as const) {
+      const orderId = await newOrder();
+      const r = await emitInvoice({
+        orderId,
+        slug: businessSlug,
+        tipoComprobante: "factura_a",
+        cuitReceptor: "20307123459",
+        condicionIvaReceptor: cond,
+      });
+      expect(r.ok).toBe(false);
+      const { count } = await supabase
+        .from("invoices")
+        .select("id", { count: "exact", head: true })
+        .eq("order_id", orderId);
+      expect(count).toBe(0);
+    }
+  });
+
+  it("condición ≠ Consumidor Final SIN CUIT → rechazo (doc_tipo 99 coherente)", { timeout: 30_000 }, async () => {
+    const orderId = await newOrder();
+    const r = await emitInvoice({
+      orderId,
+      slug: businessSlug,
+      tipoComprobante: "factura_b",
+      condicionIvaReceptor: 1, // RI sin CUIT: incoherente
+    });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toMatch(/consumidor final/i);
+    const { count } = await supabase
+      .from("invoices")
+      .select("id", { count: "exact", head: true })
+      .eq("order_id", orderId);
+    expect(count).toBe(0);
+  });
+
+  it("Factura B con CUIT SIN condición → rechazo (guard R-C6), cero comprobante", { timeout: 30_000 }, async () => {
+    const orderId = await newOrder();
+    const r = await emitInvoice({
+      orderId,
+      slug: businessSlug,
+      tipoComprobante: "factura_b",
+      cuitReceptor: "20307123459",
+    });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toMatch(/condición de IVA/i);
+
+    const { count } = await supabase
+      .from("invoices")
+      .select("id", { count: "exact", head: true })
+      .eq("order_id", orderId);
+    expect(count).toBe(0);
+  });
+
+  it("Factura B sin CUIT → condicion_iva_receptor NULL (regresión: camino feliz intacto)", { timeout: 30_000 }, async () => {
+    const orderId = await newOrder();
+    const r = await emitInvoice({ orderId, slug: businessSlug });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    const { data: inv } = await supabase
+      .from("invoices")
+      .select("cuit_receptor, condicion_iva_receptor")
+      .eq("id", r.data.invoice.id)
+      .single();
+    const row = inv as { cuit_receptor: string | null; condicion_iva_receptor: number | null };
+    expect(row.cuit_receptor).toBeNull();
+    expect(row.condicion_iva_receptor).toBeNull();
+  });
+
+  it("anular una B con condición declarada → la NC hereda condicion_iva_receptor", { timeout: 30_000 }, async () => {
+    const orderId = await newOrder();
+    const emitted = await emitInvoice({
+      orderId,
+      slug: businessSlug,
+      tipoComprobante: "factura_b",
+      cuitReceptor: "20307123459",
+      condicionIvaReceptor: 6,
+    });
+    expect(emitted.ok).toBe(true);
+    if (!emitted.ok) return;
+
+    const anulada = await anularFactura({
+      invoiceId: emitted.data.invoice.id,
+      motivo: "Condición mal cargada",
+      slug: businessSlug,
+    });
+    expect(anulada.ok).toBe(true);
+    if (!anulada.ok) return;
+
+    const { data: nc } = await supabase
+      .from("invoices")
+      .select("condicion_iva_receptor, provider_response")
+      .eq("id", anulada.data.notaCredito.id)
+      .single();
+    const ncRow = nc as {
+      condicion_iva_receptor: number;
+      provider_response: { gatewayBody?: { receptor?: { condicion_iva?: number } } };
+    };
+    expect(ncRow.condicion_iva_receptor).toBe(6);
+    // Costura row→wire de anular: la condición del ENQUEUE de la NC viene de la
+    // fila original, no re-derivada del tipo (si no, NC-B caería a 5). Spec 053.
+    expect(ncRow.provider_response.gatewayBody?.receptor?.condicion_iva).toBe(6);
+  });
+
+  it("retry de una B-con-CUIT fallida → re-encola con la condición de la fila (costura row→wire)", { timeout: 30_000 }, async () => {
+    const orderId = await newOrder();
+    // Insertamos directamente una factura `failed` con condición declarada
+    // (el sandbox nunca falla, así que fabricamos el estado a mano).
+    const { data: failedRow } = await supabase
+      .from("invoices")
+      .insert({
+        business_id: businessId,
+        order_id: orderId,
+        tipo_comprobante: "factura_b",
+        punto_venta: 1,
+        cuit_receptor: "20307123459",
+        condicion_iva_receptor: 6,
+        total_cents: 12_100,
+        neto_cents: 10_000,
+        iva_cents: 2_100,
+        iva_rate: 21,
+        status: "failed",
+        provider: "sandbox",
+        idempotency_key: `${orderId}:factura_b`,
+        error_message: "forzado para test",
+      })
+      .select("id")
+      .single();
+    const failedId = failedRow!.id as string;
+
+    const r = await retryInvoice(failedId, businessSlug);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.data.invoice.status).toBe("authorized");
+
+    const { data: inv } = await supabase
+      .from("invoices")
+      .select("condicion_iva_receptor, provider_response")
+      .eq("id", failedId)
+      .single();
+    const row = inv as {
+      condicion_iva_receptor: number;
+      provider_response: { gatewayBody?: { receptor?: { condicion_iva?: number } } };
+    };
+    expect(row.condicion_iva_receptor).toBe(6);
+    // El valor que viaja al gateway en el retry sale de la fila, no del tipo.
+    expect(row.provider_response.gatewayBody?.receptor?.condicion_iva).toBe(6);
   });
 });
