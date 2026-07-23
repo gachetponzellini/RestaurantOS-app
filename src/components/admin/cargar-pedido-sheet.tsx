@@ -15,7 +15,12 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
-import { buscarClientes, type ClienteMatch } from "@/lib/admin/customers-actions";
+import {
+  buscarClientes,
+  getClienteDirecciones,
+  type ClienteDireccion,
+  type ClienteMatch,
+} from "@/lib/admin/customers-actions";
 import { formatCurrency } from "@/lib/currency";
 import type { CatalogForMozo, CatalogProduct } from "@/lib/mozo/catalog-query";
 import { loadPedirCatalog } from "@/lib/mozo/pedir-panel-data";
@@ -27,6 +32,12 @@ import { ProductModal, type AddToCartItem } from "@/components/mozo/product-moda
 type CartItem = AddToCartItem & { _key: string };
 type DeliveryType = "pickup" | "delivery";
 type View = "carga" | "datos";
+
+/** Compone una dirección guardada en una línea editable. */
+function formatDireccion(a: ClienteDireccion): string {
+  const base = [a.street, a.number].filter(Boolean).join(" ");
+  return a.apartment ? `${base}, ${a.apartment}` : base;
+}
 
 /**
  * Spec 054 (fase 2) — «Cargar pedido» para llevar/delivery SIN mesa desde el
@@ -71,6 +82,9 @@ export function CargarPedidoSheet({
   const [clienteResults, setClienteResults] = useState<ClienteMatch[]>([]);
   const [clienteLoading, setClienteLoading] = useState(false);
   const [clientePicked, setClientePicked] = useState<string | null>(null);
+  const [clienteDirecciones, setClienteDirecciones] = useState<
+    ClienteDireccion[]
+  >([]);
 
   const [pending, startTransition] = useTransition();
   const searchRef = useRef<HTMLInputElement>(null);
@@ -150,6 +164,7 @@ export function CargarPedidoSheet({
     setClienteQuery("");
     setClienteResults([]);
     setClientePicked(null);
+    setClienteDirecciones([]);
   }
 
   if (!open) return null;
@@ -197,6 +212,15 @@ export function CargarPedidoSheet({
     setClientePicked(c.id);
     setClienteQuery("");
     setClienteResults([]);
+    setClienteDirecciones([]);
+    // Traemos las direcciones guardadas para prellenar la de delivery (editable).
+    getClienteDirecciones(slug, c.id).then((r) => {
+      if (!r.ok) return;
+      setClienteDirecciones(r.data);
+      if (deliveryType === "delivery" && r.data.length > 0) {
+        setDeliveryAddress(formatDireccion(r.data[0]));
+      }
+    });
   }
 
   const canSubmit =
@@ -598,6 +622,29 @@ export function CargarPedidoSheet({
                     <label className="text-xs font-semibold text-zinc-600">
                       Dirección de entrega (requerida)
                     </label>
+                    {clienteDirecciones.length > 0 && (
+                      <div className="mt-1 flex flex-wrap gap-1.5">
+                        {clienteDirecciones.map((a) => {
+                          const linea = formatDireccion(a);
+                          const activa = deliveryAddress === linea;
+                          return (
+                            <button
+                              key={a.id}
+                              type="button"
+                              onClick={() => setDeliveryAddress(linea)}
+                              className={`rounded-full px-2.5 py-1 text-xs font-semibold transition ${
+                                activa
+                                  ? "bg-zinc-900 text-white"
+                                  : "bg-zinc-100 text-zinc-700 ring-1 ring-zinc-200 active:bg-zinc-200"
+                              }`}
+                            >
+                              {a.label ? `${a.label}: ` : ""}
+                              {linea}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
                     <input
                       type="text"
                       value={deliveryAddress}
@@ -605,6 +652,11 @@ export function CargarPedidoSheet({
                       placeholder="Av. del Golf 123"
                       className="mt-1 block h-10 w-full rounded-xl border border-zinc-200 px-3 text-sm focus:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-100"
                     />
+                    {clienteDirecciones.length > 0 && (
+                      <p className="mt-1 text-[11px] text-zinc-500">
+                        Elegí una dirección guardada o editá el campo.
+                      </p>
+                    )}
                   </div>
                 )}
                 <div>
