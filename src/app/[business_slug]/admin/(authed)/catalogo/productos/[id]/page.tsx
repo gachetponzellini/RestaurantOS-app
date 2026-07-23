@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 
 import { ProductForm } from "@/components/admin/catalog/product-form";
 import { RecipeSection } from "@/components/admin/catalog/recipe-section";
+import { ProductDeleteButton } from "@/components/admin/catalog/product-delete-button";
 import { PageHeader, PageShell, Surface } from "@/components/admin/shell/page-shell";
 import {
   getAdminCatalog,
@@ -63,6 +64,14 @@ export default async function EditProductoPage({
           recipeLines={recipeLines}
           ingredientOptions={ingredientOptions}
           foodCost={foodCost}
+        />
+      </Surface>
+
+      <Surface padding="default">
+        <ProductDeleteButton
+          slug={business_slug}
+          productId={id}
+          productName={product.name}
         />
       </Surface>
     </PageShell>

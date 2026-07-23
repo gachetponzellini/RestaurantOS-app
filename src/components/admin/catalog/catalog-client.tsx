@@ -9,23 +9,18 @@ import { ProductRow } from "@/components/admin/catalog/product-row";
 import type {
   AdminCategory,
   AdminProduct,
-  AdminStation,
 } from "@/lib/admin/catalog-query";
 
 const UNCATEGORIZED = "__uncat__";
 
 export function CatalogClient({
   slug,
-  businessId,
   categories,
   products,
-  stations = [],
 }: {
   slug: string;
-  businessId: string;
   categories: AdminCategory[];
   products: AdminProduct[];
-  stations?: AdminStation[];
 }) {
   const [categoryFilter, setCategoryFilter] = useState<string | null>(null);
   const [search, setSearch] = useState("");
@@ -112,14 +107,7 @@ export function CatalogClient({
           </li>
         ) : (
           filteredProducts.map((p) => (
-            <ProductRow
-              key={p.id}
-              slug={slug}
-              businessId={businessId}
-              product={p}
-              categories={categories}
-              stations={stations}
-            />
+            <ProductRow key={p.id} slug={slug} product={p} />
           ))
         )}
       </ul>

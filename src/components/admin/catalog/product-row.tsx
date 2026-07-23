@@ -1,98 +1,73 @@
 "use client";
 
-import { useState } from "react";
 import Image from "next/image";
+import Link from "next/link";
 import { ChevronRight, EyeOff, ImageOff } from "lucide-react";
 
-import { ProductDetailSheet } from "@/components/admin/catalog/product-detail-sheet";
-import type {
-  AdminCategory,
-  AdminProduct,
-  AdminStation,
-} from "@/lib/admin/catalog-query";
+import type { AdminProduct } from "@/lib/admin/catalog-query";
 import { formatCurrency } from "@/lib/currency";
 import { cn } from "@/lib/utils";
 
 export function ProductRow({
   slug,
-  businessId,
   product,
-  categories,
-  stations = [],
 }: {
   slug: string;
-  businessId: string;
   product: AdminProduct;
-  categories: AdminCategory[];
-  stations?: AdminStation[];
 }) {
-  const [open, setOpen] = useState(false);
   const dimmed = !product.is_active;
 
   return (
-    <>
-      <li>
-        <button
-          type="button"
-          onClick={() => setOpen(true)}
-          className={cn(
-            "bg-card hover:bg-muted/40 group flex w-full items-center gap-3 rounded-xl p-3 text-left transition-colors",
-            "ring-border/60 ring-1",
-            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500",
-            dimmed && "opacity-70",
-          )}
-        >
-          {product.image_url ? (
-            <div className="bg-muted relative size-12 shrink-0 overflow-hidden rounded-lg">
-              <Image
-                src={product.image_url}
-                alt=""
-                fill
-                sizes="48px"
-                className="object-cover"
-              />
-            </div>
-          ) : (
-            <div className="bg-muted/60 text-muted-foreground/60 flex size-12 shrink-0 items-center justify-center rounded-lg">
-              <ImageOff className="size-4" strokeWidth={1.5} />
-            </div>
-          )}
-
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2">
-              <span className="text-foreground truncate text-sm font-semibold">
-                {product.name}
-              </span>
-              {dimmed && (
-                <EyeOff
-                  className="text-muted-foreground size-3 shrink-0"
-                  aria-label="Oculto"
-                />
-              )}
-              {!product.is_available && product.is_active && (
-                <span className="bg-amber-50 text-amber-800 inline-flex shrink-0 items-center rounded-full px-1.5 py-0.5 text-[0.6rem] font-semibold uppercase tracking-wider">
-                  Sin stock
-                </span>
-              )}
-            </div>
-            <p className="text-muted-foreground text-xs tabular-nums">
-              {formatCurrency(product.price_cents)}
-            </p>
+    <li>
+      <Link
+        href={`/${slug}/admin/catalogo/productos/${product.id}`}
+        className={cn(
+          "bg-card hover:bg-muted/40 group flex w-full items-center gap-3 rounded-xl p-3 text-left transition-colors",
+          "ring-border/60 ring-1",
+          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500",
+          dimmed && "opacity-70",
+        )}
+      >
+        {product.image_url ? (
+          <div className="bg-muted relative size-12 shrink-0 overflow-hidden rounded-lg">
+            <Image
+              src={product.image_url}
+              alt=""
+              fill
+              sizes="48px"
+              className="object-cover"
+            />
           </div>
+        ) : (
+          <div className="bg-muted/60 text-muted-foreground/60 flex size-12 shrink-0 items-center justify-center rounded-lg">
+            <ImageOff className="size-4" strokeWidth={1.5} />
+          </div>
+        )}
 
-          <ChevronRight className="text-muted-foreground/40 size-4 shrink-0 transition-transform group-hover:translate-x-0.5" />
-        </button>
-      </li>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <span className="text-foreground truncate text-sm font-semibold">
+              {product.name}
+            </span>
+            {dimmed && (
+              <EyeOff
+                className="text-muted-foreground size-3 shrink-0"
+                aria-label="Oculto"
+              />
+            )}
+            {!product.is_available && product.is_active && (
+              <span className="bg-amber-50 text-amber-800 inline-flex shrink-0 items-center rounded-full px-1.5 py-0.5 text-[0.6rem] font-semibold uppercase tracking-wider">
+                Sin stock
+              </span>
+            )}
+          </div>
+          <p className="text-muted-foreground text-xs tabular-nums">
+            {formatCurrency(product.price_cents)}
+          </p>
+        </div>
 
-      <ProductDetailSheet
-        open={open}
-        onOpenChange={setOpen}
-        slug={slug}
-        businessId={businessId}
-        product={product}
-        categories={categories}
-        stations={stations}
-      />
-    </>
+        <ChevronRight className="text-muted-foreground/40 size-4 shrink-0 transition-transform group-hover:translate-x-0.5" />
+      </Link>
+    </li>
   );
 }
