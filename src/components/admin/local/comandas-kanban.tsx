@@ -13,6 +13,7 @@ import {
   Ban,
   ChefHat,
   Check,
+  Clock,
   Minus,
   MoreVertical,
   Package,
@@ -726,9 +727,11 @@ function ComandaCard({
         />
       </header>
 
-      {/* Sector + mozo en la misma fila (dos chips), con tanda · nº pedido a la
-          derecha. El sector no encoge (dato crítico, color del sector); el chip
-          del mozo — su color del palette del salón — trunca si falta lugar. */}
+      {/* Sector + mozo en la misma fila (dos chips), con el tiempo desde que se
+          comandó a la derecha (solo activas; las entregadas ya muestran "hace X"
+          arriba y "Preparada en X" abajo). El sector no encoge (dato crítico,
+          color del sector); el chip del mozo — su color del palette del salón —
+          trunca si falta lugar. */}
       <div className="flex min-w-0 items-center gap-1.5 text-[11px]">
         <span
           className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 font-bold uppercase tracking-wide ${stationStyle.bg} ${stationStyle.text}`}
@@ -747,9 +750,12 @@ function ComandaCard({
             </span>
           );
         })()}
-        <span className="text-muted-foreground/70 ml-auto shrink-0 tabular-nums">
-          tanda {comanda.batch} · #{comanda.order_number}
-        </span>
+        {!isTerminal && (
+          <span className="text-muted-foreground/70 ml-auto inline-flex shrink-0 items-center gap-1 tabular-nums">
+            <Clock className="size-3" strokeWidth={2.5} />
+            {formatRelativeTime(elapsed)}
+          </span>
+        )}
       </div>
 
       {/* Items */}
