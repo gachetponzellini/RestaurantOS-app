@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Bell, Clock } from "lucide-react";
+import { Bell, Clock, Plus } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -13,6 +13,7 @@ import { updateOrderStatus } from "@/lib/orders/update-status";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 
 import { CancelledOrderRow } from "./cancelled-order-row";
+import { CargarPedidoSheet } from "./cargar-pedido-sheet";
 import { OrderCard } from "./order-card";
 
 type Column = {
@@ -118,6 +119,8 @@ export function OrdersRealtimeBoard({
   const [orders, setOrders] = useState<AdminOrder[]>(initialOrders);
   const [newlyArrived, setNewlyArrived] = useState<Set<string>>(new Set());
   const [soundUnlocked, setSoundUnlocked] = useState(false);
+  // Spec 054 — sheet para cargar a mano un pedido para llevar/delivery.
+  const [cargarOpen, setCargarOpen] = useState(false);
 
   // Keep a ref for realtime handler (avoids stale closure).
   const soundUnlockedRef = useRef(soundUnlocked);
@@ -318,16 +321,26 @@ export function OrdersRealtimeBoard({
 
   return (
     <div className="flex flex-col gap-5">
-      {/* El contador total queda en la pill del tab; acá solo el toggle de
-          sonido cuando hace falta. */}
-      {!soundUnlocked && (
-        <div className="flex items-center justify-end gap-3">
+      {/* Toolbar: cargar un pedido a mano (spec 054) + toggle de sonido. El
+          contador total vive en la pill del tab. */}
+      <div className="flex items-center justify-between gap-3">
+        <Button size="sm" onClick={() => setCargarOpen(true)}>
+          <Plus className="size-4" />
+          Cargar pedido
+        </Button>
+        {!soundUnlocked && (
           <Button size="sm" variant="outline" onClick={unlockSound}>
             <Bell className="size-4" />
             Activar sonido
           </Button>
-        </div>
-      )}
+        )}
+      </div>
+
+      <CargarPedidoSheet
+        slug={slug}
+        open={cargarOpen}
+        onClose={() => setCargarOpen(false)}
+      />
 
       {/* Próximos / agendados (spec 31): diferidos pagados esperando su hora.
           Entran al kanban cuando marchan (cron ~40 min antes o "marchar ahora"). */}

@@ -36,6 +36,15 @@ function getSiteUrl(): string {
 export async function persistOrder(
   data: CreateOrderInput,
   userId?: string | null,
+  options?: {
+    /**
+     * Staff que cargó el pedido a mano desde operación (spec 054). Se persiste
+     * en `orders.mozo_id` como "cargado por" — el board no filtra por mozo_id,
+     * así que no cambia el listado; sólo deja auditoría de quién lo cargó. Los
+     * callers del checkout público lo omiten → `null` (comportamiento idéntico).
+     */
+    mozoId?: string | null;
+  },
 ): Promise<ActionResult<CreateOrderResult>> {
   const supabase = createSupabaseServiceClient();
 
@@ -462,6 +471,8 @@ export async function persistOrder(
     promo_code_id: promoCodeId,
     promo_code_snapshot: promoCodeSnapshot,
     scheduled_at: scheduledAtIso,
+    // Staff que cargó el pedido a mano (spec 054); null en el checkout público.
+    mozo_id: options?.mozoId ?? null,
   };
   const { data: order, error: orderErr } = await supabase
     .from("orders")

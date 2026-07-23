@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { CreateOrderInput } from "./schema";
+import { CreateOrderInput, StaffOrderInput } from "./schema";
 
 const UUID = "00000000-0000-4000-8000-000000000000";
 
@@ -87,5 +87,70 @@ describe("CreateOrderInput", () => {
       scheduled_at: "mañana a las 12",
     });
     expect(result.success).toBe(false);
+  });
+});
+
+describe("StaffOrderInput (spec 054)", () => {
+  const staffBase = {
+    business_slug: "golf-jcr",
+    delivery_type: "pickup" as const,
+    items: [{ product_id: UUID, quantity: 1, modifier_ids: [] }],
+  };
+
+  it("acepta un pickup de mostrador sin nombre ni teléfono", () => {
+    expect(StaffOrderInput.safeParse(staffBase).success).toBe(true);
+  });
+
+  it("acepta un pickup con nombre pero sin teléfono", () => {
+    const result = StaffOrderInput.safeParse({
+      ...staffBase,
+      customer_name: "Juan",
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("rechaza items vacíos", () => {
+    const result = StaffOrderInput.safeParse({ ...staffBase, items: [] });
+    expect(result.success).toBe(false);
+  });
+
+  it("rechaza delivery sin dirección", () => {
+    const result = StaffOrderInput.safeParse({
+      ...staffBase,
+      delivery_type: "delivery",
+      customer_phone: "1155551234",
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("rechaza delivery sin teléfono", () => {
+    const result = StaffOrderInput.safeParse({
+      ...staffBase,
+      delivery_type: "delivery",
+      delivery_address: "Av. Golf 123",
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("acepta delivery con dirección + teléfono", () => {
+    const result = StaffOrderInput.safeParse({
+      ...staffBase,
+      delivery_type: "delivery",
+      delivery_address: "Av. Golf 123",
+      customer_phone: "1155551234",
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("no acepta scheduled_at (fuera de fase 1)", () => {
+    // `scheduled_at` no está en el schema staff → Zod lo ignora, no lo persiste.
+    const result = StaffOrderInput.safeParse({
+      ...staffBase,
+      scheduled_at: "2026-08-01T13:00:00-03:00",
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect("scheduled_at" in result.data).toBe(false);
+    }
   });
 });

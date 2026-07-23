@@ -8,6 +8,7 @@ import {
   canAnularFactura,
   canApplyDiscount,
   canCancelItem,
+  canCargarPedido,
   canCrearPedidoFlash,
   canHacerCorte,
   canMakeSangria,
@@ -172,6 +173,15 @@ describe("permissions / canCrearPedidoFlash", () => {
     expect(canCrearPedidoFlash("encargado")).toBe(true);
     expect(canCrearPedidoFlash("mozo")).toBe(false);
     expect(canCrearPedidoFlash("personal")).toBe(false);
+  });
+});
+
+describe("permissions / canCargarPedido", () => {
+  it("admin y encargado (mostrador) pueden cargar pedidos, mozo y personal no (spec 054, fase 1)", () => {
+    expect(canCargarPedido("admin")).toBe(true);
+    expect(canCargarPedido("encargado")).toBe(true);
+    expect(canCargarPedido("mozo")).toBe(false);
+    expect(canCargarPedido("personal")).toBe(false);
   });
 });
 

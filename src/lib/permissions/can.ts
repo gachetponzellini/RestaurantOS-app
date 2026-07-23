@@ -207,6 +207,17 @@ export function canCrearPedidoFlash(role: BusinessRole): boolean {
   return role === "admin" || role === "encargado";
 }
 
+/**
+ * Cargar a mano un pedido para llevar / delivery SIN mesa desde operación
+ * (spec 054) — el pedido de mostrador o telefónico, que hoy sólo entra
+ * automático por la carta pública. Es operación de mostrador: encargado/admin.
+ * En fase 1 el mozo no carga pedidos del board (está en salón, opera mesas);
+ * sumarlo es un ajuste posterior de este helper.
+ */
+export function canCargarPedido(role: BusinessRole): boolean {
+  return role === "admin" || role === "encargado";
+}
+
 // ── Reservas (spec 22) ──────────────────────────────────────────
 
 /**

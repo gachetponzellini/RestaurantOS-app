@@ -89,3 +89,44 @@ export const CreateOrderInput = z
   });
 
 export type CreateOrderInput = z.infer<typeof CreateOrderInput>;
+
+/**
+ * Input para cargar un pedido para llevar / delivery a mano desde operación
+ * (spec 054), más laxo que el público `CreateOrderInput`:
+ * - `customer_name` opcional (el mostrador anónimo cae en "Mostrador").
+ * - `customer_phone` opcional en pickup (se guarda "-"); requerido en delivery.
+ * - sin `scheduled_at` / `promo_code` / `payment_method` (el cobro es aparte,
+ *   US3): el pedido nace en efectivo/pendiente y se cobra desde la card.
+ * El action `cargarPedidoStaff` mapea esto a `CreateOrderInput` aplicando los
+ * defaults antes de llamar a `persistOrder`.
+ */
+export const StaffOrderInput = z
+  .object({
+    business_slug: z.string().min(1),
+    delivery_type: z.enum(["delivery", "pickup"]),
+    customer_name: z.string().max(100).optional(),
+    customer_phone: z.string().max(20).optional(),
+    delivery_address: z.string().max(200).optional(),
+    delivery_notes: z.string().max(500).optional(),
+    items: z.array(OrderItemInput).min(1),
+  })
+  .superRefine((data, ctx) => {
+    if (data.delivery_type === "delivery") {
+      if (!data.delivery_address || data.delivery_address.trim().length === 0) {
+        ctx.addIssue({
+          code: "custom",
+          message: "Ingresá una dirección de entrega.",
+          path: ["delivery_address"],
+        });
+      }
+      if (!data.customer_phone || data.customer_phone.trim().length < 6) {
+        ctx.addIssue({
+          code: "custom",
+          message: "Ingresá un teléfono para el delivery.",
+          path: ["customer_phone"],
+        });
+      }
+    }
+  });
+
+export type StaffOrderInput = z.infer<typeof StaffOrderInput>;

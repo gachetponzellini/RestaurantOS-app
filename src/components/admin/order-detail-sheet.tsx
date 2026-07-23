@@ -5,6 +5,7 @@ import { formatInTimeZone } from "date-fns-tz";
 import {
   Bike,
   Phone,
+  Receipt,
   ShoppingBag,
   X,
 } from "lucide-react";
@@ -23,6 +24,8 @@ import { formatCurrency } from "@/lib/currency";
 import type { OrderStatus } from "@/lib/orders/status";
 import { updateOrderStatus } from "@/lib/orders/update-status";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
+
+import { CobrarPedidoSheet } from "./cobrar-pedido-sheet";
 
 type Detail = {
   delivery_address: string | null;
@@ -118,6 +121,8 @@ export function OrderDetailSheet({
   const [showCancel, setShowCancel] = useState(false);
   const [reason, setReason] = useState("");
   const [cancelling, startCancel] = useTransition();
+  // Spec 054 — cobrar/facturar el pedido sin mesa desde el detalle.
+  const [cobrarOpen, setCobrarOpen] = useState(false);
 
   useEffect(() => {
     if (!open) return;
@@ -235,6 +240,7 @@ export function OrderDetailSheet({
   );
 
   return (
+    <>
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
         side="right"
@@ -446,6 +452,15 @@ export function OrderDetailSheet({
 
         {!isTerminal && !showCancel && (
           <footer className="border-border/60 flex flex-col gap-2 border-t px-5 py-4">
+            <Button
+              variant="outline"
+              size="lg"
+              className="w-full font-semibold"
+              onClick={() => setCobrarOpen(true)}
+            >
+              <Receipt className="size-4" />
+              Cobrar / Facturar
+            </Button>
             {isPendingOnline && onConfirm ? (
               <Button
                 size="lg"
@@ -526,6 +541,18 @@ export function OrderDetailSheet({
         )}
       </SheetContent>
     </Sheet>
+
+    <CobrarPedidoSheet
+      order={order}
+      slug={slug}
+      open={cobrarOpen}
+      onClose={() => setCobrarOpen(false)}
+      onDone={() => {
+        setCobrarOpen(false);
+        onOpenChange(false);
+      }}
+    />
+    </>
   );
 }
 
