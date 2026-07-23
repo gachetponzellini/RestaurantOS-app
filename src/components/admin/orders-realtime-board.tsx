@@ -310,6 +310,17 @@ export function OrdersRealtimeBoard({
       const col = COLUMNS.find((c) => c.statuses.includes(order.status));
       if (col) groups[col.key].push(order);
     }
+    // FIFO en las columnas activas: el pedido más viejo arriba (la query trae
+    // created_at desc y el realtime hace prepend). "Entregados" queda como
+    // historial —el más reciente arriba— igual que en el KDS de comandas.
+    for (const col of COLUMNS) {
+      const asc = col.key !== "delivered";
+      groups[col.key].sort((a, b) =>
+        asc
+          ? a.created_at.localeCompare(b.created_at)
+          : b.created_at.localeCompare(a.created_at),
+      );
+    }
     groups["delivered"] = groups["delivered"].slice(0, 20);
     return { agendados: proximos, byColumn: groups };
   }, [orders]);
