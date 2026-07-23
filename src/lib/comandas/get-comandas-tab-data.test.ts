@@ -20,7 +20,7 @@ vi.mock("@/lib/mozo/auth", () => ({
       : { ok: false as const, error: "No tenés acceso a este negocio." },
 }));
 
-const getMozosByBusiness = vi.fn(async () => [
+const getMozosByBusiness = vi.fn(async (_id: string) => [
   { user_id: "u1", full_name: "Ana", role: "mozo" as const },
 ]);
 vi.mock("@/lib/mozo/queries", () => ({
