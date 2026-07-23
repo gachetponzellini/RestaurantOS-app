@@ -110,7 +110,9 @@ export async function getActiveComandas(
       .select(select)
       .eq("orders.business_id", businessId)
       .in("status", ["pendiente", "en_preparacion"])
-      .order("emitted_at", { ascending: false }),
+      // FIFO: la comanda más vieja arriba. La cocina atiende por orden de
+      // llegada; las recién marchadas caen al fondo de la columna.
+      .order("emitted_at", { ascending: true }),
     supabase
       .from("comandas")
       .select(select)
