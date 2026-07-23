@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
@@ -57,6 +57,7 @@ import type {
   CatalogSuperCategory,
 } from "@/lib/mozo/catalog-query";
 import type { DailyMenuForMozo } from "@/lib/mozo/daily-menus-query";
+import { moveSelection, resetSelection } from "@/lib/mozo/product-search";
 import { canCancelItem } from "@/lib/permissions/can";
 
 import { ProductModal, type AddToCartItem } from "@/components/mozo/product-modal";
@@ -402,6 +403,12 @@ export function MozoPedirClient({
   } | null>(null);
   const [cancelReason, setCancelReason] = useState("");
 
+  // ── Carga por teclado (spec 055 — solo se activa en el sidebar `embedded`) ──
+  const searchRef = useRef<HTMLInputElement>(null);
+  // Índice del resultado resaltado para navegar la búsqueda con ↓/↑ y abrirlo
+  // con Enter.
+  const [selectedIndex, setSelectedIndex] = useState(0);
+
   // Si la tab activa desaparece (admin cambió el catálogo entre cargas),
   // saltar a la primera disponible.
   useEffect(() => {
@@ -443,6 +450,26 @@ export function MozoPedirClient({
     const q = search.trim().toLowerCase();
     return allProducts.filter((p) => p.name.toLowerCase().includes(q));
   }, [search, allProducts, isSearching]);
+
+  // Al (re)generarse la lista de resultados —p. ej. al cambiar el texto— la
+  // selección vuelve al primero (o a "sin selección" si no hay). Spec 055.
+  useEffect(() => {
+    setSelectedIndex(resetSelection(searchResults.length));
+  }, [searchResults]);
+
+  // Foco al buscador al montar, SOLO en el sidebar embebido: en la tablet del
+  // mozo (full-screen) abriría el teclado virtual tapando la vista. FR-002.
+  useEffect(() => {
+    if (embedded) searchRef.current?.focus();
+  }, [embedded]);
+
+  // Tras agregar un ítem o cerrar el modal, devolvemos el foco al buscador para
+  // encadenar cargas sin mouse (FR-013), en el próximo tick (modal ya
+  // desmontado). No-op fuera del modo embebido.
+  const focusSearch = () => {
+    if (!embedded) return;
+    setTimeout(() => searchRef.current?.focus(), 0);
+  };
 
   const tabSections: { category: CatalogCategory | null; products: CatalogProduct[] }[] =
     useMemo(() => {
@@ -643,6 +670,373 @@ export function MozoPedirClient({
   const footerClass = embedded
     ? "z-20 shrink-0 border-t border-zinc-200 bg-white/95 backdrop-blur"
     : "fixed inset-x-0 bottom-0 z-20 bg-white/95 pb-[env(safe-area-inset-bottom)] backdrop-blur";
+
+  // ── Modales, compartidos por ambos layouts (full-screen y embebido) ──
+  // Al cerrar/agregar devolvemos el foco al buscador (solo embebido) para
+  // encadenar cargas sin mouse (spec 055 FR-013).
+  const modalsEl = (
+    <>
+      {/* ─── Modal: agregar producto ─── */}
+      <ProductModal
+        product={openProduct}
+        open={!!openProduct}
+        onClose={() => {
+          setOpenProduct(null);
+          focusSearch();
+        }}
+        onAdd={(item) => {
+          addToCart(item);
+          if (embedded) setSearch("");
+          focusSearch();
+        }}
+        embedded={embedded}
+      />
+
+      {/* ─── Modal: agregar menú del día ─── */}
+      <DailyMenuModal
+        menu={openDailyMenu}
+        embedded={embedded}
+        onClose={() => {
+          setOpenDailyMenu(null);
+          focusSearch();
+        }}
+        onAdd={(menu, quantity, selectedChoices) => {
+          setCart((prev) => [
+            ...prev,
+            {
+              _key: crypto.randomUUID(),
+              kind: "daily_menu" as const,
+              daily_menu_id: menu.id,
+              product_name: menu.name,
+              unit_price_cents: menu.price_cents,
+              quantity,
+              notes: "",
+              line_subtotal_cents:
+                (menu.price_cents +
+                  selectedChoices.reduce(
+                    (acc, sc) => acc + (sc.extra_price_cents ?? 0),
+                    0,
+                  )) *
+                quantity,
+              seat_number: seatMode ? activeSeat : null,
+              selected_choices: selectedChoices,
+            },
+          ]);
+          setOpenDailyMenu(null);
+          if (embedded) setSearch("");
+          focusSearch();
+        }}
+      />
+
+      {/* ─── Modal: cancelar item ─── */}
+      {cancelTarget && (
+        <div
+          onClick={() => {
+            setCancelTarget(null);
+            setCancelReason("");
+          }}
+          className={`${overlayPos} inset-0 z-50 flex items-end justify-center bg-black/40`}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-md rounded-t-3xl bg-white p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] shadow-xl"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <h3 className="font-heading text-base font-bold text-zinc-900">
+                Cancelar &ldquo;{cancelTarget.productName}&rdquo;
+              </h3>
+              <button
+                onClick={() => {
+                  setCancelTarget(null);
+                  setCancelReason("");
+                }}
+                className="rounded-full p-1.5 text-zinc-500 active:bg-zinc-100"
+                aria-label="Cerrar"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <p className="mt-1 text-xs text-zinc-500">
+              Indicá un motivo. Queda registrado.
+            </p>
+            <textarea
+              value={cancelReason}
+              onChange={(e) => setCancelReason(e.target.value.slice(0, 200))}
+              placeholder="ej: rotura, cliente cambió de opinión..."
+              className="mt-3 block w-full rounded-2xl border border-zinc-200 px-3 py-2 text-sm focus:border-red-400 focus:outline-none focus:ring-2 focus:ring-red-100"
+              rows={3}
+              autoFocus
+            />
+            <div className="mt-4 flex gap-2">
+              <button
+                onClick={() => {
+                  setCancelTarget(null);
+                  setCancelReason("");
+                }}
+                disabled={pending}
+                className="flex h-12 flex-1 items-center justify-center rounded-2xl bg-zinc-100 text-sm font-semibold text-zinc-700 active:scale-[0.98]"
+              >
+                Volver
+              </button>
+              <button
+                onClick={handleCancelConfirm}
+                disabled={pending || !cancelReason.trim()}
+                className="flex h-12 flex-1 items-center justify-center rounded-2xl bg-red-600 text-sm font-semibold text-white active:scale-[0.98] disabled:opacity-50"
+              >
+                Cancelar item
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+
+  // ── Sidebar del salón (`embedded`): layout keyboard-first (spec 055) ──
+  // Vista única: header compacto → buscador fijo (+ categorías secundarias) →
+  // resultados/catálogo con scroll → panel de pedido siempre visible. El
+  // full-screen del mozo (abajo) conserva su flujo de 2 pasos intacto.
+  if (embedded) {
+    const activeTabLabel = tabById[activeTab]?.label ?? "";
+    return (
+      <div
+        className={rootClass}
+        onKeyDown={(e) => {
+          // Enviar con Ctrl/Cmd+Enter desde cualquier parte del panel, salvo con
+          // un modal abierto. Pasa por el mismo handleSend (anti-doble-envío,
+          // specs 41/42). FR-016.
+          if (
+            (e.metaKey || e.ctrlKey) &&
+            e.key === "Enter" &&
+            !openProduct &&
+            !openDailyMenu &&
+            !cancelTarget
+          ) {
+            e.preventDefault();
+            handleSend();
+          }
+        }}
+      >
+        {/* Header compacto */}
+        <header className="shrink-0 border-b border-zinc-200 bg-white px-3 py-2.5">
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => onClose?.()}
+              className="-ml-1 rounded-full p-2 text-zinc-700 active:bg-zinc-100"
+              aria-label="Volver al salón"
+            >
+              <ArrowLeft className="h-5 w-5" />
+            </button>
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-500">
+                {businessName}
+              </p>
+              <h1 className="font-heading text-base font-bold leading-tight text-zinc-900">
+                Mesa {table.label}
+              </h1>
+            </div>
+            {comandas.length > 0 && (
+              <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-zinc-500">
+                <ClipboardList className="h-3.5 w-3.5" />
+                {comandas.length}
+              </span>
+            )}
+          </div>
+        </header>
+
+        {/* Buscador fijo + categorías secundarias. FR-001/003/014. */}
+        <div className="shrink-0 space-y-2 border-b border-zinc-200 bg-white px-3 py-2.5">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
+            <input
+              ref={searchRef}
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              onKeyDown={(e) => {
+                if (!isSearching) return;
+                if (e.key === "ArrowDown") {
+                  e.preventDefault();
+                  setSelectedIndex((i) =>
+                    moveSelection(i, 1, searchResults.length),
+                  );
+                } else if (e.key === "ArrowUp") {
+                  e.preventDefault();
+                  setSelectedIndex((i) =>
+                    moveSelection(i, -1, searchResults.length),
+                  );
+                } else if (e.key === "Enter") {
+                  const pick = searchResults[selectedIndex];
+                  if (pick) {
+                    e.preventDefault();
+                    setOpenProduct(pick);
+                  }
+                }
+              }}
+              placeholder="Buscar producto..."
+              aria-label="Buscar producto"
+              className="block h-11 w-full rounded-2xl border border-zinc-200 bg-white pl-9 pr-9 text-sm focus:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-100"
+            />
+            {search.length > 0 && (
+              <button
+                onClick={() => {
+                  setSearch("");
+                  searchRef.current?.focus();
+                }}
+                className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full p-1 text-zinc-400 active:bg-zinc-100"
+                aria-label="Limpiar"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            )}
+          </div>
+          {!isSearching && tabs.length > 1 && (
+            <div className="flex items-center gap-2">
+              <label
+                htmlFor="cat-select"
+                className="shrink-0 text-[11px] font-semibold uppercase tracking-wide text-zinc-500"
+              >
+                Categoría
+              </label>
+              <select
+                id="cat-select"
+                value={activeTab}
+                onChange={(e) => setActiveTab(e.target.value)}
+                className="min-w-0 flex-1 rounded-xl border border-zinc-200 bg-white px-2.5 py-1.5 text-sm font-semibold text-zinc-800 focus:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-100"
+              >
+                {tabs.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.label}
+                    {tabTouched[t.id] ? " ✓" : ""}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+        </div>
+
+        {/* Resultados / catálogo (scroll) */}
+        <div className="min-h-0 flex-1 overflow-y-auto px-3 py-3">
+          {isSearching ? (
+            <SearchResults
+              results={searchResults}
+              onPick={setOpenProduct}
+              selectedProductId={searchResults[selectedIndex]?.id}
+            />
+          ) : tabs.length === 0 ? (
+            <EmptyCatalog />
+          ) : (
+            <TabView
+              tabSections={tabSections}
+              activeTabLabel={activeTabLabel}
+              isTopTab={activeTab === TOP_TAB_ID}
+              dailyMenus={dailyMenus}
+              onPick={setOpenProduct}
+              onPickDailyMenu={setOpenDailyMenu}
+            />
+          )}
+        </div>
+
+        {/* Panel de pedido en armado — siempre visible. FR-005/006/007/008. */}
+        <div className="shrink-0 border-t border-zinc-200 bg-white">
+          <div className="flex items-center justify-between px-3 pt-2.5">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-500">
+              Tu pedido
+            </p>
+            <span className="text-[11px] font-semibold text-zinc-500 tabular-nums">
+              {cartCount > 0
+                ? `${cartCount} ${cartCount === 1 ? "ítem" : "ítems"}`
+                : "vacío"}
+            </span>
+          </div>
+
+          {cart.length === 0 ? (
+            <p className="px-3 pb-2.5 pt-1 text-xs text-zinc-500">
+              Todavía no cargaste nada. Buscá arriba y agregá con Enter.
+            </p>
+          ) : (
+            <ul className="max-h-44 space-y-1 overflow-y-auto px-3 py-2">
+              {cart.map((c) => (
+                <li
+                  key={c._key}
+                  className="flex items-center gap-2 rounded-xl bg-zinc-50 px-2.5 py-1.5 ring-1 ring-zinc-100"
+                >
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-semibold text-zinc-900">
+                      {isDailyMenuCart(c) && (
+                        <span className="mr-1 inline-flex items-center rounded bg-emerald-100 px-1 align-middle text-[9px] font-bold uppercase text-emerald-700">
+                          Menú
+                        </span>
+                      )}
+                      {c.product_name}
+                    </p>
+                    {c.notes && (
+                      <p className="truncate text-[11px] italic text-zinc-500">
+                        &quot;{c.notes}&quot;
+                      </p>
+                    )}
+                  </div>
+                  <span className="shrink-0 text-xs font-semibold text-emerald-700 tabular-nums">
+                    {formatCurrency(c.line_subtotal_cents)}
+                  </span>
+                  <div className="flex shrink-0 items-center gap-1">
+                    <button
+                      onClick={() => changeQuantity(c._key, -1)}
+                      disabled={c.quantity <= 1}
+                      className="flex h-8 w-8 items-center justify-center rounded-full bg-white ring-1 ring-zinc-200 active:scale-95 disabled:opacity-40"
+                      aria-label={`Restar ${c.product_name}`}
+                    >
+                      <Minus className="h-4 w-4" />
+                    </button>
+                    <span className="w-6 text-center text-sm font-bold tabular-nums">
+                      {c.quantity}
+                    </span>
+                    <button
+                      onClick={() => changeQuantity(c._key, 1)}
+                      disabled={c.quantity >= 99}
+                      className="flex h-8 w-8 items-center justify-center rounded-full bg-white ring-1 ring-zinc-200 active:scale-95 disabled:opacity-40"
+                      aria-label={`Sumar ${c.product_name}`}
+                    >
+                      <Plus className="h-4 w-4" />
+                    </button>
+                    <button
+                      onClick={() => removeFromCart(c._key)}
+                      className="flex h-8 w-8 items-center justify-center rounded-full text-zinc-400 active:bg-red-50 active:text-red-600"
+                      aria-label={`Quitar ${c.product_name}`}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          <div className="flex items-center gap-2 border-t border-zinc-100 px-3 py-2.5 pb-[max(0.625rem,env(safe-area-inset-bottom))]">
+            <div className="min-w-0 flex-1">
+              <p className="text-[11px] text-zinc-500">Total a enviar</p>
+              <p className="text-lg font-bold tabular-nums text-zinc-900">
+                {formatCurrency(cartTotal)}
+              </p>
+            </div>
+            <button
+              onClick={handleSend}
+              disabled={pending || cart.length === 0}
+              className="flex h-12 items-center justify-center gap-2 rounded-2xl bg-emerald-600 px-5 text-sm font-semibold text-white shadow-sm active:scale-[0.98] disabled:opacity-50"
+            >
+              <Send className="h-4 w-4" />
+              {pending ? "Enviando..." : "Enviar"}
+              <kbd className="ml-1 hidden rounded bg-white/20 px-1.5 py-0.5 text-[10px] font-semibold sm:inline">
+                ⌘↵
+              </kbd>
+            </button>
+          </div>
+        </div>
+
+        {modalsEl}
+      </div>
+    );
+  }
 
   // ─────────────────────────────────────────────────────────────────────────
   return (
@@ -860,107 +1254,7 @@ export function MozoPedirClient({
         </div>
       </div>
 
-      {/* ─── Modal: agregar producto ─── */}
-      <ProductModal
-        product={openProduct}
-        open={!!openProduct}
-        onClose={() => setOpenProduct(null)}
-        onAdd={addToCart}
-        embedded={embedded}
-      />
-
-      {/* ─── Modal: agregar menú del día ─── */}
-      <DailyMenuModal
-        menu={openDailyMenu}
-        embedded={embedded}
-        onClose={() => setOpenDailyMenu(null)}
-        onAdd={(menu, quantity, selectedChoices) => {
-          setCart((prev) => [
-            ...prev,
-            {
-              _key: crypto.randomUUID(),
-              kind: "daily_menu" as const,
-              daily_menu_id: menu.id,
-              product_name: menu.name,
-              unit_price_cents: menu.price_cents,
-              quantity,
-              notes: "",
-              line_subtotal_cents:
-                (menu.price_cents +
-                  selectedChoices.reduce(
-                    (acc, sc) => acc + (sc.extra_price_cents ?? 0),
-                    0,
-                  )) *
-                quantity,
-              seat_number: seatMode ? activeSeat : null,
-              selected_choices: selectedChoices,
-            },
-          ]);
-          setOpenDailyMenu(null);
-        }}
-      />
-
-      {/* ─── Modal: cancelar item ─── */}
-      {cancelTarget && (
-        <div
-          onClick={() => {
-            setCancelTarget(null);
-            setCancelReason("");
-          }}
-          className={`${overlayPos} inset-0 z-50 flex items-end justify-center bg-black/40`}
-        >
-          <div
-            onClick={(e) => e.stopPropagation()}
-            className="w-full max-w-md rounded-t-3xl bg-white p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] shadow-xl"
-          >
-            <div className="flex items-start justify-between gap-3">
-              <h3 className="font-heading text-base font-bold text-zinc-900">
-                Cancelar &ldquo;{cancelTarget.productName}&rdquo;
-              </h3>
-              <button
-                onClick={() => {
-                  setCancelTarget(null);
-                  setCancelReason("");
-                }}
-                className="rounded-full p-1.5 text-zinc-500 active:bg-zinc-100"
-                aria-label="Cerrar"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-            <p className="mt-1 text-xs text-zinc-500">
-              Indicá un motivo. Queda registrado.
-            </p>
-            <textarea
-              value={cancelReason}
-              onChange={(e) => setCancelReason(e.target.value.slice(0, 200))}
-              placeholder="ej: rotura, cliente cambió de opinión..."
-              className="mt-3 block w-full rounded-2xl border border-zinc-200 px-3 py-2 text-sm focus:border-red-400 focus:outline-none focus:ring-2 focus:ring-red-100"
-              rows={3}
-              autoFocus
-            />
-            <div className="mt-4 flex gap-2">
-              <button
-                onClick={() => {
-                  setCancelTarget(null);
-                  setCancelReason("");
-                }}
-                disabled={pending}
-                className="flex h-12 flex-1 items-center justify-center rounded-2xl bg-zinc-100 text-sm font-semibold text-zinc-700 active:scale-[0.98]"
-              >
-                Volver
-              </button>
-              <button
-                onClick={handleCancelConfirm}
-                disabled={pending || !cancelReason.trim()}
-                className="flex h-12 flex-1 items-center justify-center rounded-2xl bg-red-600 text-sm font-semibold text-white active:scale-[0.98] disabled:opacity-50"
-              >
-                Cancelar item
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {modalsEl}
     </div>
   );
 }
@@ -1037,9 +1331,12 @@ function CatalogoStep({
 function SearchResults({
   results,
   onPick,
+  selectedProductId,
 }: {
   results: CatalogProduct[];
   onPick: (p: CatalogProduct) => void;
+  /** Resalta el resultado navegado por teclado (↓/↑). Spec 055. */
+  selectedProductId?: string;
 }) {
   if (results.length === 0) {
     return (
@@ -1049,7 +1346,13 @@ function SearchResults({
       </div>
     );
   }
-  return <ProductGrid products={results} onPick={onPick} />;
+  return (
+    <ProductGrid
+      products={results}
+      onPick={onPick}
+      selectedProductId={selectedProductId}
+    />
+  );
 }
 
 function TabView({
@@ -1189,31 +1492,46 @@ function TabNav({
 function ProductGrid({
   products,
   onPick,
+  selectedProductId,
 }: {
   products: CatalogProduct[];
   onPick: (p: CatalogProduct) => void;
+  selectedProductId?: string;
 }) {
+  // Mantiene visible el resultado navegado por teclado (spec 055).
+  const selectedRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (selectedProductId) {
+      selectedRef.current?.scrollIntoView({ block: "nearest" });
+    }
+  }, [selectedProductId]);
   return (
     <div className="grid grid-cols-2 gap-2.5">
-      {products.map((p) => (
-        <button
-          key={p.id}
-          onClick={() => onPick(p)}
-          className="flex min-h-[88px] flex-col justify-between rounded-2xl bg-white p-3 text-left ring-1 ring-zinc-200 transition active:scale-[0.97] active:bg-zinc-50"
-        >
-          <span className="line-clamp-2 text-sm font-semibold text-zinc-900">
-            {p.name}
-          </span>
-          <div className="mt-2 flex items-center justify-between">
-            <span className="text-sm font-bold text-emerald-700 tabular-nums">
-              {formatCurrency(p.price_cents)}
+      {products.map((p) => {
+        const isSelected = p.id === selectedProductId;
+        return (
+          <button
+            key={p.id}
+            ref={isSelected ? selectedRef : undefined}
+            onClick={() => onPick(p)}
+            className={`flex min-h-[88px] flex-col justify-between rounded-2xl bg-white p-3 text-left transition active:scale-[0.97] active:bg-zinc-50 ${
+              isSelected ? "ring-2 ring-emerald-500" : "ring-1 ring-zinc-200"
+            }`}
+          >
+            <span className="line-clamp-2 text-sm font-semibold text-zinc-900">
+              {p.name}
             </span>
-            <span className="rounded-full bg-emerald-50 p-1 text-emerald-700">
-              <Plus className="h-3.5 w-3.5" />
-            </span>
-          </div>
-        </button>
-      ))}
+            <div className="mt-2 flex items-center justify-between">
+              <span className="text-sm font-bold text-emerald-700 tabular-nums">
+                {formatCurrency(p.price_cents)}
+              </span>
+              <span className="rounded-full bg-emerald-50 p-1 text-emerald-700">
+                <Plus className="h-3.5 w-3.5" />
+              </span>
+            </div>
+          </button>
+        );
+      })}
     </div>
   );
 }

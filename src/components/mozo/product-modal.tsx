@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Check, Minus, Plus, UtensilsCrossed, X } from "lucide-react";
 import { toast } from "sonner";
 
 import { formatCurrency } from "@/lib/currency";
 import { composeItemNotes } from "@/lib/mozo/item-notes";
+import { useEscapeToClose } from "@/lib/ui/use-escape-to-close";
 import type {
   CatalogProduct,
   CatalogModifier,
@@ -85,6 +86,28 @@ export function ProductModal({
     }
   }, [product?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // ── Teclado (spec 055) ──
+  // Esc cierra; foco inicial al abrir; Tab atrapado dentro del modal. En modo
+  // embebido el foco vuelve al buscador al cerrar/agregar (lo hace el padre).
+  const panelRef = useRef<HTMLDivElement>(null);
+  const firstFieldRef = useRef<HTMLButtonElement>(null);
+  const submitRef = useRef<HTMLButtonElement>(null);
+
+  useEscapeToClose(onClose, open);
+
+  useEffect(() => {
+    if (!open || !product) return;
+    // Foco inicial: primer modificador si hay, si no el botón "Agregar". FR-010.
+    const t = setTimeout(() => {
+      if (product.modifier_groups.length > 0) {
+        firstFieldRef.current?.focus();
+      } else {
+        submitRef.current?.focus();
+      }
+    }, 0);
+    return () => clearTimeout(t);
+  }, [open, product?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const lineTotal = useMemo(() => {
     if (!product) return 0;
     const modsTotal = product.modifier_groups.reduce((acc, g) => {
@@ -146,9 +169,32 @@ export function ProductModal({
       className={`${embedded ? "absolute" : "fixed"} inset-0 z-50 flex items-end justify-center bg-black/45 backdrop-blur-sm`}
     >
       <div
+        ref={panelRef}
         onClick={(e) => e.stopPropagation()}
+        onKeyDown={(e) => {
+          // Focus-trap: Tab/Shift+Tab ciclan dentro del modal. FR-009.
+          if (e.key !== "Tab") return;
+          const panel = panelRef.current;
+          if (!panel) return;
+          const items = Array.from(
+            panel.querySelectorAll<HTMLElement>(
+              'button:not([disabled]), input, select, textarea, [href], [tabindex]:not([tabindex="-1"])',
+            ),
+          );
+          if (items.length === 0) return;
+          const first = items[0];
+          const last = items[items.length - 1];
+          if (e.shiftKey && document.activeElement === first) {
+            e.preventDefault();
+            last.focus();
+          } else if (!e.shiftKey && document.activeElement === last) {
+            e.preventDefault();
+            first.focus();
+          }
+        }}
         className={`w-full max-w-md ${embedded ? "max-h-full" : "max-h-[92dvh]"} overflow-y-auto rounded-t-3xl bg-white pb-[max(1.25rem,env(safe-area-inset-bottom))] shadow-2xl`}
       >
+        <form onSubmit={(e) => { e.preventDefault(); handleAdd(); }}>
         {/* Handle */}
         <div className="flex justify-center py-2">
           <span className="h-1 w-10 rounded-full bg-zinc-200" />
@@ -167,6 +213,7 @@ export function ProductModal({
             </p>
           </div>
           <button
+            type="button"
             onClick={onClose}
             className="-mt-1 rounded-full p-2 text-zinc-500 active:bg-zinc-100"
             aria-label="Cerrar"
@@ -177,7 +224,7 @@ export function ProductModal({
 
         {product.modifier_groups.length > 0 && (
           <div className="mt-5 space-y-3 px-5">
-            {product.modifier_groups.map((g) => (
+            {product.modifier_groups.map((g, gi) => (
               <div key={g.id} className="rounded-2xl border border-zinc-200 p-3">
                 <div className="flex items-center justify-between gap-2">
                   <h4 className="text-sm font-bold text-zinc-900">{g.name}</h4>
@@ -200,11 +247,13 @@ export function ProductModal({
                   </div>
                 </div>
                 <div className="mt-2 space-y-1.5">
-                  {g.modifiers.map((m) => {
+                  {g.modifiers.map((m, mi) => {
                     const selected = (selection[g.id] ?? []).includes(m.id);
                     return (
                       <button
                         key={m.id}
+                        ref={gi === 0 && mi === 0 ? firstFieldRef : undefined}
+                        type="button"
                         onClick={() => toggle(g, m.id)}
                         className={`flex w-full items-center justify-between rounded-xl px-3 py-3 text-left text-sm transition active:scale-[0.99] ${
                           selected
@@ -281,6 +330,7 @@ export function ProductModal({
           <span className="px-2 text-sm font-semibold text-zinc-700">Cantidad</span>
           <div className="flex items-center gap-3">
             <button
+              type="button"
               onClick={() => setQuantity((q) => Math.max(1, q - 1))}
               disabled={quantity <= 1}
               className="flex h-12 w-12 items-center justify-center rounded-full bg-white shadow-sm ring-1 ring-zinc-200 active:scale-[0.95] disabled:opacity-40"
@@ -292,6 +342,7 @@ export function ProductModal({
               {quantity}
             </span>
             <button
+              type="button"
               onClick={() => setQuantity((q) => Math.min(99, q + 1))}
               disabled={quantity >= 99}
               className="flex h-12 w-12 items-center justify-center rounded-full bg-white shadow-sm ring-1 ring-zinc-200 active:scale-[0.95] disabled:opacity-40"
@@ -304,7 +355,8 @@ export function ProductModal({
 
         <div className="mt-4 px-5">
           <button
-            onClick={handleAdd}
+            ref={submitRef}
+            type="submit"
             className="flex h-14 w-full items-center justify-between gap-2 rounded-2xl bg-emerald-600 px-5 text-white shadow-sm transition active:scale-[0.98]"
           >
             <span className="text-base font-semibold">Agregar al pedido</span>
@@ -313,6 +365,7 @@ export function ProductModal({
             </span>
           </button>
         </div>
+        </form>
       </div>
     </div>
   );
