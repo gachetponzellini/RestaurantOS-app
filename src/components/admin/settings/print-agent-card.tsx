@@ -80,12 +80,14 @@ export function PrintAgentCard({
         return;
       }
       triggerDownload("config.json", r.data.configJson, "application/json");
-      if (r.data.exeUrl) {
-        triggerUrlDownload(r.data.exeUrl);
-        toast.success("Descargando agente. Dejá config.json junto al .exe.");
+      if (r.data.zipUrl) {
+        triggerUrlDownload(r.data.zipUrl);
+        toast.success(
+          "Descargando instalador. Descomprimí el ZIP, dejá config.json adentro y doble clic en instalar.bat.",
+        );
       } else {
         toast.success(
-          "Bajé config.json. El .exe todavía no está publicado — usá el que ya tenés en la carpeta.",
+          "Bajé config.json. El instalador todavía no está publicado — usá el que ya tenés en la carpeta.",
         );
       }
     });
@@ -167,6 +169,12 @@ export function PrintAgentCard({
           )
         ) : null}
       </div>
+
+      <p className="text-xs text-zinc-500">
+        Descomprimí el ZIP, dejá el <code>config.json</code> descargado en la
+        misma carpeta y doble clic en <code>instalar.bat</code>. Queda corriendo
+        y arranca solo al prender la PC.
+      </p>
 
       {freshKey ? (
         <div className="grid gap-2 rounded-xl bg-zinc-50 p-3 ring-1 ring-zinc-200/70">

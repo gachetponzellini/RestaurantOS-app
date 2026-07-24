@@ -1,0 +1,32 @@
+Print-agent de RestaurantOS - Instalacion
+==========================================
+
+El print-agent es el programita que corre en UNA PC del local y manda
+las comandas a las impresoras. Instalarlo es un solo clic.
+
+Del panel bajaste DOS cosas:
+  - print-agent.zip   (este ZIP: el programa + el instalador)
+  - config.json       (la configuracion de TU negocio, con su clave)
+
+Pasos:
+
+  1) Descomprimi print-agent.zip en una carpeta.
+
+  2) Copia el config.json que bajaste DENTRO de esa carpeta,
+     al lado de print-agent.exe e instalar.bat.
+
+  3) Doble clic en  instalar.bat
+
+Eso:
+  - Copia todo a  %LOCALAPPDATA%\RestaurantOS-PrintAgent
+  - Registra el arranque automatico (al iniciar sesion de Windows)
+  - Deja el agente corriendo ya mismo
+
+Comandos utiles (opcional, en una consola cmd):
+  - Ver estado:  schtasks /query /tn "RestaurantOS PrintAgent"
+  - Frenar:      schtasks /end   /tn "RestaurantOS PrintAgent"
+
+Importante:
+  - Instalalo en UNA SOLA PC del local. En dos, se duplican los tickets.
+  - Las impresoras se configuran desde el panel (Configuracion > Comanderas),
+    no aca.

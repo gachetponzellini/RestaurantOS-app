@@ -11,7 +11,11 @@ import { createSupabaseServiceClient } from "@/lib/supabase/service";
 import { getBusiness } from "@/lib/tenant";
 
 const EXE_BUCKET = "print-agent-releases";
-const EXE_PATH = "print-agent.exe";
+// Instalador de un clic (spec 046 fase 2): el objeto del bucket es un ZIP con el
+// relay `print-agent.exe` + `instalar.bat` (registra el arranque automático) +
+// `iniciar-agente.bat` + `LEEME.txt`. El `config.json` (key por-negocio) NO va
+// adentro: se baja aparte y el usuario lo deja en la carpeta antes de instalar.
+const ZIP_PATH = "print-agent.zip";
 
 /** Key opaca del agente. `pak_live_` para reconocerla de un vistazo. */
 function generateAgentKey(): string {
@@ -54,12 +58,13 @@ async function ensurePrintAgentKey(businessId: string): Promise<string> {
 /**
  * Genera el instalador del print-agent para el negocio (spec 046): el
  * `config.json` ya rellenado (con la key, creada lazily) + una signed URL del
- * `.exe` (best-effort; null si el binario no está publicado). Gate admin.
- * La key sólo viaja acá, dentro de la sesión admin — nunca al cliente sin gate.
+ * `.zip` instalador (best-effort; null si el binario no está publicado). Gate
+ * admin. La key sólo viaja acá, dentro de la sesión admin — nunca al cliente sin
+ * gate; por eso tampoco puede ir dentro del ZIP (que es único para todos).
  */
 export async function getPrintAgentInstaller(
   slug: string,
-): Promise<ActionResult<{ configJson: string; exeUrl: string | null }>> {
+): Promise<ActionResult<{ configJson: string; zipUrl: string | null }>> {
   const business = await getBusiness(slug);
   if (!business) return actionError("Negocio no encontrado.");
 
@@ -79,18 +84,18 @@ export async function getPrintAgentInstaller(
   };
   const configJson = JSON.stringify(config, null, 2) + "\n";
 
-  // El .exe vive en Storage (fuera de Vercel por el límite de 4.5MB). Si el
+  // El ZIP vive en Storage (fuera de Vercel por el límite de 4.5MB). Si el
   // bucket/binario no está publicado todavía, devolvemos null y la UI lo avisa.
-  let exeUrl: string | null = null;
+  let zipUrl: string | null = null;
   const service = createSupabaseServiceClient();
   const { data } = await service.storage
     .from(EXE_BUCKET)
     // `download` fuerza Content-Disposition: attachment → el browser lo baja
     // (no navega), así un <a> lo descarga sin depender de window.open.
-    .createSignedUrl(EXE_PATH, 3600, { download: "print-agent.exe" });
-  exeUrl = data?.signedUrl ?? null;
+    .createSignedUrl(ZIP_PATH, 3600, { download: "print-agent.zip" });
+  zipUrl = data?.signedUrl ?? null;
 
-  return actionOk({ configJson, exeUrl });
+  return actionOk({ configJson, zipUrl });
 }
 
 /**
