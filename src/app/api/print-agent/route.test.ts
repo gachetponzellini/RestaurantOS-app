@@ -200,6 +200,35 @@ describe("GET /api/print-agent — printer_ip por comanda (spec 28)", () => {
     expect(bar?.reprint).toBe(false);
   });
 
+  it("incluye el ticket pre-renderizado por el server (spec 051): content_escpos_b64 + content_plain, aditivo", async () => {
+    const res = await GET(getReq());
+    const body = (await res.json()) as {
+      comandas: {
+        station_name: string;
+        items: unknown[];
+        cancelled: boolean;
+        reprint: boolean;
+        content_escpos_b64: string;
+        content_plain: string;
+      }[];
+    };
+    const cocina = body.comandas.find((c) => c.station_name === "Cocina");
+    // Campos nuevos presentes...
+    expect(typeof cocina?.content_escpos_b64).toBe("string");
+    expect(cocina!.content_escpos_b64.length).toBeGreaterThan(0);
+    // ...y el base64 decodifica (latin1) a un stream ESC/POS con el contenido.
+    const escpos = Buffer.from(cocina!.content_escpos_b64, "base64").toString("latin1");
+    expect(escpos.startsWith("\x1b@")).toBe(true); // init ESC @
+    expect(escpos).toContain("COCINA");
+    expect(cocina?.content_plain).toContain("COCINA");
+    expect(cocina?.content_plain).toContain("(sin items)"); // makeRow no trae items
+    // El payload estructurado viejo sigue intacto (aditivo → un agente viejo lo usa).
+    expect(cocina?.station_name).toBe("Cocina");
+    expect(cocina?.items).toEqual([]);
+    expect(cocina?.cancelled).toBe(false);
+    expect(cocina?.reprint).toBe(false);
+  });
+
   it("sin Bearer válido → 401", async () => {
     const res = await GET(getReq(""));
     expect(res.status).toBe(401);

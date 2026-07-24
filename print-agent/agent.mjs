@@ -52,7 +52,11 @@ const authHeaders = { authorization: `Bearer ${cfg.printAgentKey}` };
 const FAIL_THRESHOLD = 5;
 const failCounts = new Map(); // comanda_id → fallos consecutivos
 
-// ── Formato del ticket ────────────────────────────────────────────────────
+// ── Formato del ticket (FALLBACK) ─────────────────────────────────────────
+// Spec 051: el render primario vive en el server (`src/lib/print/ticket.ts`,
+// portado 1:1 de acá) y llega pre-renderizado en el pull. Estas funciones
+// quedan SOLO como fallback si el server no manda contenido (server viejo,
+// rollback o error). Mantener en paridad con el módulo del server.
 // El ticket se arma como una lista de líneas con atributos de tamaño/énfasis y
 // se renderiza según el transporte:
 //   • red (térmica ESC/POS) → renderEscPos: letra grande, ancha y espaciada.
@@ -258,9 +262,18 @@ async function report(comandaId, result, error) {
 }
 
 async function printOne(c) {
-  const lines = ticketLines(c);
+  // Spec 051: el server pre-renderiza el ticket (`content_escpos_b64` +
+  // `content_plain`). El agente es un relay: imprime lo que recibe. Si NO viene
+  // contenido (server viejo, rollback o error de render), cae al render local
+  // (`ticketLines`/`renderEscPos`/`renderPlain`) para no cortar la impresión ni
+  // escupir basura. `ticketLines` solo se calcula en ese fallback.
+  const escpos = c.content_escpos_b64
+    ? Buffer.from(c.content_escpos_b64, "base64").toString("latin1")
+    : renderEscPos(ticketLines(c));
+  const plain = c.content_plain ?? renderPlain(ticketLines(c));
+
   if (DRY) {
-    console.log("\n" + renderPlain(lines));
+    console.log("\n" + plain);
     return;
   }
   if (c.printer_enabled === false) {
@@ -276,9 +289,9 @@ async function printOne(c) {
         console.log(`  ⏭  ${c.station_name}: sin printer_ip, se saltea`);
         return;
       }
-      await printNetwork(renderEscPos(lines), c.printer_ip, c.printer_port);
+      await printNetwork(escpos, c.printer_ip, c.printer_port);
     } else {
-      await printWindows(renderPlain(lines), cfg.printerName);
+      await printWindows(plain, cfg.printerName);
     }
   } catch (e) {
     const n = (failCounts.get(c.comanda_id) ?? 0) + 1;

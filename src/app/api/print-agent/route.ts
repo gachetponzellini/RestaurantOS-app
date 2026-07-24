@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { notifyPrintFailed } from "@/lib/notifications/events";
+import { buildComandaContent } from "@/lib/print/ticket";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 
 import { unauthorized, verifyAgentKey } from "./agent-auth";
@@ -105,7 +106,7 @@ export async function GET(req: Request) {
       printer_enabled: boolean;
     };
 
-    return {
+    const comanda = {
       comanda_id: c.id,
       station_id: c.station_id,
       station_name: sanitizeTicketText(station?.name) ?? "—",
@@ -146,6 +147,15 @@ export async function GET(req: Request) {
             .filter(Boolean),
         };
       }),
+    };
+    // Spec 051: el server pre-renderiza el ticket (ESC/POS en base64 + texto
+    // plano). El agente relay lo imprime tal cual; un agente viejo ignora estos
+    // campos y renderiza con su lógica local (aditivo → retrocompat).
+    const content = buildComandaContent(comanda);
+    return {
+      ...comanda,
+      content_escpos_b64: content.escpos_b64,
+      content_plain: content.plain,
     };
   });
 
