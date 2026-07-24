@@ -172,6 +172,20 @@ export function ProductModal({
         ref={panelRef}
         onClick={(e) => e.stopPropagation()}
         onKeyDown={(e) => {
+          // Cantidad con + / − sin mouse (salvo escribiendo en Observaciones).
+          // Spec 055 fast-follow: acelera cargar varias unidades (ej. agua).
+          const target = e.target as HTMLElement;
+          const typing = target.tagName === "TEXTAREA" || target.tagName === "INPUT";
+          if (!typing && (e.key === "+" || e.key === "=")) {
+            e.preventDefault();
+            setQuantity((q) => Math.min(99, q + 1));
+            return;
+          }
+          if (!typing && e.key === "-") {
+            e.preventDefault();
+            setQuantity((q) => Math.max(1, q - 1));
+            return;
+          }
           // Focus-trap: Tab/Shift+Tab ciclan dentro del modal. FR-009.
           if (e.key !== "Tab") return;
           const panel = panelRef.current;

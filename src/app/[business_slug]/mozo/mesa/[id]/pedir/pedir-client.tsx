@@ -471,6 +471,41 @@ export function MozoPedirClient({
     setTimeout(() => searchRef.current?.focus(), 0);
   };
 
+  // ── Cache del borrador de pedido por mesa (spec 055 fast-follow, #81) ──
+  // Si el encargado sale de la carga (p. ej. a editar el precio de una
+  // sugerencia) y vuelve, el pedido en armado se retoma en vez de perderse.
+  // Borrador local (localStorage) por mesa+negocio — NO es plata: son ítems sin
+  // enviar; se limpia solo cuando el carrito queda vacío (al enviar todo).
+  const cartCacheKey = `mozo-cart:${slug}:${table.id}`;
+  const skipFirstPersist = useRef(true);
+
+  // Hidratar al montar (client-only).
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(cartCacheKey);
+      const saved = raw ? (JSON.parse(raw) as CartItem[]) : null;
+      if (Array.isArray(saved) && saved.length > 0) setCart(saved);
+    } catch {
+      // localStorage no disponible / JSON corrupto → arrancamos vacío.
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cartCacheKey]);
+
+  // Persistir en cada cambio (salteando la 1ª corrida para no pisar lo recién
+  // hidratado); limpiar cuando queda vacío.
+  useEffect(() => {
+    if (skipFirstPersist.current) {
+      skipFirstPersist.current = false;
+      return;
+    }
+    try {
+      if (cart.length === 0) window.localStorage.removeItem(cartCacheKey);
+      else window.localStorage.setItem(cartCacheKey, JSON.stringify(cart));
+    } catch {
+      // ignorar (modo privado, cuota excedida, etc.)
+    }
+  }, [cart, cartCacheKey]);
+
   const tabSections: { category: CatalogCategory | null; products: CatalogProduct[] }[] =
     useMemo(() => {
       if (isSearching) return [];

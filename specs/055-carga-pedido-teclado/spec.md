@@ -159,12 +159,18 @@ Como quien terminó de cargar, quiero enviar la comanda completa sin ir al mouse
 
 - **FR-017**: En modo full-screen (mozo, táctil) NO DEBE haber regresión: la carga por tap sigue funcionando, los cambios de layout se degradan bien y los atajos de teclado no estorban.
 
+**Fast-follow — pedido de Juan (2026-07-23, post-implementación)**
+
+- **FR-018 (ADDED)**: En el `ProductModal`, las teclas `+` (o `=`) y `−` DEBEN aumentar/disminuir la cantidad (respetando el rango 1–99), salvo cuando el foco está en el campo Observaciones (ahí `+`/`−` se escriben). Permite cargar varias unidades (ej. agua) sin ir al mouse.
+- **FR-019 (ADDED)**: El pedido en armado (carrito) DEBE persistirse como **borrador local por mesa+negocio** (`localStorage`, key `mozo-cart:{slug}:{tableId}`), de modo que si se sale de la carga (p. ej. a editar el precio de una sugerencia) y se vuelve, se retoma en vez de perderse. El borrador **no es plata** (ítems sin enviar) y se limpia al enviar todo (carrito vacío). Es local al dispositivo (no se comparte entre browsers). Sigue siendo `useState` (no se migra a Zustand); la persistencia es un efecto sobre `localStorage`.
+
 ### Non-Goals (fuera de alcance)
 
 - Tocar `enviarComanda`, el ruteo a cocina/estaciones, la plata, los estados de mesa/comanda o ARCA.
 - Mostrar lo **ya enviado** a cocina en esta mesa (comandas previas): esta feature muestra solo el **carrito en armado**.
 - Migrar el mozo full-screen (tablet) a un layout distinto: solo hereda las mejoras que aplican en táctil, sin rediseño propio.
-- Persistir el carrito (sigue siendo `useState` efímero) ni moverlo a Zustand.
+- Mover el carrito a Zustand (el borrador se persiste en `localStorage` vía efecto, ver FR-019 — el estado sigue en `useState`).
+- Compartir el borrador entre dispositivos/usuarios (es local al browser) o persistirlo server-side.
 - Cambiar el criterio de búsqueda (sigue por nombre); fuzzy/ranking/atajos tipo Cmd+K quedan fuera.
 - Datos / migración / RLS / permisos: **cero cambios**.
 

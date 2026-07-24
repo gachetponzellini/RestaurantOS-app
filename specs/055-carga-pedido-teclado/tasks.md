@@ -44,4 +44,9 @@
 - [ ] **T018** Verify en vivo con **rol real (encargado)** en el sidebar del salón: (a) cargar N ítems solo con teclado, de abrir a enviar, sin mouse; (b) pedido siempre visible, ítems al instante; (c) modal Esc/Enter/validación/foco-vuelve; (d) categorías secundarias accesibles; (e) **no-regresión** del mozo full-screen (táctil) en tablet. **SC-001..006**.
 - [ ] **T019** Cierre: comentar + `gh issue close 81`; actualizar [wiki/features/mozo.md](../../../../wiki/features/mozo.md); bump del puntero en el brain + log.
 
-> **T018** requiere sesión con rol real (encargado) + datos reales en el salón → verificación manual de Juan antes de cerrar el issue.
+## Fase H — Fast-follow (pedido de Juan, 2026-07-23 post-impl)
+
+- [x] **T020** `product-modal.tsx` — teclas `+`/`=` y `−` cambian la cantidad (1–99), salvo con el foco en Observaciones. **FR-018**. typecheck+build verde; verify en vivo junto con T018.
+- [x] **T021** `pedir-client.tsx` — cache del borrador por mesa en `localStorage` (`mozo-cart:{slug}:{tableId}`): hidrata al montar, persiste en cada cambio (skip 1ª corrida para no pisar lo hidratado), limpia al vaciar. **FR-019**. typecheck+build verde; verify en vivo junto con T018.
+
+> **T018** requiere sesión con rol real (encargado) + datos reales en el salón → verificación manual de Juan antes de cerrar el issue. Cubre también T020/T021.
